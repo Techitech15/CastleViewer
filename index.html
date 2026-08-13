@@ -334,10 +334,24 @@ function makeTextSprite(text, worldHeight){
  * water layout (circular moat, dry ditch, no moat) can ignore this
  * helper entirely and build its own environment meshes.
  * ==================================================================== */
-function ringPerimPoint(kind, t, extent){
+function ringPerimPoint(kind, t, extent, extentZ){
   if (kind === 'circle'){
     var a = t * Math.PI * 2;
     return { x: Math.cos(a)*extent, z: Math.sin(a)*extent };
+  }
+  if (kind === 'rect'){
+    // rectangle variant of the 'square' walk below -- independent X/Z half-
+    // extents, used by non-square footprints (e.g. Vincennes' 330x175m
+    // enceinte). extentZ falls back to `extent` (i.e. behaves like 'square')
+    // if omitted, though callers needing a rectangle always pass it.
+    var ez = extentZ != null ? extentZ : extent;
+    var tt2 = ((t % 1) + 1) % 1 * 4;
+    var side2 = Math.floor(tt2), f2 = tt2 - side2;
+    var sx = (f2 - 0.5) * 2 * extent, sz = (f2 - 0.5) * 2 * ez;
+    if (side2 === 0) return { x: sx, z: -ez };
+    if (side2 === 1) return { x: extent, z: sz };
+    if (side2 === 2) return { x: -sx, z: ez };
+    return { x: -extent, z: -sz };
   }
   // square, walked counter-clockwise starting at the north edge midpoint
   var tt = ((t % 1) + 1) % 1 * 4;
@@ -355,7 +369,7 @@ function ringPerimPoint(kind, t, extent){
  * /`yBottom` is the waterline edge (u=1); the Y profile is eased
  * (smoothstep) so it meets both the flat ground/island above and the
  * flat water below tangentially -- no visible kink at either join. */
-function buildBankRamp(kind, extentTop, extentBottom, yTop, yBottom, colTop, colMid, colEdge, segs, steps){
+function buildBankRamp(kind, extentTop, extentBottom, yTop, yBottom, colTop, colMid, colEdge, segs, steps, extentTopZ, extentBottomZ){
   segs = segs || 48; steps = steps || 6;
   var positions = [], colors = [], indices = [];
   var stride = steps + 1;
@@ -363,8 +377,8 @@ function buildBankRamp(kind, extentTop, extentBottom, yTop, yBottom, colTop, col
   var i, j;
   for (i=0;i<=segs;i++){
     var t = i/segs;
-    var pTop = ringPerimPoint(kind, t, extentTop);
-    var pBot = ringPerimPoint(kind, t, extentBottom);
+    var pTop = ringPerimPoint(kind, t, extentTop, extentTopZ);
+    var pBot = ringPerimPoint(kind, t, extentBottom, extentBottomZ);
     for (j=0;j<=steps;j++){
       var u = j/steps;
       var eu = smoothstep01(0,1,u);
@@ -1120,6 +1134,575 @@ function buildBodiam(){
 }
 
 /* ====================================================================
+ * 1.5 Chateau de Vincennes procedural builder
+ * ====================================================================
+ * Returns the same { group, fadeGroups, interiorGroup, info, pickables,
+ * windowMat, waterMats, labelGroup } contract as buildBodiam(). At ~10x
+ * Bodiam's footprint (330x175m rectangular enceinte vs. a 33m square),
+ * this is a TWO-TIER cutaway: the outer enceinte (walls/towers, tier
+ * 'outer', the same WALL_START/END + ROOF_START/END bands Bodiam uses)
+ * fades first as the camera zooms in; the donjon's own shell (tier
+ * 'inner', DONJON_WALL_START/END + DONJON_ROOF_START/END -- see section
+ * 5) only fades once the camera is close enough that the outer shell has
+ * already faded away, revealing the keep's five floors.
+ */
+function buildVincennes(){
+  var group = new T.Group();
+  var interiorGroup = new T.Group();
+  group.add(interiorGroup);
+  var fadeGroups = [];
+  var pickables = [];
+
+  function makeFadeGroup(name, dir, isRoof, colorHex, tier){
+    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    var g = new T.Group();
+    g.name = name;
+    group.add(g);
+    var desc = { group:g, mat:mat, dir:dir, roof: !!isRoof, op:1, name:name, tier: tier || 'outer' };
+    fadeGroups.push(desc);
+    return desc;
+  }
+  function norm(x,z){ var l = Math.hypot(x,z)||1; return {x:x/l, z:z/l}; }
+
+  /* ---- palette: pale Paris limestone, slate roofs ------------------ */
+  var STONE_WALL   = 0xb9b2a0;
+  var STONE_WALL_V = 0xafa896;
+  var STONE_DARK   = 0x8a8474;
+  var ROOF_COL     = 0x4a4640;
+  var WINDOW_COL   = 0x1c150e;
+  var FLOOR_COL    = 0x9c9484;
+  var STUB_COL     = 0x776f5e;
+  var WOOD_COL     = 0x6b4f34;
+  var METAL_COL    = 0x2a2925;
+  var WATER_COL    = 0x35545c;
+  var GRASS_COL    = 0x5c7a48;
+  var GRASS_COL2   = 0x6c8a52;
+  var BANK_COL     = 0x8a7a58;
+  var BANK_MID_COL = 0x62543a;
+  var BANK_EDGE_COL= 0x2f2617;
+  var COURT_GRASS_COL = 0x6a8d4f;
+
+  var windowMat = new T.MeshLambertMaterial({ color: WINDOW_COL });
+  var floorMat  = new T.MeshLambertMaterial({ color: FLOOR_COL });
+  var stubMat   = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
+  var woodMat   = new T.MeshLambertMaterial({ color: WOOD_COL });
+  var metalMat  = new T.MeshLambertMaterial({ color: METAL_COL });
+  var grassMat  = new T.MeshLambertMaterial({ color: GRASS_COL });
+  var grassMat2 = new T.MeshLambertMaterial({ color: GRASS_COL2 });
+  var courtGrassMat = new T.MeshLambertMaterial({ color: COURT_GRASS_COL });
+  var darkWoodMat = new T.MeshLambertMaterial({ color: 0x2a1c14 });
+  var chemiseMat = new T.MeshLambertMaterial({ color: STONE_DARK });
+
+  /* -------------------------------------------------------------- *
+   * outer enceinte: 330 x 175m rectangle, 11m wall, 9 towers (6 round
+   * + 3 square gate towers). Policy decision (per spec): every tower is
+   * built at its full 14th-century height (42m), not the truncated
+   * height most survive to today.
+   * -------------------------------------------------------------- */
+  var OHX = 165, OHZ = 87.5;          // outer wall half-extents (330 x 175m)
+  var WT = 2.8, WH = 11, MER = 1.5;   // wall thickness / height / merlon height
+  var TOWER_R = 5.5, TOWER_H = 42, TOWER_ROOF_H = 6.4;
+  var GATE_W = 11, GATE_D = 8.5, GATE_H = 42, GATE_ROOF_H = 7;
+
+  var wallN = makeFadeGroup('wallN', {x:0,z:-1}, false, STONE_WALL);
+  var wallS = makeFadeGroup('wallS', {x:0,z:1},  false, STONE_WALL);
+  var wallE = makeFadeGroup('wallE', {x:1,z:0},  false, STONE_WALL);
+  var wallW = makeFadeGroup('wallW', {x:-1,z:0}, false, STONE_WALL);
+  var tNW = makeFadeGroup('towerNW', norm(-1,-1), false, STONE_WALL_V);
+  var tNE = makeFadeGroup('towerNE', norm(1,-1),  false, STONE_WALL_V);
+  var tSE = makeFadeGroup('towerSE', norm(1,1),   false, STONE_WALL_V);
+  var tSW = makeFadeGroup('towerSW', norm(-1,1),  false, STONE_WALL_V);
+  var tNFlank = makeFadeGroup('towerNFlank', {x:0,z:-1}, false, STONE_WALL_V);
+  var tEMid   = makeFadeGroup('towerEMid',   {x:1,z:0},  false, STONE_WALL_V);
+  var tNGate = makeFadeGroup('gateN', {x:0,z:-1}, false, STONE_WALL_V);
+  var tSGate = makeFadeGroup('gateS', {x:0,z:1},  false, STONE_WALL_V);
+  var tWGate = makeFadeGroup('gateW', {x:-1,z:0}, false, STONE_WALL_V);
+  var roofCaps = makeFadeGroup('roofCaps', null, true, ROOF_COL); // outer-tier conical/pyramidal tower roofs
+
+  function addCrenellations(target, mat, cx, cz, length, ry, topY, thickness){
+    var merlonW = 1.5, gapW = 1.35, mt = thickness*0.72;
+    var period = merlonW + gapW;
+    var count = Math.max(1, Math.floor(length/period));
+    var start = -(count*period)/2 + merlonW/2;
+    var co = Math.cos(ry), si = Math.sin(ry);
+    for (var i=0;i<count;i++){
+      var lx = start + i*period;
+      var wx = cx + lx*co, wz = cz - lx*si;
+      var m = mkBox(merlonW, MER, mt, mat);
+      place(m, wx, topY + MER/2, wz, ry);
+      target.add(m);
+    }
+  }
+  function buildStraightWall(fg, cx, cz, length, ry, windows){
+    var wall = mkBox(length, WH, WT, fg.mat);
+    place(wall, cx, WH/2, cz, ry);
+    fg.group.add(wall);
+    addCrenellations(fg.group, fg.mat, cx, cz, length, ry, WH, WT);
+    if (windows){
+      var co=Math.cos(ry), si=Math.sin(ry);
+      windows.forEach(function(w){
+        var win = mkBox(w.w, w.h, WT*1.05, windowMat);
+        place(win, cx+w.x*co, WH*0.6, cz-w.x*si, ry);
+        fg.group.add(win);
+      });
+    }
+  }
+  buildStraightWall(wallN, 0, -OHZ, 2*OHX, 0,
+    [{x:-40,w:1.6,h:2.6},{x:40,w:1.6,h:2.6},{x:-125,w:1.6,h:2.6},{x:125,w:1.6,h:2.6}]);
+  buildStraightWall(wallS, 0, OHZ, 2*OHX, Math.PI,
+    [{x:-60,w:1.6,h:2.6},{x:60,w:1.6,h:2.6},{x:-140,w:1.6,h:2.6},{x:140,w:1.6,h:2.6}]);
+  buildStraightWall(wallE, OHX, 0, 2*OHZ, -Math.PI/2, [{x:-40,w:1.6,h:2.6},{x:40,w:1.6,h:2.6}]);
+  buildStraightWall(wallW, -OHX, 0, 2*OHZ, Math.PI/2, [{x:-40,w:1.6,h:2.6},{x:40,w:1.6,h:2.6}]);
+
+  registerPick(pickables, 'structure', 0, WH/2, -OHZ, OHX*0.8, WH, WT*2, '北城壁 North Curtain Wall', '高さ11mの外郭城壁。石造の水堀がこれを囲む。');
+  registerPick(pickables, 'structure', 0, WH/2, OHZ, OHX*0.8, WH, WT*2, '南城壁 South Curtain Wall', '高さ11mの外郭城壁。');
+  registerPick(pickables, 'structure', OHX, WH/2, 0, WT*2, WH, OHZ*0.8, '東城壁 East Curtain Wall', '高さ11mの外郭城壁。');
+  registerPick(pickables, 'structure', -OHX, WH/2, 0, WT*2, WH, OHZ*0.8, '西城壁 West Curtain Wall', '高さ11mの外郭城壁。');
+
+  /* round corner / flank towers -- all 42m, full medieval height ---- */
+  function buildRoundTower(fg, cx, cz, label, desc){
+    var shaft = mkCyl(TOWER_R, TOWER_R*1.05, TOWER_H, 16, fg.mat);
+    place(shaft, cx, TOWER_H/2, cz);
+    fg.group.add(shaft);
+    var plinth = mkCyl(TOWER_R*1.12, TOWER_R*1.26, 1.4, 16, fg.mat);
+    place(plinth, cx, 0.7, cz);
+    fg.group.add(plinth);
+    var n = 16;
+    for (var i=0;i<n;i+=2){
+      var a = (i/n)*Math.PI*2;
+      var m = mkBox(TOWER_R*0.3, MER, TOWER_R*0.3, fg.mat);
+      place(m, cx+Math.cos(a)*TOWER_R, TOWER_H+MER/2, cz+Math.sin(a)*TOWER_R, -a);
+      fg.group.add(m);
+    }
+    var storeys = Math.floor(TOWER_H/5.2);
+    for (var s=0;s<storeys;s++){
+      for (var k=0;k<4;k++){
+        var ang = k*Math.PI/2 + Math.PI/4;
+        var wm = mkBox(0.42, 1.7, 0.5, windowMat);
+        place(wm, cx+Math.cos(ang)*TOWER_R*0.98, 3.0+s*5.2, cz+Math.sin(ang)*TOWER_R*0.98, -ang);
+        fg.group.add(wm);
+      }
+    }
+    var roof = mkCone(TOWER_R*1.2, TOWER_ROOF_H, 16, roofCaps.mat);
+    place(roof, cx, TOWER_H+MER+TOWER_ROOF_H/2, cz);
+    roofCaps.group.add(roof);
+    registerPick(pickables, 'structure', cx, TOWER_H*0.4, cz, TOWER_R*2.6, TOWER_H*0.8, TOWER_R*2.6, label, desc);
+  }
+  buildRoundTower(tNW, -OHX, -OHZ, '北西塔 Northwest Tower', '中世当時の姿(全高42m)に復元した円塔。城壁北西の隅を固める。');
+  buildRoundTower(tNE, OHX, -OHZ, '北東塔 Northeast Tower', '中世当時の姿(全高42m)に復元した円塔。城壁北東の隅を固める。');
+  buildRoundTower(tSE, OHX, OHZ, '南東塔 Southeast Tower', '中世当時の姿(全高42m)に復元した円塔。城壁南東の隅を固める。');
+  buildRoundTower(tSW, -OHX, OHZ, '南西塔 Southwest Tower', '中世当時の姿(全高42m)に復元した円塔。城壁南西の隅を固める。');
+  buildRoundTower(tNFlank, -OHX*0.5, -OHZ, '北壁塔 North Flanking Tower', '北壁を守る側防塔。主門である村門塔に隣接する。');
+  buildRoundTower(tEMid, OHX, 0, '東壁塔 East Mid-wall Tower', '東壁中央に立つ側防塔。');
+
+  /* square gate towers -- 3 gates, all 42m tall, proud of a continuous
+   * curtain wall (no gap cut into the wall -- same "tower straddles the
+   * approach" treatment Bodiam uses for its south postern). ------------ */
+  function buildGateTower(fg, cx, cz, ry, isMain, label, desc){
+    var body = mkBox(GATE_W, GATE_H, GATE_D, fg.mat);
+    place(body, cx, GATE_H/2, cz, ry);
+    fg.group.add(body);
+    var lip = mkBox(GATE_W*1.08, 0.7, GATE_D*1.1, fg.mat);
+    place(lip, cx, GATE_H-0.6, cz, ry);
+    fg.group.add(lip);
+    addCrenellations(fg.group, fg.mat, cx, cz, GATE_W, ry, GATE_H, GATE_D);
+    var roof = mkCone(GATE_W*0.6, GATE_ROOF_H, 4, roofCaps.mat);
+    roof.rotation.y = Math.PI/4;
+    place(roof, cx, GATE_H+MER+GATE_ROOF_H/2, cz);
+    roofCaps.group.add(roof);
+    var storeys = Math.floor(GATE_H/5.4);
+    for (var s=0;s<storeys;s++){
+      var wm = mkBox(0.6,1.8,0.4, windowMat);
+      place(wm, cx+fg.dir.x*(GATE_D/2-0.02), 3.4+s*5.4, cz+fg.dir.z*(GATE_D/2-0.02), ry);
+      fg.group.add(wm);
+    }
+    // arched door recess in the outward face (fg.dir), reached by the road
+    var door = mkBox(isMain?3.2:2.2, isMain?4.2:3.2, 0.4, windowMat);
+    place(door, cx+fg.dir.x*(GATE_D/2-0.05), (isMain?2.1:1.6), cz+fg.dir.z*(GATE_D/2-0.05), ry);
+    fg.group.add(door);
+    if (isMain){
+      var lintel = mkBox(3.6, 1.0, GATE_D*0.85, fg.mat);
+      place(lintel, cx, GATE_H*0.5, cz, ry);
+      fg.group.add(lintel);
+      var pg = new T.Group();
+      var co=Math.cos(ry), si=Math.sin(ry);
+      for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.1,3.6,0.1, metalMat), cx+bi*0.5*co, 3.2, cz-bi*0.5*si));
+      for (var bj=0;bj<4;bj++) pg.add(place(mkBox(3.4*Math.abs(co)+0.1, 0.1, 3.4*Math.abs(si)+0.1, metalMat), cx, 1.4+bj*0.9, cz));
+      interiorGroup.add(pg);
+    }
+    registerPick(pickables, 'structure', cx, GATE_H*0.4, cz, GATE_W*1.8, GATE_H*0.8, GATE_D*1.8, label, desc);
+  }
+  buildGateTower(tNGate, 0, -OHZ, 0, true, '村門塔 Tour du Village (主門)',
+    '城の正門。北壁中央にそびえる主要な門塔で、城下と結ぶ最も重要な出入口。');
+  buildGateTower(tSGate, 0, OHZ, Math.PI, false, '南門塔 South Gate Tower',
+    '南壁中央の副門。庭園側への通用門として使われた。');
+  buildGateTower(tWGate, -OHX, 0, Math.PI/2, false, '木の門塔 Tour du Bois (西門)',
+    '西壁中央の第三の門。ヴァンセンヌの森側への出入口。');
+
+  /* -------------------------------------------------------------- *
+   * donjon (keep): 16.5m square, 52m tall, four full-height corner
+   * turrets (6.6m diameter), a north stair tower, enclosed by a low
+   * chemise wall with its own moat (reusing buildWaterMoatSystem --
+   * square footprint fits the shared helper directly) and two
+   * drawbridges. Two-tier cutaway: donjon shell fades only once the
+   * outer enceinte above has already faded away (tier 'inner').
+   * -------------------------------------------------------------- */
+  var DCX = -70, DCZ = 0;               // donjon complex centre (west of the bailey)
+  var DHALF = 8.25, DH = 52;            // 16.5m square footprint, 52m tall
+  var TURR_R = 3.3;                     // corner turret radius, runs the full height
+  var STAIR_R = 3.0;                    // north stair-tower radius
+
+  var dWallN = makeFadeGroup('donjonWallN', {x:0,z:-1}, false, STONE_WALL_V, 'inner');
+  var dWallS = makeFadeGroup('donjonWallS', {x:0,z:1},  false, STONE_WALL_V, 'inner');
+  var dWallE = makeFadeGroup('donjonWallE', {x:1,z:0},  false, STONE_WALL_V, 'inner');
+  var dWallW = makeFadeGroup('donjonWallW', {x:-1,z:0}, false, STONE_WALL_V, 'inner');
+  var dTurrets = makeFadeGroup('donjonTurrets', null, true, STONE_WALL_V, 'inner');
+  var dStair = makeFadeGroup('donjonStair', {x:0,z:-1}, false, STONE_WALL_V, 'inner');
+  var dRoof = makeFadeGroup('donjonRoof', null, true, ROOF_COL, 'inner');
+
+  function donjonWallFace(fg, cx, cz, ry){
+    var w = mkBox(DHALF*2, DH, 0.9, fg.mat);
+    place(w, cx, DH/2, cz, ry);
+    fg.group.add(w);
+    addCrenellations(fg.group, fg.mat, cx, cz, DHALF*2, ry, DH, 0.9);
+  }
+  donjonWallFace(dWallN, DCX, DCZ-DHALF, 0);
+  donjonWallFace(dWallS, DCX, DCZ+DHALF, Math.PI);
+  donjonWallFace(dWallE, DCX+DHALF, DCZ, -Math.PI/2);
+  donjonWallFace(dWallW, DCX-DHALF, DCZ, Math.PI/2);
+
+  function donjonWindows(fg, cx, cz, ry){
+    var co=Math.cos(ry), si=Math.sin(ry);
+    for (var lvl=0; lvl<4; lvl++){
+      var y = 6 + lvl*10.4;
+      for (var i=0;i<2;i++){
+        var lx = (i-0.5) * (DHALF*2/3);
+        var win = mkBox(0.5, 1.8, 0.35, windowMat);
+        place(win, cx+lx*co, y, cz-lx*si, ry);
+        fg.group.add(win);
+      }
+    }
+  }
+  donjonWindows(dWallN, DCX, DCZ-DHALF, 0);
+  donjonWindows(dWallS, DCX, DCZ+DHALF, Math.PI);
+  donjonWindows(dWallE, DCX+DHALF, DCZ, -Math.PI/2);
+  donjonWindows(dWallW, DCX-DHALF, DCZ, Math.PI/2);
+
+  var turretPos = [
+    {x:DCX-DHALF, z:DCZ-DHALF}, {x:DCX+DHALF, z:DCZ-DHALF},
+    {x:DCX+DHALF, z:DCZ+DHALF}, {x:DCX-DHALF, z:DCZ+DHALF}
+  ];
+  turretPos.forEach(function(p){
+    var t = mkCyl(TURR_R, TURR_R*1.05, DH, 14, dTurrets.mat);
+    place(t, p.x, DH/2, p.z);
+    dTurrets.group.add(t);
+    var cap = mkCone(TURR_R*1.15, 3.2, 14, dRoof.mat);
+    place(cap, p.x, DH+1.6, p.z);
+    dRoof.group.add(cap);
+  });
+
+  var stairCz = DCZ - DHALF - STAIR_R*0.7;
+  var stairShaft = mkCyl(STAIR_R, STAIR_R*1.05, DH-4, 14, dStair.mat);
+  place(stairShaft, DCX, (DH-4)/2, stairCz);
+  dStair.group.add(stairShaft);
+  var stairCap = mkCone(STAIR_R*1.2, 4, 14, dRoof.mat);
+  place(stairCap, DCX, DH-2, stairCz);
+  dRoof.group.add(stairCap);
+  registerPick(pickables, 'structure', DCX, DH*0.4, stairCz, STAIR_R*2.4, DH*0.7, STAIR_R*2.4,
+    '螺旋階段塔 Spiral Staircase Tower', 'ドンジョン北面に付属する塔。各階を結ぶ螺旋階段を収める。');
+
+  var donjonRoofMesh = mkCone(DHALF*1.35, 6.5, 4, dRoof.mat);
+  donjonRoofMesh.rotation.y = Math.PI/4;
+  place(donjonRoofMesh, DCX, DH+3.25, DCZ);
+  dRoof.group.add(donjonRoofMesh);
+
+  registerPick(pickables, 'structure', DCX, DH*0.4, DCZ, DHALF*2+TURR_R*2, DH*0.75, DHALF*2+TURR_R*2,
+    'ドンジョン Donjon (大塔)', '高さ52m、一辺16.5mの主塔。四隅に円形小塔を持つ、当時ヨーロッパ最大級の居住塔。');
+
+  /* ---- five floors: basement + 3 lower floors (decorative central
+   * pillar) + upper guard/armoury levels. All furniture sits in
+   * interiorGroup, hidden behind the still-opaque donjon shell until the
+   * inner-tier cutaway fades it. ---------------------------------- */
+  var donjonFloors = [
+    { y0:-4, y1:0,     name:'地下貯蔵庫 Basement Storage', pillar:true,
+      desc:'石造ヴォールト天井の貯蔵庫。食料や物資を保管した。' },
+    { y0:0, y1:10.4,   name:'評議の間 Chamber of Council (1F)', pillar:true,
+      desc:'国王が重臣と政務を協議した、玄関階(テラスレベル)の広間。' },
+    { y0:10.4, y1:20.8, name:"王の寝室 King's Bedchamber (2F)", pillar:true, fireplace:true,
+      desc:'シャルル5世の私室。中央柱と暖炉を備えた、大塔で最も格式高い部屋。' },
+    { y0:20.8, y1:31.2, name:'賓客の間 Guest Chamber (3F)', pillar:true,
+      desc:'来賓を迎えた部屋。下層4フロア共通の装飾中央柱で天井を支える。' },
+    { y0:31.2, y1:52,   name:'兵士詰所・弾薬庫 Guard Room & Armoury (Upper)', pillar:false,
+      desc:'上層階は守備兵の詰所と武具・弾薬の保管に充てられた。' }
+  ];
+  donjonFloors.forEach(function(f){
+    var slab = mkBox(DHALF*2-0.6, 0.3, DHALF*2-0.6, floorMat);
+    place(slab, DCX, f.y0+0.15, DCZ);
+    interiorGroup.add(slab);
+    if (f.pillar){
+      var pillar = mkCyl(0.6, 0.7, f.y1-f.y0-0.3, 10, stubMat);
+      place(pillar, DCX, (f.y0+f.y1)/2, DCZ);
+      interiorGroup.add(pillar);
+    }
+    if (f.fireplace){
+      var hearth = mkBox(2.4, 1.3, 0.6, darkWoodMat);
+      place(hearth, DCX+DHALF-1.5, f.y0+0.9, DCZ);
+      interiorGroup.add(hearth);
+    }
+    var fbox = mkBox(1.6, 0.8, 1.0, woodMat);
+    place(fbox, DCX-2.4, f.y0+0.55, DCZ+2.4);
+    interiorGroup.add(fbox);
+    registerPick(pickables, 'room', DCX, (f.y0+f.y1)/2, DCZ, DHALF*2-0.8, f.y1-f.y0-0.4, DHALF*2-0.8, f.name, f.desc);
+  });
+
+  /* ---- chemise (low outer skirt wall around the donjon), its own
+   * moat via the shared square-moat helper, and two drawbridges ---- */
+  var CHEM_HALF = 22, CHEM_H = 5;
+  function chemiseSide(cx,cz,length,ry){
+    var w = mkBox(length, CHEM_H, 1.2, chemiseMat);
+    place(w, cx, CHEM_H/2, cz, ry);
+    group.add(w);
+  }
+  chemiseSide(DCX, DCZ-CHEM_HALF, CHEM_HALF*2, 0);
+  chemiseSide(DCX, DCZ+CHEM_HALF, CHEM_HALF*2, Math.PI);
+  chemiseSide(DCX+CHEM_HALF, DCZ, CHEM_HALF*2, -Math.PI/2);
+  chemiseSide(DCX-CHEM_HALF, DCZ, CHEM_HALF*2, Math.PI/2);
+  registerPick(pickables, 'structure', DCX, CHEM_H*0.5, DCZ-CHEM_HALF, CHEM_HALF*2, CHEM_H, 2,
+    'シェミーズ Chemise Wall', 'ドンジョンを囲む低い方形の防壁。専用の堀を伴い、大塔だけの独立した防御線を成す。');
+
+  // buildWaterMoatSystem builds its ShapeGeometry pieces centred on local
+  // (0,0) and only ever sets their Y position -- so it needs its own
+  // child group, positioned at the donjon's centre, rather than being
+  // added straight into `group` (which would leave it sitting at world
+  // origin instead of around the donjon).
+  var donjonMoatGroup = new T.Group();
+  donjonMoatGroup.position.set(DCX, 0, DCZ);
+  group.add(donjonMoatGroup);
+  var donjonMoat = buildWaterMoatSystem({
+    group: donjonMoatGroup,
+    groundY: 0.04, waterY: 0.04 - 1.3,
+    islandHalf: CHEM_HALF, islandY: 0.06,
+    moatOuterHalf: CHEM_HALF + 7,
+    bankWidthOut: 2.2, bankWidthIn: 1.6,
+    groundMat: courtGrassMat, islandMat: courtGrassMat,
+    waterColor: WATER_COL,
+    bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL,
+    groundSize: 80, groundSegs: 20
+  });
+  registerPick(pickables, 'structure', DCX, 0.0, DCZ-CHEM_HALF-4, 6, 1.5, CHEM_HALF*2+8,
+    'ドンジョンの堀 Donjon Moat', '主郭の堀とは別に、シェミーズ壁を囲んで大塔単独を守る専用の堀。');
+
+  function bridgeAcrossMoat(axis, fixedCoord, outerCoord, innerCoord, w){
+    var len = Math.abs(outerCoord-innerCoord), mid = (outerCoord+innerCoord)/2;
+    var br = axis==='z' ? mkBox(w, 0.3, len, woodMat) : mkBox(len, 0.3, w, woodMat);
+    if (axis==='z') place(br, fixedCoord, 0.05, mid); else place(br, mid, 0.05, fixedCoord);
+    group.add(br);
+  }
+  bridgeAcrossMoat('z', DCX, DCZ-(CHEM_HALF+7)+1.0, DCZ-CHEM_HALF-0.5, 3.0); // north drawbridge (main approach)
+  bridgeAcrossMoat('x', DCZ, DCX+(CHEM_HALF+7)-1.0, DCX+CHEM_HALF+0.5, 2.6); // east drawbridge (secondary)
+
+  // raised entrance: the real door sits at first-floor "terrace" level,
+  // not grade, reached by a short timber stair from the chemise courtyard
+  var entranceStair = mkBox(2.6, 0.3, 3.4, woodMat);
+  entranceStair.rotation.x = -0.5;
+  place(entranceStair, DCX, 1.6, DCZ+DHALF+2.0);
+  interiorGroup.add(entranceStair);
+  var doorRecess = mkBox(2.4, 3.2, 0.2, windowMat);
+  place(doorRecess, DCX, 2.6, DCZ+DHALF-0.1);
+  interiorGroup.add(doorRecess);
+
+  /* -------------------------------------------------------------- *
+   * Sainte-Chapelle: simplified single-nave Gothic chapel, east of the
+   * donjon. In 1380 (this viewer's year) it was still under
+   * construction in reality -- completed 1379-1552; noted in the
+   * tooltip rather than modelled as a building site.
+   * -------------------------------------------------------------- */
+  // side:DoubleSide only actually matters for the flat gable-end triangle
+  // below (a single-face ShapeGeometry plane) -- the nave/buttress boxes
+  // already show every face regardless, so this is a safe shared change.
+  var chapelMat = new T.MeshLambertMaterial({ color: 0xcac2ae, side: T.DoubleSide });
+  var CHX = 10, CHZ = -18;
+  var CH_W = 11, CH_LEN = 30, CH_EAVE = 9, CH_RIDGE = 15.5;
+  var nave = mkBox(CH_W, CH_EAVE, CH_LEN, chapelMat);
+  place(nave, CHX, CH_EAVE/2, CHZ);
+  group.add(nave);
+  (function(){
+    // gabled roof: two slabs, each hinged (rotated about Z, the ridge
+    // axis) from the eave (x = CHX +/- run, y = CH_EAVE) up to the ridge
+    // (x = CHX, y = CH_RIDGE). A slab's local +X axis, before rotation,
+    // points along world +X; rotating by -sign*atan2(rise,run) swings the
+    // +run/2 side down to its eave and the -run/2 side up to the ridge for
+    // sign=+1, and mirrors that for sign=-1 -- i.e. the *opposite* sign
+    // from a naive `sign*atan2(...)`, which instead swings both slabs the
+    // wrong way (visible as one slope standing up near-vertical).
+    var run = CH_W/2, rise = CH_RIDGE-CH_EAVE, slant = Math.hypot(run, rise);
+    [1,-1].forEach(function(sign){
+      var geo = new T.BoxGeometry(slant, 0.4, CH_LEN+1.2);
+      var m = new T.Mesh(geo, chapelMat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set(CHX + sign*run/2, CH_EAVE + rise/2, CHZ);
+      m.rotation.z = -sign * Math.atan2(rise, run);
+      group.add(m);
+    });
+    // gable end walls: a triangular infill from the eave line up to the
+    // ridge point, closing the gap the two roof slabs leave at both ends
+    // of the nave (previously open -- the interior showed through).
+    [CHZ - CH_LEN/2, CHZ + CH_LEN/2].forEach(function(z){
+      var shape = new T.Shape();
+      shape.moveTo(-run, 0);
+      shape.lineTo(run, 0);
+      shape.lineTo(0, rise);
+      shape.closePath();
+      var gm = new T.Mesh(new T.ShapeGeometry(shape), chapelMat);
+      gm.castShadow = true; gm.receiveShadow = true;
+      gm.position.set(CHX, CH_EAVE, z);
+      group.add(gm);
+    });
+  })();
+  for (var wi=-1; wi<=1; wi+=2){
+    for (var wl=0; wl<3; wl++){
+      var wz = CHZ - CH_LEN/2 + 4 + wl*(CH_LEN-8)/2;
+      var win = mkBox(0.15, 3.4, 1.4, windowMat);
+      place(win, CHX+wi*CH_W/2, 4.6, wz);
+      group.add(win);
+      var cap = mkCone(0.9, 1.0, 3, windowMat);
+      cap.rotation.y = Math.PI/2;
+      place(cap, CHX+wi*(CH_W/2+0.05), 6.6, wz);
+      group.add(cap);
+      var buttress = mkBox(0.9, CH_EAVE*0.8, 1.6, chapelMat);
+      place(buttress, CHX+wi*(CH_W/2+0.55), CH_EAVE*0.4, wz-2.0);
+      group.add(buttress);
+    }
+  }
+  registerPick(pickables, 'structure', CHX, CH_EAVE*0.6, CHZ, CH_W+2, CH_RIDGE, CH_LEN+2,
+    'サント・シャペル Sainte-Chapelle', 'ドンジョン東側に建つゴシック様式の礼拝堂。1380年時点ではまだ建設中であった(実際の完成は1552年)。');
+
+  /* -------------------------------------------------------------- *
+   * outer moat: 330 x 175m rectangle, so buildWaterMoatSystem's square-
+   * only assumption doesn't fit -- reuse its ground/bank/water technique
+   * (buildUndulatingGround + buildBankRamp, both already generalised to
+   * a 'rect' footprint above in section 0.5) via a local rectangle-aware
+   * counterpart instead.
+   * -------------------------------------------------------------- */
+  function buildRectMoatSystem(opts){
+    var g = opts.group;
+    var groundY = opts.groundY, waterY = opts.waterY;
+    var bailHX = opts.bailHalfX, bailHZ = opts.bailHalfZ, islandY = opts.islandY!=null?opts.islandY:0.02;
+    var moatOHX = opts.moatOuterHalfX, moatOHZ = opts.moatOuterHalfZ;
+    var bankWOut = opts.bankWidthOut!=null?opts.bankWidthOut:5.0;
+    var bankWIn = opts.bankWidthIn!=null?opts.bankWidthIn:3.5;
+    var waterHX = moatOHX - bankWOut, waterHZ = moatOHZ - bankWOut;
+    var waterInHX = bailHX + bankWIn, waterInHZ = bailHZ + bankWIn;
+
+    var groundSize = opts.groundSize||2200, groundSegs = opts.groundSegs||88;
+    var cellSize = groundSize/groundSegs;
+    var cutHalf = Math.max(moatOHX, moatOHZ) + Math.max(30, cellSize*2.5);
+    var ground = buildUndulatingGround(cutHalf, groundSize, groundSegs, opts.groundMat, cutHalf);
+    ground.position.y = groundY;
+    g.add(ground);
+
+    var collarShape = new T.Shape();
+    collarShape.moveTo(-cutHalf,-cutHalf); collarShape.lineTo(cutHalf,-cutHalf);
+    collarShape.lineTo(cutHalf,cutHalf); collarShape.lineTo(-cutHalf,cutHalf); collarShape.closePath();
+    var collarHole = new T.Path();
+    collarHole.moveTo(-moatOHX,-moatOHZ); collarHole.lineTo(-moatOHX,moatOHZ);
+    collarHole.lineTo(moatOHX,moatOHZ); collarHole.lineTo(moatOHX,-moatOHZ); collarHole.closePath();
+    collarShape.holes.push(collarHole);
+    var collarGeo = new T.ShapeGeometry(collarShape);
+    collarGeo.rotateX(-Math.PI/2);
+    var collar = new T.Mesh(collarGeo, opts.groundMat);
+    collar.position.y = groundY; collar.receiveShadow = true;
+    g.add(collar);
+
+    var islandShape = new T.Shape();
+    islandShape.moveTo(-bailHX,-bailHZ); islandShape.lineTo(bailHX,-bailHZ);
+    islandShape.lineTo(bailHX,bailHZ); islandShape.lineTo(-bailHX,bailHZ); islandShape.closePath();
+    var islandGeo = new T.ShapeGeometry(islandShape);
+    islandGeo.rotateX(-Math.PI/2);
+    var island = new T.Mesh(islandGeo, opts.islandMat);
+    island.position.y = islandY; island.receiveShadow = true;
+    g.add(island);
+
+    var colTop = new T.Color(opts.bankColorTop!=null?opts.bankColorTop:0x9c8a5e);
+    var colMid = new T.Color(opts.bankColorMid!=null?opts.bankColorMid:0x6e5c3e);
+    var colEdge = new T.Color(opts.bankColorEdge!=null?opts.bankColorEdge:0x332818);
+
+    var bankOuter = buildBankRamp('rect', moatOHX, waterHX, groundY, waterY, colTop, colMid, colEdge, 64, 6, moatOHZ, waterHZ);
+    g.add(bankOuter);
+    var bankInner = buildBankRamp('rect', bailHX, waterInHX, islandY, waterY, colTop, colMid, colEdge, 64, 6, bailHZ, waterInHZ);
+    g.add(bankInner);
+
+    var moatShape = new T.Shape();
+    moatShape.moveTo(-waterHX,-waterHZ); moatShape.lineTo(waterHX,-waterHZ);
+    moatShape.lineTo(waterHX,waterHZ); moatShape.lineTo(-waterHX,waterHZ); moatShape.closePath();
+    var hole = new T.Path();
+    hole.moveTo(-waterInHX,-waterInHZ); hole.lineTo(-waterInHX,waterInHZ);
+    hole.lineTo(waterInHX,waterInHZ); hole.lineTo(waterInHX,-waterInHZ); hole.closePath();
+    moatShape.holes.push(hole);
+    var moatGeo = new T.ShapeGeometry(moatShape);
+    moatGeo.rotateX(-Math.PI/2);
+    var waterMat = new T.MeshPhongMaterial({ color: opts.waterColor||0x2e5b66,
+      transparent:true, opacity:opts.waterOpacity!=null?opts.waterOpacity:0.82, shininess:90, specular:0x9fd4e0 });
+    var moatWater = new T.Mesh(moatGeo, waterMat);
+    moatWater.position.y = waterY;
+    g.add(moatWater);
+
+    return { ground:ground, island:island, moatWater:moatWater, waterMat:waterMat,
+      waterHalfX:waterHX, waterHalfZ:waterHZ, waterInnerHalfX:waterInHX, waterInnerHalfZ:waterInHZ,
+      waterY:waterY, groundY:groundY };
+  }
+
+  var BAIL_HX = OHX+3, BAIL_HZ = OHZ+3;
+  var MOAT_W = 22;
+  var MOAT_OHX = BAIL_HX+MOAT_W, MOAT_OHZ = BAIL_HZ+MOAT_W;
+  var GROUND_Y = -1.2, WATER_Y = GROUND_Y - 1.4;
+
+  var rectMoat = buildRectMoatSystem({
+    group: group, groundY: GROUND_Y, waterY: WATER_Y,
+    bailHalfX: BAIL_HX, bailHalfZ: BAIL_HZ, islandY: 0.02,
+    moatOuterHalfX: MOAT_OHX, moatOuterHalfZ: MOAT_OHZ,
+    bankWidthOut: 5.5, bankWidthIn: 3.5,
+    groundMat: grassMat, islandMat: grassMat2,
+    waterColor: WATER_COL,
+    bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL,
+    groundSize: 2400, groundSegs: 96
+  });
+  var waterMat = rectMoat.waterMat;
+  registerPick(pickables, 'structure', 0, WATER_Y+0.1, -MOAT_OHZ+MOAT_W/2, MOAT_OHX*1.6, 1.2, MOAT_W*0.9,
+    '水堀 Moat', '石造りの水堀が城壁の全周を囲む。幅約22m。');
+
+  function bridgeOverOuterMoat(axis, fixedCoord, outerCoord, innerCoord, w){
+    var len = Math.abs(outerCoord-innerCoord), mid = (outerCoord+innerCoord)/2;
+    var br = axis==='z' ? mkBox(w, 0.35, len, woodMat) : mkBox(len, 0.35, w, woodMat);
+    if (axis==='z') place(br, fixedCoord, -0.05, mid); else place(br, mid, -0.05, fixedCoord);
+    group.add(br);
+  }
+  bridgeOverOuterMoat('z', 0, -MOAT_OHZ+1.0, -BAIL_HZ-0.5, 5.5);  // north: main approach to Tour du Village
+  bridgeOverOuterMoat('z', 0, MOAT_OHZ-1.0, BAIL_HZ+0.5, 4.5);    // south gate approach
+  bridgeOverOuterMoat('x', 0, -MOAT_OHX+1.0, -BAIL_HX-0.5, 4.5);  // west gate (Tour du Bois) approach
+
+  /* -------------------------------------------------------------- *
+   * info payload + always-on labels (same pattern as buildBodiam)
+   * -------------------------------------------------------------- */
+  var info = { rooms: donjonFloors.map(function(f){ return { name:f.name, desc:f.desc }; }) };
+
+  var labelGroup = new T.Group();
+  labelGroup.visible = false;
+  group.add(labelGroup);
+  pickables.forEach(function(p){
+    var pi = p.userData.pickInfo;
+    if (pi.kind !== 'room') return;
+    var shortName = pi.name.split(' ')[0];
+    var spr = makeTextSprite(shortName, 2.2);
+    spr.position.set(p.position.x, p.position.y + 1.6, p.position.z);
+    labelGroup.add(spr);
+  });
+
+  return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
+    pickables: pickables, windowMat: windowMat, waterMats: [waterMat, donjonMoat.waterMat], labelGroup: labelGroup };
+}
+
+/* ====================================================================
  * 2. castle registry — add more entries here to extend the viewer.
  *    Each entry's build(THREE) must return
  *    { group, fadeGroups, interiorGroup, info, pickables, labelGroup,
@@ -1153,12 +1736,35 @@ var CASTLES = [
     flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
     year: '1385',
     description: '1385年、エドワード・ダリングリッジ卿が築いた水堀に浮かぶ城。四隅に円塔、北に双子塔のゲートハウスを持つ、対称性の高い後期中世城郭建築の代表例。',
-    build: buildBodiam
+    build: buildBodiam,
+    // camera / fog / shadow tuning for this castle's scale (section 5 /
+    // section 3 read these via applyCastle). These are exactly the values
+    // that were previously hardcoded, so Bodiam's behaviour is unchanged.
+    view: { targetY: 6.0, zMin: 20, zMax: 150, initDist: 105,
+      fogNear: 90, fogFar: 320, shadowExtent: 60, shadowFar: 220 }
+  },
+  {
+    id: 'vincennes',
+    name: 'Château de Vincennes',
+    nameJa: 'ヴァンセンヌ城',
+    country: 'France',
+    countryJa: 'フランス',
+    flag: '🇫🇷',
+    year: '1380',
+    description: 'フランス王シャルル5世が14世紀に築いた、高さ52mを誇る欧州最大級のドンジョンと1km超の城壁を持つ中世要塞。パリ郊外の森に建つ王権の象徴。',
+    build: buildVincennes,
+    // much larger footprint than Bodiam (330x175m enceinte vs. 33m square)
+    // -- pull the camera back, extend fog/shadow range, and push the
+    // shared background mountain rings out (envScale) so they still read
+    // as a distant backdrop rather than sitting inside the zoom clamp.
+    view: { targetY: 20, zMin: 60, zMax: 600, initDist: 450,
+      fogNear: 300, fogFar: 1200, shadowExtent: 250, shadowFar: 900, envScale: 2.6 }
   }
   // 今後の拡張: 他の城を追加する場合はここに { id, name, nameJa, country,
-  // countryJa, flag, year, description, build } を追加するだけでよい。切替
-  // ロジック(applyCastle)と国表示は汎用化されているため、レジストリに追加
-  // すれば自動的にUIに反映される。
+  // countryJa, flag, year, description, build, view } を追加するだけでよい。
+  // 切替ロジック(applyCastle)と国表示は汎用化されているため、レジストリに
+  // 追加すれば自動的にUIに反映される。view を省略した場合はボディアムの
+  // 既定値(20/150/105/90/320/60/220, envScale 1)にフォールバックする。
 ];
 
 /* ====================================================================
@@ -1180,6 +1786,13 @@ var skyCtx = skyCanvas.getContext('2d');
 var skyTex = new T.CanvasTexture(skyCanvas);
 scene.background = skyTex;
 scene.fog = new T.Fog(0xcdddE3, 90, 320);
+// per-castle view scale: multiplies every TIME_STATES fog near/far value
+// (see applyEnvironment) and the background mountain rings' radius, so a
+// much larger castle (e.g. Vincennes) can push fog/mountains out without
+// touching the tuned per-time-of-day numbers. Derived in applyCastle from
+// view.fogNear/fogFar (relative to Bodiam's own view: 90/320) and
+// view.envScale; default 1 leaves everything exactly as today.
+var FOG_NEAR_SCALE = 1, FOG_FAR_SCALE = 1, ENV_SCALE = 1;
 
 var camera = new T.PerspectiveCamera(42, 1, 0.5, 1000);
 
@@ -1371,8 +1984,8 @@ function applyEnvironment(){
   fill.intensity = CUR_TIME.ambientIntensity * CUR_WEATHER.ambientMul;
   scene.fog.color.copy(CUR_TIME.fogColor);
   desaturate(scene.fog.color, CUR_WEATHER.skySatMul);
-  scene.fog.near = CUR_TIME.fogNear * CUR_WEATHER.fogNearMul;
-  scene.fog.far = Math.max(scene.fog.near + 20, CUR_TIME.fogFar * CUR_WEATHER.fogFarMul);
+  scene.fog.near = CUR_TIME.fogNear * CUR_WEATHER.fogNearMul * FOG_NEAR_SCALE;
+  scene.fog.far = Math.max(scene.fog.near + 20, CUR_TIME.fogFar * CUR_WEATHER.fogFarMul * FOG_FAR_SCALE);
   if (current){
     (current.waterMats || []).forEach(function(m){ m.color.copy(CUR_TIME.waterColor); });
     if (current.windowMat){
@@ -1583,6 +2196,29 @@ function applyCastle(idx){
   // reset fade state instantly so a new castle never appears mid-fade
   built.fadeGroups.forEach(function(fg){ setGroupOpacity(fg, 1, true); });
   hideTooltip();
+
+  // apply this castle's view/env tuning (falls back to Bodiam's own
+  // longstanding numbers if a registry entry omits `view` entirely).
+  var v = def.view || {};
+  TARGET_Y = v.targetY != null ? v.targetY : 6.0;
+  ZMIN = v.zMin != null ? v.zMin : 20;
+  ZMAX = v.zMax != null ? v.zMax : 150;
+  var initDist = v.initDist != null ? v.initDist : 105;
+  // snap the orbit distance straight to this castle's starting distance
+  // (no easing) so the reveal/cutaway state always starts fresh -- carrying
+  // over the previous castle's zoomed-in orbDist would otherwise open the
+  // new castle already mid-cutaway, at the wrong scale for its ZMIN/ZMAX.
+  orbDist = initDist; curDist = initDist;
+  FOG_NEAR_SCALE = (v.fogNear != null ? v.fogNear : 90) / 90;
+  FOG_FAR_SCALE = (v.fogFar != null ? v.fogFar : 320) / 320;
+  var shadowExtent = v.shadowExtent != null ? v.shadowExtent : 60;
+  sun.shadow.camera.left = -shadowExtent; sun.shadow.camera.right = shadowExtent;
+  sun.shadow.camera.top = shadowExtent; sun.shadow.camera.bottom = -shadowExtent;
+  sun.shadow.camera.far = v.shadowFar != null ? v.shadowFar : 220;
+  sun.shadow.camera.updateProjectionMatrix();
+  ENV_SCALE = v.envScale != null ? v.envScale : 1;
+  MOUNTAIN_RINGS.forEach(function(r){ r.mesh.scale.setScalar(ENV_SCALE); });
+
   updateLabelVisibility();
 }
 var currentIdx = 0;
@@ -1646,6 +2282,15 @@ var WALL_START = 0.35, WALL_END = 0.58;
 // faded) so the roof reads as gone at roughly the same reveal depth the
 // camera-facing walls do.
 var ROOF_START = 0.40, ROOF_END = 0.62;
+// second, deeper cutaway tier -- used by fadeGroups whose descriptor sets
+// tier:'inner' (e.g. Vincennes' donjon shell nested inside the outer
+// enceinte). Reached only once the outer 'outer'-tier shell has already
+// fully faded (WALL_END/ROOF_END below these start points), so the two-
+// stage cutaway reads as outer walls first, then the keep. Every fadeGroup
+// defaults to tier:'outer' (see setGroupOpacity/updateFade below), so
+// castles that never set `tier` -- i.e. Bodiam -- are unaffected.
+var DONJON_WALL_START = 0.72, DONJON_WALL_END = 0.90;
+var DONJON_ROOF_START = 0.76, DONJON_ROOF_END = 0.92;
 var FACE_DOT = 0.25;
 function smoothstep(a,b,x){
   if (b<=a) return x<a?0:1;
@@ -1668,12 +2313,13 @@ function updateFade(reveal, dt){
   var k = reducedMotion ? 1 : easeFactor(dt);
   var anyMid = false, anyRoofGone = false;
   current.fadeGroups.forEach(function(fg){
+    var inner = fg.tier === 'inner';
     var dirFade = 0;
     if (fg.dir){
       var facing = fg.dir.x*camDir.x + fg.dir.z*camDir.z;
-      if (facing > FACE_DOT) dirFade = smoothstep(WALL_START, WALL_END, reveal);
+      if (facing > FACE_DOT) dirFade = smoothstep(inner ? DONJON_WALL_START : WALL_START, inner ? DONJON_WALL_END : WALL_END, reveal);
     }
-    var roofFade = fg.roof ? smoothstep(ROOF_START, ROOF_END, reveal) : 0;
+    var roofFade = fg.roof ? smoothstep(inner ? DONJON_ROOF_START : ROOF_START, inner ? DONJON_ROOF_END : ROOF_END, reveal) : 0;
     var fade = Math.max(dirFade, roofFade);
     var targetOp = 1 - fade;
     var nextOp = fg.op + (targetOp - fg.op) * k;
