@@ -145,6 +145,8 @@
     <div id="hudInner" class="glass">
       <div class="guide"><b>ドラッグ</b> = 回転</div>
       <div class="divider"></div>
+      <div class="guide"><b>右ドラッグ / Shift+ドラッグ / 2本指ドラッグ</b> = 移動</div>
+      <div class="divider"></div>
       <div class="guide"><b>ホイール / ピンチ</b> = ズーム</div>
       <div class="divider"></div>
       <div class="guide">ズームインで壁がフェードし内観が見えます</div>
@@ -1741,7 +1743,8 @@ var CASTLES = [
     // section 3 read these via applyCastle). These are exactly the values
     // that were previously hardcoded, so Bodiam's behaviour is unchanged.
     view: { targetY: 6.0, zMin: 20, zMax: 150, initDist: 105,
-      fogNear: 90, fogFar: 320, shadowExtent: 60, shadowFar: 220 }
+      fogNear: 90, fogFar: 320, shadowExtent: 60, shadowFar: 220,
+      camFar: 1000, panLimit: 40 }
   },
   {
     id: 'vincennes',
@@ -1754,17 +1757,21 @@ var CASTLES = [
     description: 'フランス王シャルル5世が14世紀に築いた、高さ52mを誇る欧州最大級のドンジョンと1km超の城壁を持つ中世要塞。パリ郊外の森に建つ王権の象徴。',
     build: buildVincennes,
     // much larger footprint than Bodiam (330x175m enceinte vs. 33m square)
-    // -- pull the camera back, extend fog/shadow range, and push the
-    // shared background mountain rings out (envScale) so they still read
-    // as a distant backdrop rather than sitting inside the zoom clamp.
+    // -- pull the camera back, extend fog/shadow/far-clip range, and push
+    // the shared background mountain rings out (envScale) so they still
+    // clear the zoom clamp. envLift (negative -- see applyCastle) nudges
+    // the ring back down so its ridge actually projects inside the camera
+    // frustum at Vincennes' scale, not just technically past the far clip.
     view: { targetY: 20, zMin: 60, zMax: 600, initDist: 450,
-      fogNear: 300, fogFar: 1200, shadowExtent: 250, shadowFar: 900, envScale: 2.6 }
+      fogNear: 300, fogFar: 1200, shadowExtent: 250, shadowFar: 900,
+      camFar: 2500, panLimit: 220, envScale: 2.2, envLift: -55 }
   }
   // 今後の拡張: 他の城を追加する場合はここに { id, name, nameJa, country,
   // countryJa, flag, year, description, build, view } を追加するだけでよい。
   // 切替ロジック(applyCastle)と国表示は汎用化されているため、レジストリに
   // 追加すれば自動的にUIに反映される。view を省略した場合はボディアムの
-  // 既定値(20/150/105/90/320/60/220, envScale 1)にフォールバックする。
+  // 既定値(20/150/105/90/320/60/220, camFar 1000, panLimit 40, envScale 1,
+  // envLift 0)にフォールバックする。
 ];
 
 /* ====================================================================
@@ -1787,12 +1794,14 @@ var skyTex = new T.CanvasTexture(skyCanvas);
 scene.background = skyTex;
 scene.fog = new T.Fog(0xcdddE3, 90, 320);
 // per-castle view scale: multiplies every TIME_STATES fog near/far value
-// (see applyEnvironment) and the background mountain rings' radius, so a
-// much larger castle (e.g. Vincennes) can push fog/mountains out without
+// (see applyEnvironment) and the background mountain rings' radius + Y
+// position, so a much larger castle (e.g. Vincennes) can push fog/
+// mountains out (and lift them back into frame -- see applyCastle) without
 // touching the tuned per-time-of-day numbers. Derived in applyCastle from
 // view.fogNear/fogFar (relative to Bodiam's own view: 90/320) and
-// view.envScale; default 1 leaves everything exactly as today.
-var FOG_NEAR_SCALE = 1, FOG_FAR_SCALE = 1, ENV_SCALE = 1;
+// view.envScale/envLift; defaults (1/1/1/0) leave everything exactly as
+// today for a castle that omits them.
+var FOG_NEAR_SCALE = 1, FOG_FAR_SCALE = 1, ENV_SCALE = 1, ENV_LIFT = 0;
 
 var camera = new T.PerspectiveCamera(42, 1, 0.5, 1000);
 
@@ -2209,6 +2218,10 @@ function applyCastle(idx){
   // over the previous castle's zoomed-in orbDist would otherwise open the
   // new castle already mid-cutaway, at the wrong scale for its ZMIN/ZMAX.
   orbDist = initDist; curDist = initDist;
+  // pan target resets to the origin on every switch (new castle, fresh
+  // vantage point) -- instant, same treatment as orbDist/curDist above.
+  orbTgtX = 0; orbTgtZ = 0; curTgtX = 0; curTgtZ = 0;
+  PAN_LIMIT = v.panLimit != null ? v.panLimit : 40;
   FOG_NEAR_SCALE = (v.fogNear != null ? v.fogNear : 90) / 90;
   FOG_FAR_SCALE = (v.fogFar != null ? v.fogFar : 320) / 320;
   var shadowExtent = v.shadowExtent != null ? v.shadowExtent : 60;
@@ -2216,8 +2229,28 @@ function applyCastle(idx){
   sun.shadow.camera.top = shadowExtent; sun.shadow.camera.bottom = -shadowExtent;
   sun.shadow.camera.far = v.shadowFar != null ? v.shadowFar : 220;
   sun.shadow.camera.updateProjectionMatrix();
+  // far-clip plane wasn't previously castle-tunable at all (always the
+  // constructor's default 1000) -- Vincennes' background mountain rings,
+  // pushed out past ~700m by envScale, need a much larger far plane or
+  // they simply never reach the GPU's rasteriser.
+  camera.far = v.camFar != null ? v.camFar : 1000;
+  camera.updateProjectionMatrix();
   ENV_SCALE = v.envScale != null ? v.envScale : 1;
-  MOUNTAIN_RINGS.forEach(function(r){ r.mesh.scale.setScalar(ENV_SCALE); });
+  // envLift: a rigid vertical shift applied to the (already envScale'd)
+  // ring, on top of the uniform radius/height scale. Verified empirically
+  // (NDC-space projection of sample ring points through the actual
+  // camera, not just hand trigonometry) rather than derived analytically:
+  // a naive uniform envScale alone was pushing the visible ring points'
+  // projected Y comfortably *above* the top of frame (ndcY > 1) at
+  // Vincennes' much larger initDist/curDist, so they read as invisible --
+  // envLift nudges the ring down (a *negative* value) until the ridge
+  // sits back inside the frustum. The ring's geometric base (local Y=-34,
+  // scaled) is always deep underground regardless of sign, so this never
+  // produces a visible floating gap. Bodiam's envLift is 0 (or omitted),
+  // so this is a no-op for it -- position.y simply gets (re-)set to the
+  // same 0 it already is.
+  ENV_LIFT = v.envLift != null ? v.envLift : 0;
+  MOUNTAIN_RINGS.forEach(function(r){ r.mesh.scale.setScalar(ENV_SCALE); r.mesh.position.y = ENV_LIFT; });
 
   updateLabelVisibility();
 }
@@ -2240,6 +2273,14 @@ var EL_MIN = 0.05, EL_MAX = 1.25; // elevation clamp (radians)
 
 var orbAz = -Math.PI*0.22, orbEl = 0.42, orbDist = 105;
 var curAz = orbAz, curEl = orbEl, curDist = orbDist;
+// look-at target (ground-plane XZ), pannable via right-drag / shift-drag /
+// two-finger drag (section 5.1 below). Eased through the same
+// orbX->curX/easeFactor pattern as az/el/dist, and clamped to PAN_LIMIT
+// (set per-castle in applyCastle) so panning can't wander off into empty
+// field. Reset to the origin on every castle switch (see applyCastle).
+var orbTgtX = 0, orbTgtZ = 0;
+var curTgtX = orbTgtX, curTgtZ = orbTgtZ;
+var PAN_LIMIT = 40;
 
 function easeFactor(dt){
   // frame-rate independent damping
@@ -2249,13 +2290,15 @@ function placeCamera(k){
   curAz += (orbAz - curAz) * k;
   curEl += (orbEl - curEl) * k;
   curDist += (orbDist - curDist) * k;
+  curTgtX += (orbTgtX - curTgtX) * k;
+  curTgtZ += (orbTgtZ - curTgtZ) * k;
   var ce = Math.cos(curEl), se = Math.sin(curEl);
   camera.position.set(
-    curDist*ce*Math.sin(curAz),
+    curTgtX + curDist*ce*Math.sin(curAz),
     TARGET_Y + curDist*se,
-    curDist*ce*Math.cos(curAz)
+    curTgtZ + curDist*ce*Math.cos(curAz)
   );
-  camera.lookAt(0, TARGET_Y*0.55, 0);
+  camera.lookAt(curTgtX, TARGET_Y*0.55, curTgtZ);
 }
 function layout(){
   var w = window.innerWidth;
@@ -2334,10 +2377,41 @@ function updateFade(reveal, dt){
 /* -- pointer / touch / wheel handling -- */
 var ptrs = new Map();
 var dragging = false, lastX=0, lastY=0, pinchD=0, pinchDist=orbDist;
+var panMode = false; // this drag gesture pans the look-at target instead of orbiting
+var pinchMidX=0, pinchMidY=0; // two-finger gesture midpoint, tracked frame-to-frame for pan
 function ptrDist(){
   var a = Array.from(ptrs.values());
   return Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
 }
+function ptrMid(){
+  var a = Array.from(ptrs.values());
+  return { x:(a[0].x+a[1].x)/2, y:(a[0].y+a[1].y)/2 };
+}
+/* -- 5.1 pan: right-drag / shift+left-drag (mouse) or two-finger drag
+ * (touch, alongside the existing pinch-zoom) move the look-at target
+ * across the ground plane, using the camera's own current right vector
+ * and its forward vector projected onto the ground (elevation ignored --
+ * per spec, vertical drag walks the target forward/back along the
+ * ground rather than along the camera's tilted view axis). Scaled by
+ * curDist so the on-screen drag-to-world-motion ratio stays constant
+ * across zoom levels, matching how az/el already feel zoom-independent. */
+var PAN_K = 0.0012;
+function clampPan(){
+  var d = Math.hypot(orbTgtX, orbTgtZ);
+  if (d > PAN_LIMIT){
+    var s = PAN_LIMIT / d;
+    orbTgtX *= s; orbTgtZ *= s;
+  }
+}
+function panBy(dx, dy){
+  var rightX = Math.cos(curAz), rightZ = -Math.sin(curAz);
+  var fwdX = -Math.sin(curAz), fwdZ = -Math.cos(curAz); // camera->target, ground-projected
+  var scale = curDist * PAN_K;
+  orbTgtX -= (rightX*dx + fwdX*dy) * scale;
+  orbTgtZ -= (rightZ*dx + fwdZ*dy) * scale;
+  clampPan();
+}
+canvas.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 var touchStart = null; // tap-vs-drag detection for touch tooltip picking
 canvas.addEventListener('pointerdown', function(e){
   ptrs.set(e.pointerId, {x:e.clientX,y:e.clientY});
@@ -2347,8 +2421,13 @@ canvas.addEventListener('pointerdown', function(e){
   } else {
     hideTooltip();
   }
-  if (ptrs.size === 2){ dragging=false; pinchD = ptrDist(); pinchDist = orbDist; hideTooltip(); return; }
+  if (ptrs.size === 2){
+    dragging=false; pinchD = ptrDist(); pinchDist = orbDist;
+    var mid0 = ptrMid(); pinchMidX = mid0.x; pinchMidY = mid0.y;
+    hideTooltip(); return;
+  }
   dragging = true; lastX = e.clientX; lastY = e.clientY;
+  panMode = e.pointerType !== 'touch' && (e.button === 2 || (e.button === 0 && e.shiftKey));
   canvas.classList.add('drag');
 });
 canvas.addEventListener('pointermove', function(e){
@@ -2356,14 +2435,23 @@ canvas.addEventListener('pointermove', function(e){
   if (ptrs.size >= 2){
     var d = ptrDist();
     if (pinchD > 8) orbDist = Math.max(ZMIN, Math.min(ZMAX, pinchDist * (pinchD/d)));
+    // two-finger midpoint drift pans, independent of (and simultaneous
+    // with) the distance-drift pinch-zoom handled just above.
+    var mid = ptrMid();
+    panBy(mid.x - pinchMidX, mid.y - pinchMidY);
+    pinchMidX = mid.x; pinchMidY = mid.y;
     return;
   }
   if (!dragging){
     if (e.pointerType !== 'touch') doPick(e.clientX, e.clientY);
     return;
   }
-  orbAz -= (e.clientX - lastX) * 0.0062;
-  orbEl = Math.max(EL_MIN, Math.min(EL_MAX, orbEl - (e.clientY - lastY) * 0.0046));
+  if (panMode){
+    panBy(e.clientX - lastX, e.clientY - lastY);
+  } else {
+    orbAz -= (e.clientX - lastX) * 0.0062;
+    orbEl = Math.max(EL_MIN, Math.min(EL_MAX, orbEl - (e.clientY - lastY) * 0.0046));
+  }
   lastX = e.clientX; lastY = e.clientY;
   hideTooltip();
 });
@@ -2386,7 +2474,7 @@ function ptrEnd(e){
   }
   if (e && ptrs.has(e.pointerId)) ptrs.delete(e.pointerId);
   if (ptrs.size < 2) pinchD = 0;
-  if (ptrs.size === 0){ dragging = false; canvas.classList.remove('drag'); }
+  if (ptrs.size === 0){ dragging = false; panMode = false; canvas.classList.remove('drag'); }
   else { var a = Array.from(ptrs.values())[0]; lastX=a.x; lastY=a.y; dragging=true; }
   if (tapAt) doPick(tapAt.x, tapAt.y);
 }
@@ -2572,7 +2660,36 @@ window.__setEnv = function(timeKey, weatherKey, instant){
   renderer.render(scene, camera);
 };
 window.__pickAt = function(clientX, clientY){ doPick(clientX, clientY); };
+window.__setPan = function(x, z){
+  // testing helper: snaps the pan target instantly (no easing), through
+  // the same clamp real drag input goes through.
+  orbTgtX = x; orbTgtZ = z; clampPan();
+  curTgtX = orbTgtX; curTgtZ = orbTgtZ;
+  placeCamera(1); updateCamDir();
+  renderer.render(scene, camera);
+};
+window.__panBy = function(dx, dy){
+  // testing helper: runs the exact drag-delta pan path (panBy) real
+  // pointer input uses, then snaps curTgt to match (no easing lag) so the
+  // effect is immediately observable.
+  panBy(dx, dy);
+  curTgtX = orbTgtX; curTgtZ = orbTgtZ;
+  placeCamera(1); updateCamDir();
+  renderer.render(scene, camera);
+};
+window.__debugState = function(){
+  return {
+    orbTgtX: orbTgtX, orbTgtZ: orbTgtZ, curTgtX: curTgtX, curTgtZ: curTgtZ, PAN_LIMIT: PAN_LIMIT,
+    camFar: camera.far, envScale: ENV_SCALE, envLift: ENV_LIFT,
+    fogNear: scene.fog.near, fogFar: scene.fog.far,
+    cameraPos: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    mountainRings: MOUNTAIN_RINGS.map(function(r){
+      return { scale: r.mesh.scale.x, posY: r.mesh.position.y };
+    })
+  };
+};
 window.__scene = scene; window.__camera = camera; window.__renderer = renderer;
+window.__MOUNTAIN_RINGS = MOUNTAIN_RINGS;
 })();
 </script>
 </body>
