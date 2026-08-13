@@ -1,0 +1,1933 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ボディアム城 3Dビューア | Bodiam Castle Viewer</title>
+<style>
+  :root{
+    --ink:#eee6d3; --ink2:#b9ae97; --panel:rgba(18,20,16,.62); --panel2:rgba(24,26,20,.72);
+    --hair:rgba(238,230,211,.16); --accent:#d7b26a;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:#0b0d10;color:var(--ink);font-family:var(--sans);overflow:hidden;
+    -webkit-font-smoothing:antialiased}
+  #app{position:fixed;inset:0}
+  #stage{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none}
+  #stage.drag{cursor:grabbing}
+
+  .glass{background:var(--panel);backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    border:1px solid var(--hair);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+
+  #infoPanel{position:absolute;left:16px;top:16px;max-width:340px;padding:16px 18px;z-index:5}
+  #infoPanel h1{font-size:18px;margin:0 0 2px;font-weight:700;letter-spacing:.3px;color:var(--ink)}
+  #infoPanel .sub{font-size:12px;color:var(--accent);font-weight:600;letter-spacing:.4px;margin-bottom:8px}
+  #infoPanel p{font-size:12.5px;line-height:1.65;color:var(--ink2);margin:0}
+
+  #castlePanel{position:absolute;right:16px;top:16px;padding:12px 14px;z-index:5;min-width:200px}
+  #castlePanel label{display:block;font-size:10.5px;letter-spacing:.6px;color:var(--ink2);
+    margin-bottom:6px;text-transform:uppercase}
+  #castleSelect{width:100%;background:rgba(255,255,255,.06);color:var(--ink);
+    border:1px solid var(--hair);border-radius:8px;padding:7px 9px;font-size:13px;
+    font-family:inherit;outline:none}
+  #castleSelect option{background:#1b1d18;color:var(--ink)}
+
+  #envPanel{position:absolute;right:16px;top:96px;padding:11px 14px;z-index:5;min-width:200px}
+  .segRow{margin-top:9px}
+  .segRow:first-child{margin-top:0}
+  .segRow label{display:block;font-size:10px;letter-spacing:.6px;color:var(--ink2);
+    margin-bottom:5px;text-transform:uppercase}
+  .seg{display:flex;gap:4px}
+  .seg button{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--hair);color:var(--ink2);
+    border-radius:7px;padding:6px 0;font-size:12.5px;font-family:inherit;cursor:pointer;
+    transition:background .15s,color .15s,border-color .15s}
+  .seg button:hover{color:var(--ink)}
+  .seg button.active{background:var(--accent);color:#1b1712;border-color:var(--accent);font-weight:700}
+
+  .toggleRow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .toggleRow label{margin-bottom:0}
+  .switch{position:relative;display:inline-block;width:38px;height:21px;flex:none;cursor:pointer}
+  .switch input{position:absolute;z-index:1;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .switch .track{position:absolute;inset:0;background:rgba(255,255,255,.14);border:1px solid var(--hair);
+    border-radius:11px;transition:background .18s,border-color .18s;pointer-events:none}
+  .switch .knob{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+    background:var(--ink2);transition:transform .18s,background .18s;pointer-events:none}
+  .switch input:checked ~ .track{background:var(--accent);border-color:var(--accent)}
+  .switch input:checked ~ .knob{transform:translateX(17px);background:#1b1712}
+  .switch input:focus-visible ~ .track{outline:2px solid var(--accent);outline-offset:2px}
+
+  #hud{position:absolute;left:0;right:0;bottom:0;padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    display:flex;justify-content:center;z-index:5;pointer-events:none}
+  #hudInner{pointer-events:auto;padding:10px 20px;display:flex;align-items:center;gap:18px;
+    flex-wrap:wrap;justify-content:center}
+  #hudInner .guide{font-size:11.5px;color:var(--ink2);letter-spacing:.2px;white-space:nowrap}
+  #hudInner .guide b{color:var(--ink);font-weight:600}
+  #hudInner .divider{width:1px;height:16px;background:var(--hair)}
+  #revealWrap{display:flex;align-items:center;gap:8px}
+  #revealWrap .stagesLabel{font-size:11px;color:var(--ink2)}
+  .stageDot{display:flex;gap:5px;align-items:center}
+  .dot{width:6px;height:6px;border-radius:50%;background:rgba(238,230,211,.25);transition:background .25s}
+  .dot.on{background:var(--accent)}
+  #revealText{font-size:11.5px;font-weight:700;letter-spacing:.4px;color:var(--accent);min-width:74px}
+
+  #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:#0b0d10;z-index:20;font-size:13px;color:var(--ink2);letter-spacing:.4px}
+
+  #tooltip{position:fixed;z-index:30;padding:9px 13px;max-width:260px;pointer-events:none;
+    display:none;left:0;top:0}
+  #tooltip .tt-title{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:3px;letter-spacing:.2px}
+  #tooltip .tt-desc{font-size:11.5px;line-height:1.5;color:var(--ink2)}
+
+  @media (max-width:640px){
+    #infoPanel{max-width:230px;padding:12px 14px}
+    #infoPanel h1{font-size:15px}
+    #infoPanel p{font-size:11.5px}
+    #castlePanel{min-width:150px}
+    #envPanel{min-width:150px;top:88px;padding:9px 12px}
+    #hudInner{gap:10px;padding:8px 12px}
+    #hudInner .guide{font-size:10px}
+    #tooltip{max-width:210px;padding:8px 11px}
+    #tooltip .tt-title{font-size:12px}
+    #tooltip .tt-desc{font-size:11px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" tabindex="0"></canvas>
+
+  <div id="infoPanel" class="glass">
+    <div class="sub" id="castleMeta">🏴󠁧󠁢󠁥󠁮󠁧󠁿 イングランド(イギリス) · 1385年</div>
+    <h1 id="castleName">ボディアム城</h1>
+    <p id="castleDesc">1385年、エドワード・ダリングリッジ卿が築いた水堀に浮かぶ城。四隅に円塔、北に双子塔のゲートハウスを持つ、対称性の高い後期中世城郭建築の代表例。</p>
+  </div>
+
+  <div id="castlePanel" class="glass">
+    <label for="castleSelect">城を選択 / SELECT CASTLE</label>
+    <select id="castleSelect"></select>
+  </div>
+
+  <div id="envPanel" class="glass">
+    <div class="segRow">
+      <label>時間帯 / TIME</label>
+      <div class="seg" id="timeSeg">
+        <button type="button" data-k="morning">朝</button>
+        <button type="button" data-k="day" class="active">昼</button>
+        <button type="button" data-k="dusk">夕</button>
+        <button type="button" data-k="night">夜</button>
+      </div>
+    </div>
+    <div class="segRow">
+      <label>天候 / WEATHER</label>
+      <div class="seg" id="weatherSeg">
+        <button type="button" data-k="clear" class="active">晴</button>
+        <button type="button" data-k="cloudy">曇</button>
+        <button type="button" data-k="rain">雨</button>
+        <button type="button" data-k="snow">雪</button>
+      </div>
+    </div>
+    <div class="segRow toggleRow">
+      <label for="labelToggle">ラベル常時表示</label>
+      <span class="switch">
+        <input type="checkbox" id="labelToggle">
+        <span class="track"></span>
+        <span class="knob"></span>
+      </span>
+    </div>
+  </div>
+
+  <div id="tooltip" class="glass"></div>
+
+  <div id="hud">
+    <div id="hudInner" class="glass">
+      <div class="guide"><b>ドラッグ</b> = 回転</div>
+      <div class="divider"></div>
+      <div class="guide"><b>ホイール / ピンチ</b> = ズーム</div>
+      <div class="divider"></div>
+      <div class="guide">ズームインで壁がフェードし内観が見えます</div>
+      <div class="divider"></div>
+      <div id="revealWrap">
+        <div class="stageDot">
+          <div class="dot" id="dot0"></div><div class="dot" id="dot1"></div><div class="dot" id="dot2"></div>
+        </div>
+        <div id="revealText">外観</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading">城を構築中 …</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+var T = THREE;
+var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ====================================================================
+ * 0. small geometry / material helpers
+ * ==================================================================== */
+function mkBox(w,h,d,mat){
+  var m = new T.Mesh(new T.BoxGeometry(w,h,d), mat);
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+function mkCyl(rt,rb,h,seg,mat){
+  var m = new T.Mesh(new T.CylinderGeometry(rt,rb,h,seg), mat);
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+function mkCone(r,h,seg,mat){
+  var m = new T.Mesh(new T.ConeGeometry(r,h,seg), mat);
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+function place(mesh,x,y,z,ry){
+  mesh.position.set(x,y,z);
+  if (ry) mesh.rotation.y = ry;
+  return mesh;
+}
+
+/* ---- room / structure hover-tooltip picking -------------------------
+ * Rooms used to carry an always-visible canvas-sprite label. That is
+ * replaced by a hidden pick volume + HTML tooltip (see section 5.5), so
+ * this factory builds an invisible raycast target instead of a sprite.
+ * The mesh is intentionally never added to the scene graph -- raycasting
+ * only needs its world matrix (computed once, it never moves), so it
+ * costs zero GPU state and needs no disposal bookkeeping on castle
+ * switch (it is simply dropped with the rest of the old `built` object). */
+function registerPick(list, kind, x, y, z, w, h, d, name, desc){
+  var mesh = new T.Mesh(new T.BoxGeometry(Math.max(w,0.5), Math.max(h,0.5), Math.max(d,0.5)));
+  mesh.position.set(x, y, z);
+  mesh.updateMatrixWorld(true);
+  mesh.userData.pickInfo = { kind: kind, name: name, desc: desc };
+  list.push(mesh);
+  return mesh;
+}
+
+/* cheap deterministic pseudo-noise (sum of sines) -- no external noise
+   library, used for both ground undulation and the mountain ridgelines */
+function hashNoise2(x, z){
+  return Math.sin(x*0.11 + z*0.07)*0.55 + Math.sin(x*0.23 - z*0.17 + 1.7)*0.28 + Math.sin(x*0.05+z*0.031+4.1)*1.0;
+}
+function ridgeNoise1D(a, seed){
+  return Math.sin(a*3 + seed)*0.5 + Math.sin(a*7.3 + seed*1.7)*0.28 +
+         Math.sin(a*12.7 + seed*2.3)*0.16 + Math.sin(a*21.1 + seed*3.9)*0.08;
+}
+function smoothstep01(a,b,x){
+  if (b<=a) return x<a?0:1;
+  var t = Math.max(0, Math.min(1, (x-a)/(b-a)));
+  return t*t*(3-2*t);
+}
+/* rolling ground plane: flat out to `flatR` (so the moat/island/bridge
+   height relationships never move), then a gentle noise undulation
+   fades in over the next 40m so the horizon doesn't read as a dead-flat
+   disc once the background mountains (section 3.5) are added.
+   `cutHalf` (optional): drop any triangle with a vertex inside the axis-
+   aligned square of half-extent `cutHalf` -- used to punch a (grid-
+   quantised, slightly generous) hole under a moat/bank system that dips
+   below this plane's flat height, so this continuous plane can't poke
+   through geometry that's meant to be lower. The caller is responsible
+   for covering the resulting hole with its own precise geometry (see
+   buildWaterMoatSystem's "collar", section 0.5) -- this function only
+   guarantees no ground triangle survives with any vertex inside
+   `cutHalf`, it does not fill the gap itself. */
+function buildUndulatingGround(flatR, size, segs, mat, cutHalf){
+  var geo = new T.PlaneGeometry(size, size, segs, segs);
+  geo.rotateX(-Math.PI/2);
+  var pos = geo.attributes.position;
+  var i;
+  for (i=0;i<pos.count;i++){
+    var x = pos.getX(i), z = pos.getZ(i);
+    var d = Math.hypot(x,z);
+    var t = smoothstep01(flatR, flatR+40, d);
+    pos.setY(i, hashNoise2(x,z) * 2.2 * t);
+  }
+  geo.computeVertexNormals();
+  if (cutHalf != null){
+    var srcIdx = geo.getIndex().array, kept = [];
+    for (i=0;i<srcIdx.length;i+=3){
+      var a=srcIdx[i], b=srcIdx[i+1], c=srcIdx[i+2];
+      var sqA = Math.max(Math.abs(pos.getX(a)), Math.abs(pos.getZ(a)));
+      var sqB = Math.max(Math.abs(pos.getX(b)), Math.abs(pos.getZ(b)));
+      var sqC = Math.max(Math.abs(pos.getX(c)), Math.abs(pos.getZ(c)));
+      if (sqA < cutHalf || sqB < cutHalf || sqC < cutHalf) continue; // any corner inside -> drop the whole face
+      kept.push(a,b,c);
+    }
+    geo.setIndex(kept);
+  }
+  var mesh = new T.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/* two-colour checker texture (e.g. Flemish tile floors); repeat-tiled so
+   it reads at any UV scale a BoxGeometry face happens to produce */
+function makeCheckerTexture(colorA, colorB, tilesPerSide){
+  var cell = 32, n = 2; // 2x2 cell canvas, repeated via texture.repeat
+  var c = document.createElement('canvas');
+  c.width = c.height = cell*n;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = colorA; ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle = colorB;
+  ctx.fillRect(0,0,cell,cell);
+  ctx.fillRect(cell,cell,cell,cell);
+  var tex = new T.CanvasTexture(c);
+  tex.wrapS = T.RepeatWrapping; tex.wrapT = T.RepeatWrapping;
+  tex.repeat.set(tilesPerSide||6, tilesPerSide||6);
+  tex.magFilter = T.NearestFilter;
+  return tex;
+}
+
+/* label sprite (canvas-text pill) used by the "always-on labels" toggle
+ * (section 6). Castle-agnostic: any castle's room-name strings can use
+ * this. depthTest stays on so a label sitting inside a still-solid wall
+ * is correctly occluded; it is only ever shown once reveal has faded the
+ * relevant walls anyway (see labelGroup visibility gating). */
+function roundRectPath(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function makeTextSprite(text, worldHeight){
+  var fontSize = 30, padX = 16, padY = 10;
+  var c = document.createElement('canvas');
+  var ctx = c.getContext('2d');
+  ctx.font = '700 ' + fontSize + 'px sans-serif';
+  var textW = Math.ceil(ctx.measureText(text).width);
+  c.width = textW + padX*2;
+  c.height = fontSize + padY*2;
+  ctx.font = '700 ' + fontSize + 'px sans-serif'; // canvas resize resets ctx state
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  roundRectPath(ctx, 1, 1, c.width-2, c.height-2, 9);
+  ctx.fillStyle = 'rgba(16,17,13,0.72)';
+  ctx.fill();
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = 'rgba(238,230,211,0.4)';
+  ctx.stroke();
+  ctx.fillStyle = '#f2ead6';
+  ctx.fillText(text, c.width/2, c.height/2 + 1);
+  var tex = new T.CanvasTexture(c);
+  var mat = new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  var spr = new T.Sprite(mat);
+  var h = worldHeight || 0.9;
+  spr.scale.set(h * (c.width/c.height), h, 1);
+  return spr;
+}
+
+/* ====================================================================
+ * 0.5 water / moat / bank system — castle-agnostic. A square moat
+ * ringing a central island, with graded earth banks (not hard box lips)
+ * carrying the ground smoothly down to the water on both the outer
+ * (field) side and the inner (island) side. Any castle whose footprint
+ * is a square moated island can call buildWaterMoatSystem() with its own
+ * numbers -- nothing below is Bodiam-specific. A castle with a different
+ * water layout (circular moat, dry ditch, no moat) can ignore this
+ * helper entirely and build its own environment meshes.
+ * ==================================================================== */
+function ringPerimPoint(kind, t, extent){
+  if (kind === 'circle'){
+    var a = t * Math.PI * 2;
+    return { x: Math.cos(a)*extent, z: Math.sin(a)*extent };
+  }
+  // square, walked counter-clockwise starting at the north edge midpoint
+  var tt = ((t % 1) + 1) % 1 * 4;
+  var side = Math.floor(tt), f = tt - side;
+  var s = (f - 0.5) * 2 * extent;
+  if (side === 0) return { x: s, z: -extent };
+  if (side === 1) return { x: extent, z: s };
+  if (side === 2) return { x: -s, z: extent };
+  return { x: -extent, z: -s };
+}
+/* graded ramp ring between two perimeters (concentric squares or
+ * circles), vertex-coloured so the bank reads as a continuous slope
+ * (dry earth -> darker wet mud at the waterline) rather than a flat tone
+ * that stops dead. `extentTop`/`yTop` is the dry edge (u=0), `extentBottom`
+ * /`yBottom` is the waterline edge (u=1); the Y profile is eased
+ * (smoothstep) so it meets both the flat ground/island above and the
+ * flat water below tangentially -- no visible kink at either join. */
+function buildBankRamp(kind, extentTop, extentBottom, yTop, yBottom, colTop, colMid, colEdge, segs, steps){
+  segs = segs || 48; steps = steps || 6;
+  var positions = [], colors = [], indices = [];
+  var stride = steps + 1;
+  var tmp = new T.Color();
+  var i, j;
+  for (i=0;i<=segs;i++){
+    var t = i/segs;
+    var pTop = ringPerimPoint(kind, t, extentTop);
+    var pBot = ringPerimPoint(kind, t, extentBottom);
+    for (j=0;j<=steps;j++){
+      var u = j/steps;
+      var eu = smoothstep01(0,1,u);
+      positions.push(
+        pTop.x + (pBot.x - pTop.x)*eu,
+        yTop + (yBottom - yTop)*eu,
+        pTop.z + (pBot.z - pTop.z)*eu
+      );
+      tmp.copy(colTop).lerp(colMid, smoothstep01(0,0.7,u));
+      tmp.lerp(colEdge, smoothstep01(0.72,1,u));
+      colors.push(tmp.r, tmp.g, tmp.b);
+    }
+  }
+  for (i=0;i<segs;i++){
+    for (j=0;j<steps;j++){
+      var a = i*stride+j, b = (i+1)*stride+j, c = (i+1)*stride+j+1, d = i*stride+j+1;
+      indices.push(a,b,d, b,c,d);
+    }
+  }
+  var geo = new T.BufferGeometry();
+  geo.setIndex(indices);
+  geo.setAttribute('position', new T.Float32BufferAttribute(positions,3));
+  geo.setAttribute('color', new T.Float32BufferAttribute(colors,3));
+  geo.computeVertexNormals();
+  var mat = new T.MeshLambertMaterial({ vertexColors: T.VertexColors });
+  var mesh = new T.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+/* full moat/bank/island/ground assembly for a square-moated castle.
+ * Every mesh is added directly into `opts.group`. Returns the pieces
+ * (plus the derived water-ring radii) so the caller can position a
+ * bridge/approach against `waterHalf` / `waterInnerHalf`, and register
+ * `waterMat` into the build's `waterMats` list for the time-of-day
+ * colour hook. See buildBodiam() below for a concrete call + the meaning
+ * of every field; a second moated castle only needs its own `opts`. */
+function buildWaterMoatSystem(opts){
+  var g = opts.group;
+  var groundY = opts.groundY, waterY = opts.waterY;
+  var islandHalf = opts.islandHalf, islandY = opts.islandY!=null ? opts.islandY : 0.02;
+  var moatOuterHalf = opts.moatOuterHalf;
+  var bankWOut = opts.bankWidthOut!=null ? opts.bankWidthOut : 4.0;
+  var bankWIn = opts.bankWidthIn!=null ? opts.bankWidthIn : 3.0;
+  var waterHalf = moatOuterHalf - bankWOut;        // outer edge of open water
+  var waterInnerHalf = islandHalf + bankWIn;        // inner edge of open water
+
+  // The outer bank dips WATER_Y below GROUND_Y (Fix 1), so the big
+  // continuous ground plane can no longer simply stay flat under the
+  // whole moat footprint the way it used to when the moat sat above
+  // ground level -- a flat plane there would poke up through the sloped
+  // bank / water. Punch a generous, grid-quantised hole in it (any
+  // triangle touching the moat's square footprint is dropped) and cover
+  // the resulting gap with an exact flat "collar" annulus that meets
+  // bankOuter's top ring with zero gap on the inner edge; the ground
+  // plane's own flat region is pushed out to start exactly where the
+  // collar ends, so the collar's outer edge needs no special handling
+  // either (both sides are the same flat GROUND_Y there, hills haven't
+  // engaged yet).
+  var groundSize = opts.groundSize||1600, groundSegs = opts.groundSegs||72;
+  var cellSize = groundSize / groundSegs;
+  var collarOuterHalf = moatOuterHalf + Math.max(30, cellSize*2.5);
+  var ground = buildUndulatingGround(collarOuterHalf, groundSize, groundSegs, opts.groundMat, moatOuterHalf);
+  ground.position.y = groundY;
+  g.add(ground);
+
+  var collarShape = new T.Shape();
+  collarShape.moveTo(-collarOuterHalf,-collarOuterHalf); collarShape.lineTo(collarOuterHalf,-collarOuterHalf);
+  collarShape.lineTo(collarOuterHalf,collarOuterHalf); collarShape.lineTo(-collarOuterHalf,collarOuterHalf); collarShape.closePath();
+  var collarHole = new T.Path();
+  collarHole.moveTo(-moatOuterHalf,-moatOuterHalf); collarHole.lineTo(-moatOuterHalf,moatOuterHalf);
+  collarHole.lineTo(moatOuterHalf,moatOuterHalf); collarHole.lineTo(moatOuterHalf,-moatOuterHalf); collarHole.closePath();
+  collarShape.holes.push(collarHole);
+  var collarGeo = new T.ShapeGeometry(collarShape);
+  collarGeo.rotateX(-Math.PI/2);
+  var collar = new T.Mesh(collarGeo, opts.groundMat);
+  collar.position.y = groundY; collar.receiveShadow = true;
+  g.add(collar);
+
+  var islandShape = new T.Shape();
+  islandShape.moveTo(-islandHalf,-islandHalf); islandShape.lineTo(islandHalf,-islandHalf);
+  islandShape.lineTo(islandHalf,islandHalf); islandShape.lineTo(-islandHalf,islandHalf); islandShape.closePath();
+  var islandGeo = new T.ShapeGeometry(islandShape);
+  islandGeo.rotateX(-Math.PI/2);
+  var island = new T.Mesh(islandGeo, opts.islandMat);
+  island.position.y = islandY; island.receiveShadow = true;
+  g.add(island);
+
+  var colTop = new T.Color(opts.bankColorTop!=null?opts.bankColorTop:0x9c8a5e);
+  var colMid = new T.Color(opts.bankColorMid!=null?opts.bankColorMid:0x6e5c3e);
+  var colEdge = new T.Color(opts.bankColorEdge!=null?opts.bankColorEdge:0x332818);
+
+  // outer bank: dry field (moatOuterHalf, groundY) -> waterline (waterHalf, waterY)
+  var bankOuter = buildBankRamp('square', moatOuterHalf, waterHalf, groundY, waterY, colTop, colMid, colEdge);
+  g.add(bankOuter);
+  // inner bank: island edge (islandHalf, islandY) -> waterline (waterInnerHalf, waterY)
+  var bankInner = buildBankRamp('square', islandHalf, waterInnerHalf, islandY, waterY, colTop, colMid, colEdge);
+  g.add(bankInner);
+
+  var moatShape = new T.Shape();
+  moatShape.moveTo(-waterHalf,-waterHalf); moatShape.lineTo(waterHalf,-waterHalf);
+  moatShape.lineTo(waterHalf,waterHalf); moatShape.lineTo(-waterHalf,waterHalf); moatShape.closePath();
+  var hole = new T.Path();
+  hole.moveTo(-waterInnerHalf,-waterInnerHalf); hole.lineTo(-waterInnerHalf,waterInnerHalf);
+  hole.lineTo(waterInnerHalf,waterInnerHalf); hole.lineTo(waterInnerHalf,-waterInnerHalf); hole.closePath();
+  moatShape.holes.push(hole);
+  var moatGeo = new T.ShapeGeometry(moatShape);
+  moatGeo.rotateX(-Math.PI/2);
+  var waterMat = new T.MeshPhongMaterial({ color: opts.waterColor||0x2e5b66,
+    transparent:true, opacity:opts.waterOpacity!=null?opts.waterOpacity:0.82, shininess:90, specular:0x9fd4e0 });
+  var moatWater = new T.Mesh(moatGeo, waterMat);
+  moatWater.position.y = waterY;
+  g.add(moatWater);
+
+  return { ground:ground, island:island, moatWater:moatWater, bankOuter:bankOuter, bankInner:bankInner,
+    waterMat:waterMat, waterHalf:waterHalf, waterInnerHalf:waterInnerHalf, waterY:waterY, groundY:groundY };
+}
+/* small circular skirt bank -- same grading technique as the main moat
+ * banks, sized for a small mid-moat platform (e.g. a drawbridge island)
+ * so it also meets the water on a slope instead of a hard disc edge. */
+function buildCircularSkirt(cx, cz, rTop, rBottom, yTop, yBottom, colTop, colMid, colEdge){
+  var ramp = buildBankRamp('circle', rTop, rBottom, yTop, yBottom, colTop, colMid, colEdge, 32, 5);
+  ramp.position.set(cx, 0, cz);
+  return ramp;
+}
+
+/* ====================================================================
+ * 1. Bodiam Castle procedural builder
+ * ====================================================================
+ * Returns { group, fadeGroups, interiorGroup, info }.
+ * fadeGroups is a flat array of descriptors so the reveal/cutaway loop
+ * (section 4) can stay generic across any castle added to the registry:
+ *   { group: THREE.Group, mat: THREE.Material, dir: {x,z}|null, roof: bool, op: number }
+ * `dir` is the outward-facing unit vector used for camera-facing tests;
+ * `roof` marks groups that also fade out completely (independent of
+ * camera azimuth) once the viewer is close enough to see the room plan.
+ */
+function buildBodiam(){
+  var group = new T.Group();
+  var interiorGroup = new T.Group();
+  group.add(interiorGroup);
+  var fadeGroups = [];
+  var pickables = [];   // hover/tap tooltip targets: rooms + major structures
+
+  function makeFadeGroup(name, dir, isRoof, colorHex, roughness){
+    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    var g = new T.Group();
+    g.name = name;
+    group.add(g);
+    var desc = { group:g, mat:mat, dir:dir, roof: !!isRoof, op:1, name:name };
+    fadeGroups.push(desc);
+    return desc;
+  }
+
+  /* ---- palette : Sussex sandstone, warm ochre to grey ------------- */
+  var STONE_WALL   = 0xc7a97c;
+  var STONE_WALL_V = 0xbfa176; // slight variance for towers
+  var STONE_DARK   = 0x9c8564;
+  var ROOF_COL     = 0x5b544a;
+  var TIMBER_COL   = 0x5b4530;
+  var WINDOW_COL   = 0x1c150e;
+  var FLOOR_COL    = 0xa89a80;
+  var STUB_COL     = 0x7c6c50;
+  var WOOD_COL     = 0x6b4f34;
+  var METAL_COL    = 0x2a2925;
+  var WATER_COL    = 0x2e5b66;
+  var GRASS_COL    = 0x5c7a48;
+  var GRASS_COL2   = 0x6c8a52;
+  var BANK_COL     = 0x8a7a58;
+  var BANK_MID_COL = 0x62543a; // bank ramp, mid-slope
+  var BANK_EDGE_COL= 0x2f2617; // bank ramp, wet mud right at the waterline
+  var TILE_COL     = 0x7a5240;
+  var COURT_GRASS_COL = 0x6a8d4f; // central lawn, kept distinct from the wing stone floors
+
+  var windowMat = new T.MeshLambertMaterial({ color: WINDOW_COL });
+  var floorMat  = new T.MeshLambertMaterial({ color: FLOOR_COL }); // stone slab under each wing (grey-sand, one step above the lawn)
+  var stubMat   = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
+  var partitionMat = new T.MeshLambertMaterial({ color: 0x8a7a5e, side: T.DoubleSide }); // room-dividing stub walls
+  var woodMat   = new T.MeshLambertMaterial({ color: WOOD_COL });
+  var metalMat  = new T.MeshLambertMaterial({ color: METAL_COL });
+  var tileMat   = new T.MeshLambertMaterial({ color: TILE_COL });
+  var grassMat  = new T.MeshLambertMaterial({ color: GRASS_COL });
+  var grassMat2 = new T.MeshLambertMaterial({ color: GRASS_COL2 });
+  var courtGrassMat = new T.MeshLambertMaterial({ color: COURT_GRASS_COL });
+  var bankMat   = new T.MeshLambertMaterial({ color: BANK_COL });
+  var wellMat   = new T.MeshBasicMaterial({ color: 0x2e6a7a });
+
+  /* ---- footprint constants (metres) -------------------------------- */
+  var OW = 16.5;      // outer curtain wall half-extent (33m side)
+  var WT = 1.6;        // wall thickness
+  var WH = 10.6;       // wall height to the wall-walk
+  var MER = 1.3;        // merlon height
+
+  var CORNER_R = 4.6, CORNER_H = 17.6, CORNER_ROOF_H = 2.7;
+  var MID_W = 7.2, MID_PROJ = 4.2, MID_H = 13.6, MID_ROOF_H = 2.3;
+  var GATE_W = 6.3, GATE_PROJ = 4.8, GATE_H = 15.4, GATE_ROOF_H = 2.5, GATE_GAP = 4.6;
+
+  var INNER = OW - WT; // inner wall face
+
+  /* ---- fade group registry ------------------------------------------ */
+  var wallN = makeFadeGroup('wallN', {x:0,z:-1}, false, STONE_WALL);
+  var wallS = makeFadeGroup('wallS', {x:0,z:1},  false, STONE_WALL);
+  var wallE = makeFadeGroup('wallE', {x:1,z:0},  false, STONE_WALL);
+  var wallW = makeFadeGroup('wallW', {x:-1,z:0}, false, STONE_WALL);
+
+  var tNE = makeFadeGroup('towerNE', norm(1,-1),  false, STONE_WALL_V);
+  var tNW = makeFadeGroup('towerNW', norm(-1,-1), false, STONE_WALL_V);
+  var tSE = makeFadeGroup('towerSE', norm(1,1),   false, STONE_WALL_V);
+  var tSW = makeFadeGroup('towerSW', norm(-1,1),  false, STONE_WALL_V);
+
+  var tS  = makeFadeGroup('towerS_postern', {x:0,z:1},  false, STONE_WALL_V);
+  var tE  = makeFadeGroup('towerE_mid',     {x:1,z:0},  false, STONE_WALL_V);
+  var tW  = makeFadeGroup('towerW_mid',     {x:-1,z:0}, false, STONE_WALL_V);
+  var tG1 = makeFadeGroup('gateTowerW', norm(-0.32,-1), false, STONE_WALL_V);
+  var tG2 = makeFadeGroup('gateTowerE', norm(0.32,-1),  false, STONE_WALL_V);
+
+  var roofS = makeFadeGroup('roofS', {x:0,z:1},  true, ROOF_COL);
+  var roofE = makeFadeGroup('roofE', {x:1,z:0},  true, ROOF_COL);
+  var roofW = makeFadeGroup('roofW', {x:-1,z:0}, true, ROOF_COL);
+  var roofN = makeFadeGroup('roofN', {x:0,z:-1}, true, ROOF_COL);
+  var roofCaps = makeFadeGroup('roofCaps', null, true, ROOF_COL); // conical tower roofs (no direction test)
+
+  function norm(x,z){ var l = Math.hypot(x,z)||1; return {x:x/l, z:z/l}; }
+
+  /* -------------------------------------------------------------- *
+   * curtain walls with crenellations
+   * -------------------------------------------------------------- */
+  function addCrenellations(target, mat, cx, cz, length, ry, topY, thickness){
+    var merlonW = 1.15, gapW = 1.05, mt = thickness*0.72;
+    var period = merlonW + gapW;
+    var count = Math.max(1, Math.floor(length/period));
+    var start = -(count*period)/2 + merlonW/2;
+    var co = Math.cos(ry), si = Math.sin(ry);
+    for (var i=0;i<count;i++){
+      var lx = start + i*period;
+      var wx = cx + lx*co, wz = cz - lx*si;
+      var m = mkBox(merlonW, MER, mt, mat);
+      place(m, wx, topY + MER/2, wz, ry);
+      target.add(m);
+    }
+  }
+  function addWindows(target, mat, cx, cz, length, ry, midY, thickness, windows){
+    var co = Math.cos(ry), si = Math.sin(ry);
+    (windows||[]).forEach(function(w){
+      var win = mkBox(w.w, w.h, thickness*1.05, mat);
+      var wx = cx + w.x*co, wz = cz - w.x*si;
+      place(win, wx, midY + (w.dy||0), wz, ry);
+      target.add(win);
+    });
+  }
+  function buildStraightWall(fg, cx, cz, length, ry, windows){
+    var wall = mkBox(length, WH, WT, fg.mat);
+    place(wall, cx, WH/2, cz, ry);
+    fg.group.add(wall);
+    addCrenellations(fg.group, fg.mat, cx, cz, length, ry, WH, WT);
+    if (windows) addWindows(fg.group, windowMat, cx, cz, length, ry, WH*0.62, WT, windows);
+  }
+
+  // North wall: split either side of the gatehouse gap
+  var halfGate = GATE_GAP/2 + GATE_W; // where the solid wall resumes past the twin towers
+  var nSegLen = OW - halfGate;
+  buildStraightWall(wallN, -(halfGate + nSegLen/2), -OW, nSegLen, 0, [{x:-nSegLen*0.25,w:1.5,h:2.6,dy:1.0},{x:nSegLen*0.15,w:1.3,h:2.2,dy:1.0}]);
+  buildStraightWall(wallN,  (halfGate + nSegLen/2), -OW, nSegLen, 0, [{x:nSegLen*0.25,w:1.5,h:2.6,dy:1.0},{x:-nSegLen*0.15,w:1.3,h:2.2,dy:1.0}]);
+
+  // South wall: continuous, postern tower sits proud of it, plus door slot
+  buildStraightWall(wallS, 0, OW, 2*OW, Math.PI, [{x:-9.5,w:2.2,h:3.4,dy:1.4},{x:9.5,w:2.2,h:3.4,dy:1.4}]);
+
+  // East wall: has the chapel bulge (built in courtyard section) + windows
+  buildStraightWall(wallE, OW, 0, 2*OW, -Math.PI/2, [
+    {x:-8.0,w:1.6,h:3.2,dy:1.2},{x:-3.0,w:1.6,h:3.2,dy:1.2},
+    {x:3.0,w:1.6,h:3.4,dy:1.2},{x:8.0,w:1.8,h:3.6,dy:1.0}
+  ]);
+  // chapel bulge: curtain wall projects 2.7m toward the moat here
+  (function(){
+    var bulgeCz = -OW*0.32, bulgeSpan = 6.4, bulgeProj = 2.7;
+    var bx = OW + bulgeProj/2;
+    var b = mkBox(bulgeProj + WT, WH, bulgeSpan, wallE.mat);
+    place(b, bx - WT/2, WH/2, bulgeCz, 0);
+    wallE.group.add(b);
+    addCrenellations(wallE.group, wallE.mat, OW+bulgeProj, bulgeCz, bulgeSpan, -Math.PI/2, WH, WT);
+    addCrenellations(wallE.group, wallE.mat, bx-WT/2, bulgeCz-bulgeSpan/2-0.05, bulgeProj, 0, WH, WT*0.7);
+    addCrenellations(wallE.group, wallE.mat, bx-WT/2, bulgeCz+bulgeSpan/2+0.05, bulgeProj, Math.PI, WH, WT*0.7);
+    var win = mkBox(1.6,3.0,0.3, windowMat);
+    place(win, OW+bulgeProj-0.05, WH*0.6, bulgeCz, -Math.PI/2);
+    wallE.group.add(win);
+  })();
+
+  // West wall: continuous, no windows (Bodiam's blind west face)
+  buildStraightWall(wallW, -OW, 0, 2*OW, Math.PI/2, []);
+
+  /* -------------------------------------------------------------- *
+   * round corner towers
+   * -------------------------------------------------------------- */
+  function buildCornerTower(fg, cx, cz){
+    var shaft = mkCyl(CORNER_R, CORNER_R*1.06, CORNER_H, 16, fg.mat);
+    place(shaft, cx, CORNER_H/2, cz);
+    fg.group.add(shaft);
+    var plinth = mkCyl(CORNER_R*1.1, CORNER_R*1.22, 1.2, 16, fg.mat);
+    place(plinth, cx, 0.6, cz);
+    fg.group.add(plinth);
+    var n = 14;
+    for (var i=0;i<n;i+=2){
+      var a = (i/n)*Math.PI*2;
+      var m = mkBox(CORNER_R*0.32, MER, CORNER_R*0.32, fg.mat);
+      place(m, cx+Math.cos(a)*CORNER_R, CORNER_H+MER/2, cz+Math.sin(a)*CORNER_R, -a);
+      fg.group.add(m);
+    }
+    // arrow-loop windows, 3 storeys
+    for (var s=0;s<3;s++){
+      for (var k=0;k<4;k++){
+        var ang = k*Math.PI/2 + Math.PI/4;
+        var wm = mkBox(0.4, 1.6, 0.5, windowMat);
+        place(wm, cx+Math.cos(ang)*CORNER_R*0.98, 3.2+s*4.6, cz+Math.sin(ang)*CORNER_R*0.98, -ang);
+        fg.group.add(wm);
+      }
+    }
+    var roof = mkCone(CORNER_R*1.18, CORNER_ROOF_H, 16, roofCaps.mat);
+    place(roof, cx, CORNER_H+MER+CORNER_ROOF_H/2, cz);
+    roofCaps.group.add(roof);
+  }
+  buildCornerTower(tNE, OW, -OW);
+  buildCornerTower(tNW, -OW, -OW);
+  buildCornerTower(tSE, OW, OW);
+  buildCornerTower(tSW, -OW, OW);
+  // exterior structure tooltips (always pickable, not gated by reveal)
+  var TOWER_PICK = CORNER_R*2.5;
+  registerPick(pickables, 'structure', -OW, CORNER_H/2, -OW, TOWER_PICK, CORNER_H, TOWER_PICK,
+    '北西塔 Northwest Tower', '各階に暖炉と厠(ガーダローブ)を備えた三層の円塔。伝承では牢獄塔とも呼ばれる。');
+  registerPick(pickables, 'structure', OW, CORNER_H/2, -OW, TOWER_PICK, CORNER_H, TOWER_PICK,
+    '北東塔 Northeast Tower', '三層の円塔。礼拝堂を収めるため東の城壁がここで堀側へ張り出す。');
+  registerPick(pickables, 'structure', OW, CORNER_H/2, OW, TOWER_PICK, CORNER_H, TOWER_PICK,
+    '南東塔 Southeast Tower', '三層の円塔。各階に矢狭間(アロー・ループ)を持つ。');
+  registerPick(pickables, 'structure', -OW, CORNER_H/2, OW, TOWER_PICK, CORNER_H, TOWER_PICK,
+    '南西塔 Southwest Tower', '地下に井戸を持ち、館全体に水を供給した円塔。');
+
+  /* -------------------------------------------------------------- *
+   * rectangular mid-wall towers (E / W / S-postern)
+   * -------------------------------------------------------------- */
+  function buildMidTower(fg, cx, cz, ry, opts){
+    opts = opts || {};
+    var h = opts.h || MID_H, roofH = opts.roofH || MID_ROOF_H, w = opts.w || MID_W, proj = opts.proj || MID_PROJ;
+    var body = mkBox(w, h, proj, fg.mat);
+    place(body, cx, h/2, cz, ry);
+    fg.group.add(body);
+    addCrenellations(fg.group, fg.mat, cx, cz, w, ry, h, proj);
+    var roof = mkCone(Math.max(w,proj)*0.72, roofH, 4, roofCaps.mat);
+    roof.rotation.y = Math.PI/4 + ry;
+    place(roof, cx, h+MER+roofH/2, cz);
+    roofCaps.group.add(roof);
+    if (opts.window){
+      var win = mkBox(1.6, 2.8, 0.35, windowMat);
+      var dz = opts.window.outward ? proj/2 : 0;
+      var co=Math.cos(ry), si=Math.sin(ry);
+      place(win, cx+dz*si, h*0.5, cz+dz*co, ry);
+      fg.group.add(win);
+    }
+  }
+  // south postern tower: proud of south wall, drawbridge + machicolation implied by a lip
+  buildMidTower(tS, 0, OW+MID_PROJ/2-0.4, Math.PI, {window:{outward:true}});
+  var posternLip = mkBox(MID_W*0.9, 0.5, 0.9, tS.mat);
+  place(posternLip, 0, MID_H+0.2, OW+MID_PROJ-0.3, Math.PI);
+  tS.group.add(posternLip);
+  registerPick(pickables, 'structure', 0, MID_H/2, OW+MID_PROJ/2-0.4, MID_W*1.5, MID_H, MID_PROJ*2.2,
+    'ポスタン塔 Postern Tower', '南壁中央の裏門。跳ね橋と木橋で堀の南岸と結ばれる。');
+  // east & west mid towers
+  buildMidTower(tE, OW+MID_PROJ/2-0.4, 0, -Math.PI/2, {window:{outward:true}});
+  buildMidTower(tW, -(OW+MID_PROJ/2-0.4), 0, Math.PI/2, {});
+  registerPick(pickables, 'structure', OW+MID_PROJ/2-0.4, MID_H/2, 0, 7, MID_H, 7,
+    '中間塔 Mid-wall Tower', '城壁の中間に張り出す方形塔。側面からの攻撃に対する防御を強化する。');
+  registerPick(pickables, 'structure', -(OW+MID_PROJ/2-0.4), MID_H/2, 0, 7, MID_H, 7,
+    '中間塔 Mid-wall Tower', '城壁の中間に張り出す方形塔。側面からの攻撃に対する防御を強化する。');
+
+  /* -------------------------------------------------------------- *
+   * twin gatehouse towers (north)
+   * -------------------------------------------------------------- */
+  function buildGateTower(fg, cx, cz){
+    var body = mkBox(GATE_W, GATE_H, GATE_PROJ, fg.mat);
+    place(body, cx, GATE_H/2, cz, 0);
+    fg.group.add(body);
+    // machicolated lip near top (jutting course over the gate)
+    var lip = mkBox(GATE_W*1.08, 0.6, GATE_PROJ*1.1, fg.mat);
+    place(lip, cx, GATE_H-0.5, cz, 0);
+    fg.group.add(lip);
+    addCrenellations(fg.group, fg.mat, cx, cz, GATE_W, 0, GATE_H, GATE_PROJ);
+    var roof = mkCone(GATE_W*0.62, GATE_ROOF_H, 4, roofCaps.mat);
+    roof.rotation.y = Math.PI/4;
+    place(roof, cx, GATE_H+MER+GATE_ROOF_H/2, cz);
+    roofCaps.group.add(roof);
+    for (var s=0;s<3;s++){
+      var wm = mkBox(0.5,1.6,0.4, windowMat);
+      place(wm, cx, 3.4+s*4.2, cz-GATE_PROJ/2+0.02, 0);
+      fg.group.add(wm);
+    }
+  }
+  var gateCx = GATE_GAP/2 + GATE_W/2;
+  var gateCz = -(OW + GATE_PROJ/2 - 1.0);
+  buildGateTower(tG1, -gateCx, gateCz);
+  buildGateTower(tG2,  gateCx, gateCz);
+  registerPick(pickables, 'structure', 0, GATE_H/2, gateCz, 2*gateCx+GATE_W+1, GATE_H, GATE_PROJ*1.7,
+    'ゲートハウス Gatehouse', '双塔式の主門。通路天井には殺人孔があり、かつて3基の木製ポートカリスが備わっていた。');
+  // gate arch lintel spanning the passage, with a portcullis grid hanging in the opening
+  var lintel = mkBox(GATE_GAP+1.2, 1.4, GATE_PROJ*0.9, tG1.mat);
+  place(lintel, 0, GATE_H*0.62, gateCz, 0);
+  tG1.group.add(lintel);
+  (function buildPortcullis(){
+    var pg = new T.Group();
+    var barW = 0.12, gh = GATE_H*0.5, gw = GATE_GAP*0.72;
+    for (var i=-3;i<=3;i++){
+      pg.add(place(mkBox(barW, gh, barW, metalMat), i*(gw/6), gh/2+0.3, gateCz+GATE_PROJ*0.32));
+    }
+    for (var j=0;j<4;j++){
+      pg.add(place(mkBox(gw, barW, barW, metalMat), 0, 0.6+j*(gh/3.2), gateCz+GATE_PROJ*0.32));
+    }
+    tG1.group.add(pg);
+  })();
+  // twin merlons/gate flag posts small timber gate doors (closed, in the recess)
+  var gateDoor = mkBox(GATE_GAP*0.9, GATE_H*0.42, 0.3, woodMat);
+  place(gateDoor, 0, GATE_H*0.21, gateCz+GATE_PROJ*0.44, 0);
+  interiorGroup.add(gateDoor);
+
+  /* -------------------------------------------------------------- *
+   * courtyard lawn (centre only) + wing stone floors (one step up) +
+   * wing roofs
+   * -------------------------------------------------------------- *
+   * Bodiam's four ranges each occupy a ROOM_DEPTH-deep strip against the
+   * inside of the curtain wall; only the residual central rectangle is
+   * open lawn. The wing floors sit WING_FLOOR_Y above the lawn so the
+   * "building footprint" reads clearly even before any walls are drawn. */
+  var ROOM_DEPTH = 7.0;
+  var COURT_HALF = INNER - ROOM_DEPTH;   // half-extent of the central lawn
+  var WING_FLOOR_Y = 0.16;               // top surface of the wing stone floors
+
+  var courtyard = mkBox(2*COURT_HALF, 0.32, 2*COURT_HALF, courtGrassMat);
+  place(courtyard, 0, -0.16, 0);
+  interiorGroup.add(courtyard);
+
+  function wingFloor(x0,x1,z0,z1){
+    var f = mkBox(x1-x0, 0.32, z1-z0, floorMat);
+    place(f, (x0+x1)/2, WING_FLOOR_Y-0.16, (z0+z1)/2);
+    interiorGroup.add(f);
+  }
+  wingFloor(-INNER, INNER, COURT_HALF, INNER);              // south wing floor
+  wingFloor(-INNER, INNER, -INNER, -COURT_HALF);             // north wing floor
+  wingFloor(COURT_HALF, INNER, -COURT_HALF, COURT_HALF);     // east wing floor
+  wingFloor(-INNER, -COURT_HALF, -COURT_HALF, COURT_HALF);   // west wing floor
+
+  function leanToRoof(mat, spanAxis, spanA, spanB, outerCoord, innerCoord, outerY, innerY){
+    var run = outerCoord - innerCoord;
+    var rise = outerY - innerY;
+    var slant = Math.hypot(run, rise);
+    var angle = Math.atan2(rise, Math.abs(run));
+    var spanLen = Math.abs(spanB - spanA) + 1.4;
+    var th = 0.45;
+    var geo = spanAxis === 'x'
+      ? new T.BoxGeometry(spanLen, th, slant)
+      : new T.BoxGeometry(slant, th, spanLen);
+    var mesh = new T.Mesh(geo, mat);
+    var midOI = (outerCoord+innerCoord)/2, midY = (outerY+innerY)/2, midSpan = (spanA+spanB)/2;
+    if (spanAxis === 'x'){
+      mesh.position.set(midSpan, midY, midOI);
+      mesh.rotation.x = (run > 0 ? -angle : angle);
+    } else {
+      mesh.position.set(midOI, midY, midSpan);
+      mesh.rotation.z = (run > 0 ? angle : -angle);
+    }
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  var eaveH = WH - 0.35, ridgeInH = WH - 3.1;
+  var INNER_N = -INNER, RIDGE_N = -(INNER-ROOM_DEPTH); // north-side coords are negative Z
+  var INNER_W = -INNER, RIDGE_W = -(INNER-ROOM_DEPTH); // west-side coords are negative X
+  // South wing roof (Great Hall / pantry / kitchen) -- outer edge at +Z (wall), inner at smaller +Z
+  roofS.group.add(leanToRoof(roofS.mat, 'x', -10.6, 10.6, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
+  // East wing roof (chapel / lord's apartments) -- outer edge at +X (wall), inner at smaller +X
+  roofE.group.add(leanToRoof(roofE.mat, 'z', -10.6, 10.6, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
+  // West wing roof (retainers' hall) -- outer edge at -X (wall), inner toward courtyard
+  roofW.group.add(leanToRoof(roofW.mat, 'z', -10.6, 10.6, INNER_W, RIDGE_W, eaveH, ridgeInH));
+  // North wing roof (stores / stable, either side of the gate passage) -- outer edge at -Z
+  roofN.group.add(leanToRoof(roofN.mat, 'x', -10.6, -halfGate+0.4, INNER_N, RIDGE_N, eaveH, ridgeInH));
+  roofN.group.add(leanToRoof(roofN.mat, 'x', halfGate-0.4, 10.6, INNER_N, RIDGE_N, eaveH, ridgeInH));
+
+  /* -------------------------------------------------------------- *
+   * chimneys (Great Hall, kitchen, lord's chambers, NW tower)
+   * -------------------------------------------------------------- */
+  function chimney(x,z,h,parentGroup,mat){
+    var c = mkBox(0.9,h,0.9, mat||tileMat);
+    place(c, x, h/2, z);
+    (parentGroup||interiorGroup).add(c);
+    var cap = mkBox(1.2,0.3,1.2, mat||tileMat);
+    place(cap, x, h+0.15, z);
+    (parentGroup||interiorGroup).add(cap);
+  }
+  chimney(6.4, INNER-1.5, WH+2.6, roofS.group, roofS.mat);   // great hall
+  chimney(-9.0, INNER-1.2, WH+2.4, roofS.group, roofS.mat);  // kitchen
+  chimney(INNER-1.4, 8.0, WH+2.4, roofE.group, roofE.mat);   // lord's apartments
+  chimney(-OW+2.6, -OW+2.6, CORNER_H+2.6, tNW.group, tNW.mat); // NW tower
+
+  /* -------------------------------------------------------------- *
+   * interior partition walls (ruin-height stubs marking room-to-room
+   * boundaries), low facade stubs along the courtyard-facing side of
+   * each wing, end-cap walls near the corner towers, + furniture
+   * (boxes / cylinders) + labels. All sit on top of the wing stone
+   * floor (WING_FLOOR_Y above the lawn).
+   * -------------------------------------------------------------- */
+  var PARTITION_H = 3.0;  // room-to-room dividers
+  var FACADE_H    = 1.15; // low corridor-facing wall along the courtyard edge
+  function partitionWall(x,z,len,ry,h){
+    h = h || PARTITION_H;
+    var m = mkBox(len, h, 0.45, partitionMat);
+    place(m, x, WING_FLOOR_Y + h/2, z, ry);
+    interiorGroup.add(m);
+    return m;
+  }
+  function facadeStub(cx,cz,len,ry){
+    var m = mkBox(len, FACADE_H, 0.4, stubMat);
+    place(m, cx, WING_FLOOR_Y + FACADE_H/2, cz, ry);
+    interiorGroup.add(m);
+    return m;
+  }
+  // kept for readability at call sites below (alias of partitionWall)
+  function stub(x,z,len,ry){ return partitionWall(x,z,len,ry); }
+  function furnitureBox(x,y,z,w,h,d,mat,ry){
+    var m = mkBox(w,h,d,mat);
+    place(m, x, WING_FLOOR_Y + y + h/2, z, ry||0);
+    interiorGroup.add(m);
+    return m;
+  }
+  // room hover/tap tooltip volumes -- an invisible box spanning the room's
+  // floor footprint + a generous height, registered into `pickables` (see
+  // registerPick in section 0). Replaces the old always-on sprite label.
+  function pickRoom(x0,x1,z0,z1,h,name,desc){
+    registerPick(pickables, 'room', (x0+x1)/2, WING_FLOOR_Y+h/2, (z0+z1)/2, Math.abs(x1-x0), h, Math.abs(z1-z0), name, desc);
+  }
+
+  // ---- South wing: Great Hall (east), screens passage, kitchen (west)
+  var hallX0=-0.4, hallX1=10.4, wingZ0=INNER-ROOM_DEPTH, wingZ1=INNER;
+  facadeStub(0, COURT_HALF, 2*INNER, 0);                        // courtyard-facing corridor line
+  partitionWall(-INNER+0.3, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // west end-cap (near SW tower)
+  partitionWall( INNER-0.3, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // east end-cap (near SE tower)
+  stub(-2.0, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // divides hall / passage
+  stub(-3.6, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // divides passage / kitchen
+  var dais = furnitureBox(8.6, 0, (wingZ0+wingZ1)/2, 3.0, 0.4, 5.4, woodMat);
+  furnitureBox(3.4, 0, (wingZ0+wingZ1)/2-0.6, 4.4, 0.7, 1.0, woodMat);
+  furnitureBox(0.6, 0, (wingZ0+wingZ1)/2+0.6, 3.4, 0.7, 0.9, woodMat);
+  var hearthHall = furnitureBox(8.2, 0, wingZ1-0.35, 2.2, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  var hearthGlow = new T.PointLight(0xff7a33, 1.1, 6, 2);
+  hearthGlow.position.set(8.2, WING_FLOOR_Y+1.0, wingZ1-0.7);
+  interiorGroup.add(hearthGlow);
+  pickRoom(-2.0, INNER-0.3, wingZ0, wingZ1, 6.0, '大広間 Great Hall',
+    '領主一家が食事した、幅7m・奥行12mの2階分吹き抜けの広間。東端に領主の台座(ディス)があった。');
+  pickRoom(-3.6, -2.0, wingZ0, wingZ1, 4.0, 'スクリーンズパッセージ Screens Passage',
+    '大広間と厨房を仕切る配膳通路。奥にパントリーとバトリーが続く。');
+  furnitureBox(-7.4, 0, wingZ0+0.9, 2.6, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(-7.4, 0, wingZ1-0.9, 2.6, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(-8.0, 0, (wingZ0+wingZ1)/2, 3.2, 0.75, 1.2, woodMat);
+  pickRoom(-INNER+0.3, -3.6, wingZ0, wingZ1, 4.0, '厨房 Kitchen',
+    '南棟西端。南北両壁に大きな炉を備えた調理場。');
+
+  // ---- East wing: chapel (north), lord's/lady's apartments (south)
+  var eWingX0=INNER-ROOM_DEPTH, eWingX1=INNER, eZ0=-10.4, eZ1=10.4;
+  facadeStub(COURT_HALF, 0, 2*INNER, Math.PI/2);                        // courtyard-facing corridor line
+  partitionWall((eWingX0+eWingX1)/2, -INNER+0.3, ROOM_DEPTH, 0);         // north end-cap (near NE tower)
+  partitionWall((eWingX0+eWingX1)/2,  INNER-0.3, ROOM_DEPTH, 0);         // south end-cap (near SE tower)
+  stub((eWingX0+eWingX1)/2, -0.6, ROOM_DEPTH, 0);
+  // chapel floor: two-colour Flemish-tile checker (canvas texture, repeat-tiled)
+  var chapelCheckerTex = makeCheckerTexture('#8f5a3c', '#ddd0a8', 6);
+  var chapelFloorMat = new T.MeshLambertMaterial({ map: chapelCheckerTex });
+  var chapelFloor = mkBox(ROOM_DEPTH-0.6, 0.08, 9.0, chapelFloorMat);
+  place(chapelFloor, (eWingX0+eWingX1)/2, WING_FLOOR_Y+0.04, -5.0);
+  interiorGroup.add(chapelFloor);
+  furnitureBox(eWingX1-0.8, 0, -8.6, 0.9, 1.1, 1.6, new T.MeshLambertMaterial({color:0xd8d0b8}));
+  furnitureBox(eWingX0+1.3, 0, -6.0, 2.2, 0.6, 0.7, woodMat);
+  furnitureBox(eWingX0+1.3, 0, -4.0, 2.2, 0.6, 0.7, woodMat);
+  furnitureBox(eWingX0+1.3, 0, -2.0, 2.2, 0.6, 0.7, woodMat);
+  pickRoom(eWingX0, eWingX1, -INNER+0.3, -0.6, 4.5, '礼拝堂 Chapel',
+    '東棟北寄り。フランドル風タイルの床。堀側の東壁はここで張り出している。');
+  furnitureBox(eWingX0+1.8, 0, 4.0, 2.6, 0.7, 3.6, woodMat);
+  furnitureBox(eWingX1-0.7, 0, 8.6, 2.0, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(eWingX0+0.9, 0, 8.4, 1.0, 0.8, 0.6, new T.MeshLambertMaterial({color:0x3a2a1a}));
+  pickRoom(eWingX0, eWingX1, -0.6, INNER-0.3, 4.5, "領主居室 Lord's / Lady's Apartments",
+    '東棟南寄り。東向きの窓と各階の暖炉を備えた領主一家の私室。');
+
+  // ---- West wing: retainers' hall (blind outer wall, no hearth)
+  var wWingX0=-INNER, wWingX1=-(INNER-ROOM_DEPTH), wZ0=-10.4, wZ1=10.4;
+  facadeStub(-COURT_HALF, 0, 2*INNER, Math.PI/2);                       // courtyard-facing corridor line
+  partitionWall((wWingX0+wWingX1)/2, -INNER+0.3, ROOM_DEPTH, 0);        // north end-cap (near NW tower)
+  partitionWall((wWingX0+wWingX1)/2,  INNER-0.3, ROOM_DEPTH, 0);        // south end-cap (near SW tower)
+  partitionWall((wWingX0+wWingX1)/2, 6.3, ROOM_DEPTH, 0);               // divides hall / servants' kitchen
+  furnitureBox((wWingX0+wWingX1)/2, 0, -5.0, 5.0, 0.7, 1.0, woodMat);
+  furnitureBox((wWingX0+wWingX1)/2, 0, 0.0, 5.0, 0.7, 1.0, woodMat);
+  furnitureBox((wWingX0+wWingX1)/2, 0, 5.0, 5.0, 0.7, 1.0, woodMat);
+  pickRoom(wWingX0, wWingX1, -INNER+0.3, 6.3, 4.0, "従者ホール Retainers' Hall",
+    '西棟。外壁側には窓も暖炉もない、使用人たちの広間。');
+  furnitureBox(wWingX1-1.0, 0, 8.0, 1.6, 0.9, 1.6, woodMat); // small servants' kitchen corner
+  pickRoom(wWingX0, wWingX1, 6.3, INNER-0.3, 3.5, "従者厨房 Servants' Kitchen",
+    '従者ホール南端の小さな調理場。');
+
+  // ---- North wing: stores (east of gate) & stable (west of gate)
+  var nWingZ0=-INNER, nWingZ1=-(INNER-ROOM_DEPTH);
+  facadeStub(0, -COURT_HALF, 2*INNER, 0);                               // courtyard-facing corridor line
+  partitionWall(-INNER+0.3, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2); // west end-cap (near NW tower)
+  partitionWall( INNER-0.3, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2); // east end-cap (near NE tower)
+  partitionWall(0, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2);          // divides stores / stable, centred on the gate passage
+  for (var b=0;b<3;b++){
+    furnitureBox(3.0+b*2.0, 0, (nWingZ0+nWingZ1)/2, 1.0, 1.2, 1.0, woodMat);
+  }
+  pickRoom(0, INNER-0.3, nWingZ0, nWingZ1, 3.5, '倉庫・宿舎 Stores',
+    '北棟東側、ゲートハウスの東隣に位置する倉庫兼宿舎。');
+  furnitureBox(-6.5, 0, (nWingZ0+nWingZ1)/2, 3.4, 0.5, 1.0, new T.MeshLambertMaterial({color:0x4a3a1e}));
+  furnitureBox(-4.0, 0, (nWingZ0+nWingZ1)/2, 0.6, 0.9, 0.6, new T.MeshLambertMaterial({color:0xc8b878}));
+  pickRoom(-INNER+0.3, 0, nWingZ0, nWingZ1, 3.5, '厩舎 Stable',
+    '北棟西側、ゲートハウスの西隣に位置する厩舎。');
+
+  // ---- Well, at the foot of the SW tower (on the south-wing stone floor
+  // so it reads clearly, uncovered, in the top-down view). A flat paved
+  // curb (dark stone) + a round water disc (blue) + a torus kerb ring
+  // around the rim -- the torus leaves the water visible through its
+  // centre, unlike a solid cylinder which would just hide it.
+  var WELL_X = -(INNER-2.3), WELL_Z = (INNER-1.9);
+  var wellMatDark = new T.MeshLambertMaterial({color:STONE_DARK});
+  var wellPad = mkCyl(1.75,1.75,0.1,24, wellMatDark);
+  place(wellPad, WELL_X, WING_FLOOR_Y+0.05, WELL_Z);
+  interiorGroup.add(wellPad);
+  var well = new T.Mesh(new T.CircleGeometry(1.15, 28), wellMat);
+  well.rotation.x = -Math.PI/2;
+  well.castShadow = false; well.receiveShadow = false;
+  place(well, WELL_X, WING_FLOOR_Y+0.13, WELL_Z);
+  interiorGroup.add(well);
+  var wellKerb = new T.Mesh(new T.TorusGeometry(1.18, 0.16, 10, 28), wellMatDark);
+  wellKerb.rotation.x = Math.PI/2;
+  place(wellKerb, WELL_X, WING_FLOOR_Y+0.28, WELL_Z);
+  interiorGroup.add(wellKerb);
+  registerPick(pickables, 'room', WELL_X, WING_FLOOR_Y+1.0, WELL_Z, 3.4, 2.0, 3.4, '井戸 Well',
+    '南西塔の地下に実在した井戸。館全体の生活用水をここから汲み上げた。');
+
+  /* -------------------------------------------------------------- *
+   * moat, graded bank, island, approaches
+   * -------------------------------------------------------------- *
+   * The moat/bank/island/ground assembly itself is castle-agnostic (see
+   * buildWaterMoatSystem, section 0.5) -- only the numbers below are
+   * Bodiam-specific. GROUND_Y is the outer field height; WATER_Y sits
+   * ~1m below it (spec: 0.8-1.2m) so the graded banks read as a real
+   * slope down into the moat rather than a flat plane dropped on top of
+   * the grass. Bridge/octagon height relationships are untouched -- the
+   * bridges still run from the *top* of the outer bank (still at
+   * MOAT_OUTER, GROUND_Y) to the island, just as before; only the water
+   * itself, and the ground it's cut into, moved. */
+  var ISLAND_HALF = OW + 3.2;
+  var MOAT_WIDTH = 27;
+  var MOAT_OUTER = ISLAND_HALF + MOAT_WIDTH;
+  var GROUND_Y = -0.55;
+  var WATER_Y = GROUND_Y - 1.0; // 1.0m below the field -- within the 0.8-1.2m spec
+
+  var moatSys = buildWaterMoatSystem({
+    group: group,
+    groundY: GROUND_Y, waterY: WATER_Y,
+    islandHalf: ISLAND_HALF, islandY: 0.02,
+    moatOuterHalf: MOAT_OUTER,
+    bankWidthOut: 4.2, bankWidthIn: 3.0,
+    groundMat: grassMat, islandMat: grassMat2,
+    waterColor: WATER_COL,
+    bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL
+  });
+  var waterMat = moatSys.waterMat;
+
+  // north approach: bank -> timber bridge -> octagon island -> drawbridge -> gatehouse
+  var octR = 3.3, octZ = -(ISLAND_HALF + MOAT_WIDTH*0.42);
+  var oct = new T.Mesh(new T.CircleGeometry(octR, 8), bankMat);
+  oct.rotation.x = -Math.PI/2; oct.rotation.y = Math.PI/8;
+  place(oct, 0, 0.02, octZ);
+  group.add(oct);
+  // the octagon platform also meets the water on a slope, not a hard disc
+  // edge, using the same vertex-coloured ramp technique as the main banks
+  var octSkirt = buildCircularSkirt(0, octZ, octR, octR+1.8, 0.02, WATER_Y,
+    new T.Color(BANK_COL), new T.Color(BANK_MID_COL), new T.Color(BANK_EDGE_COL));
+  group.add(octSkirt);
+
+  var b1z0 = -MOAT_OUTER+1.0, b1z1 = octZ-octR;
+  var bridge1 = mkBox(2.6, 0.35, Math.abs(b1z1-b1z0), woodMat);
+  place(bridge1, 0, -0.05, (b1z0+b1z1)/2);
+  group.add(bridge1);
+  var b2z0 = octZ+octR, b2z1 = -(OW+GATE_PROJ-0.6);
+  var bridge2 = mkBox(3.4, 0.3, Math.abs(b2z1-b2z0), woodMat);
+  place(bridge2, 0, -0.02, (b2z0+b2z1)/2);
+  group.add(bridge2);
+
+  // south approach: straight bridge from bank to postern tower
+  var s0 = MOAT_OUTER-1.0, s1 = OW+MID_PROJ-0.4;
+  var bridgeS = mkBox(3.0, 0.3, Math.abs(s0-s1), woodMat);
+  place(bridgeS, 0, -0.02, (s0+s1)/2);
+  group.add(bridgeS);
+
+  // bridge piers: the water is now well below deck height (~1.5m), so
+  // give the two long open-water spans a couple of timber support posts
+  // reaching down to just below the waterline -- purely cosmetic, no
+  // collision/height logic depends on them.
+  function bridgePier(x, z, deckY){
+    var pier = mkCyl(0.22, 0.26, (deckY - (WATER_Y - 0.4)), 8, woodMat);
+    place(pier, x, (deckY + (WATER_Y - 0.4))/2, z);
+    group.add(pier);
+  }
+  [0.35, 0.65].forEach(function(f){
+    var z = b1z0 + (b1z1-b1z0)*f;
+    bridgePier(-0.85, z, -0.05); bridgePier(0.85, z, -0.05);
+  });
+  (function(){
+    var z = s0 + (s1-s0)*0.5;
+    bridgePier(-0.9, z, -0.02); bridgePier(0.9, z, -0.02);
+  })();
+
+  /* -------------------------------------------------------------- *
+   * info payload (room list metadata; not rendered as a standalone
+   * legend panel -- room names now surface via the always-on label
+   * toggle and the hover tooltip, both driven off `pickables` below)
+   * -------------------------------------------------------------- */
+  var info = {
+    rooms: [
+      { name:'大広間 (Great Hall)', desc:'南棟東側。2階分の吹き抜け、東端に領主の台座。' },
+      { name:'スクリーンズパッセージ', desc:'大広間と厨房を隔てる通路、配膳室を兼ねる。' },
+      { name:'厨房 (Kitchen)', desc:'南棟西端。南北両壁に大きな炉。' },
+      { name:'礼拝堂 (Chapel)', desc:'東棟北寄り。フランドルタイルの床、2階に領主用オラトリー。' },
+      { name:"領主居室 (Lord's/Lady's Apartments)", desc:'東棟南寄り。東向きの窓、各階に暖炉。' },
+      { name:"従者ホール (Retainers' Hall)", desc:'西棟。外壁側は窓なし、暖炉なし。' },
+      { name:'倉庫・宿舎', desc:'北棟東側、ゲートハウスの東隣。' },
+      { name:'厩舎 (Stable)', desc:'北棟西側、ゲートハウスの西隣。' },
+      { name:'井戸 (Well)', desc:'南西円塔のたもと、南棟の石床上。' }
+    ]
+  };
+
+  /* -------------------------------------------------------------- *
+   * always-on room labels (section 6 toggle). Built from the same
+   * `pickables` list used for hover tooltips -- every 'room' entry gets
+   * a floating text-sprite label above its footprint centre, using the
+   * Japanese name only (text before the first space). Kept in a
+   * dedicated group so visibility can be driven purely by the UI toggle
+   * x reveal threshold each frame (see updateLabelVisibility), without
+   * touching the wall/roof fadeGroups.
+   * -------------------------------------------------------------- */
+  var labelGroup = new T.Group();
+  labelGroup.visible = false;
+  group.add(labelGroup);
+  pickables.forEach(function(p){
+    var pi = p.userData.pickInfo;
+    if (pi.kind !== 'room') return;
+    var shortName = pi.name.split(' ')[0];
+    var spr = makeTextSprite(shortName, 0.85);
+    spr.position.set(p.position.x, p.position.y + 1.0, p.position.z);
+    labelGroup.add(spr);
+  });
+
+  return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
+    pickables: pickables, windowMat: windowMat, waterMats: [waterMat], labelGroup: labelGroup };
+}
+
+/* ====================================================================
+ * 2. castle registry — add more entries here to extend the viewer.
+ *    Each entry's build(THREE) must return
+ *    { group, fadeGroups, interiorGroup, info, pickables, labelGroup,
+ *      windowMat, waterMats }.
+ *
+ *    Country fields are DATA, not UI strings baked into markup: the info
+ *    panel (#castleMeta), the castle <select> options, and any future
+ *    surface all read `country` / `countryJa` / `flag` off the registry
+ *    entry (see applyCastle below) so adding a castle here is enough --
+ *    no template/markup edits needed elsewhere.
+ *      country   : English country name (short, for reference)
+ *      countryJa : Japanese country name as shown in the UI
+ *      flag      : flag emoji shown next to countryJa
+ *      year      : construction year, plain number-as-string (UI appends 年)
+ *
+ *    A castle with its own square moat can build one via
+ *    buildWaterMoatSystem()/buildCircularSkirt() (section 0.5, castle-
+ *    agnostic) rather than hand-rolling ground/island/bank/water meshes
+ *    -- see buildBodiam's "moat, graded bank, island, approaches" block
+ *    for the call shape. A castle with a different water layout (circular
+ *    moat, dry ditch, hilltop/no moat) can skip that helper and build its
+ *    own environment meshes into its own `group` instead.
+ * ==================================================================== */
+var CASTLES = [
+  {
+    id: 'bodiam',
+    name: 'Bodiam Castle',
+    nameJa: 'ボディアム城',
+    country: 'England',
+    countryJa: 'イングランド(イギリス)',
+    flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+    year: '1385',
+    description: '1385年、エドワード・ダリングリッジ卿が築いた水堀に浮かぶ城。四隅に円塔、北に双子塔のゲートハウスを持つ、対称性の高い後期中世城郭建築の代表例。',
+    build: buildBodiam
+  }
+  // 今後の拡張: 他の城を追加する場合はここに { id, name, nameJa, country,
+  // countryJa, flag, year, description, build } を追加するだけでよい。切替
+  // ロジック(applyCastle)と国表示は汎用化されているため、レジストリに追加
+  // すれば自動的にUIに反映される。
+];
+
+/* ====================================================================
+ * 3. scene / renderer setup
+ * ==================================================================== */
+var canvas = document.getElementById('stage');
+var renderer = new T.WebGLRenderer({ canvas:canvas, antialias:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = T.PCFSoftShadowMap;
+
+var scene = new T.Scene();
+// sky is an 8x512 canvas gradient (6 colour stops), repainted every frame
+// from the currently-blended time-of-day state -- see section 3.5. Cheap
+// enough to repaint continuously (skill: threejs-landscape / "sky dome").
+var skyCanvas = document.createElement('canvas');
+skyCanvas.width = 8; skyCanvas.height = 512;
+var skyCtx = skyCanvas.getContext('2d');
+var skyTex = new T.CanvasTexture(skyCanvas);
+scene.background = skyTex;
+scene.fog = new T.Fog(0xcdddE3, 90, 320);
+
+var camera = new T.PerspectiveCamera(42, 1, 0.5, 1000);
+
+var hemi = new T.HemisphereLight(0xdfe9f2, 0x4a4530, 0.65);
+scene.add(hemi);
+var sun = new T.DirectionalLight(0xfff2d8, 1.55);
+sun.position.set(60, 85, 40);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 220;
+sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+sun.shadow.bias = -0.0012;
+scene.add(sun); scene.add(sun.target);
+var fill = new T.AmbientLight(0xffffff, 0.22);
+scene.add(fill);
+
+/* ====================================================================
+ * 3.5 environment layer: time-of-day + weather + background mountains
+ *     + rain/snow particles.
+ *
+ * Built ONCE here, independent of the active castle, so it is reused as
+ * castles are switched (no re-creation / no double-dispose risk). Time
+ * and weather are each a small state machine that cross-fades between a
+ * frozen "from" snapshot and a target preset over TIME_DURATION /
+ * WEATHER_DURATION seconds (threejs-landscape: "time of day is
+ * interpolation, not a switch" -- switching mid-transition freezes the
+ * *current interpolated* values as the new "from", so repeated clicks
+ * never jump).
+ * ==================================================================== */
+function col(hex){ return new T.Color(hex); }
+
+var TIME_STATES = {
+  morning: {
+    sunPos: new T.Vector3(-95, 32, 24), sunColor: col(0xffd9a0), sunIntensity: 1.15,
+    hemiSky: col(0xcfd8e6), hemiGround: col(0x5a4a3a), hemiIntensity: 0.55,
+    ambientColor: col(0xfff2df), ambientIntensity: 0.20,
+    fogColor: col(0xd9c9b0), fogNear: 90, fogFar: 650,
+    sky: [col(0x3f6a92), col(0x7d9dc0), col(0xb9c8c9), col(0xe3c9a0), col(0xf2d9ae), col(0xfbe6c2)],
+    waterColor: col(0x3d6472), windowGlow: 0.0, mountainColor: col(0x93a2a0)
+  },
+  day: {
+    sunPos: new T.Vector3(60, 85, 40), sunColor: col(0xfff2d8), sunIntensity: 1.55,
+    hemiSky: col(0xdfe9f2), hemiGround: col(0x4a4530), hemiIntensity: 0.65,
+    ambientColor: col(0xffffff), ambientIntensity: 0.22,
+    fogColor: col(0xcdddE3), fogNear: 140, fogFar: 900,
+    sky: [col(0x4f8dc7), col(0x7fb1de), col(0xa7c7e2), col(0xbcd7ea), col(0xd3d8c5), col(0xe7e2c9)],
+    waterColor: col(0x2e5b66), windowGlow: 0.0, mountainColor: col(0x7fa898)
+  },
+  dusk: {
+    sunPos: new T.Vector3(-78, 20, -52), sunColor: col(0xff9a56), sunIntensity: 1.05,
+    hemiSky: col(0x5b4a6e), hemiGround: col(0x2c2436), hemiIntensity: 0.48,
+    ambientColor: col(0xffb37a), ambientIntensity: 0.18,
+    fogColor: col(0xaa6f66), fogNear: 90, fogFar: 760,
+    sky: [col(0x1c2350), col(0x3a3468), col(0x7a4f74), col(0xc96a52), col(0xe8935a), col(0xf0b378)],
+    waterColor: col(0x4a4a5c), windowGlow: 0.4, mountainColor: col(0x4a3c52)
+  },
+  night: {
+    sunPos: new T.Vector3(40, 60, -70), sunColor: col(0xaebfe6), sunIntensity: 0.62,
+    hemiSky: col(0x1c2540), hemiGround: col(0x0a0a12), hemiIntensity: 0.40,
+    ambientColor: col(0x8fa0cf), ambientIntensity: 0.15,
+    fogColor: col(0x0b1220), fogNear: 80, fogFar: 560,
+    sky: [col(0x02040c), col(0x050a18), col(0x0a1428), col(0x0d1a34), col(0x111f3c), col(0x182742)],
+    waterColor: col(0x16222e), windowGlow: 1.0, mountainColor: col(0x0a1220)
+  }
+};
+var WEATHER_STATES = {
+  clear:  { sunMul: 1.00, ambientMul: 1.00, fogNearMul: 1.00, fogFarMul: 1.00, skySatMul: 1.00, rain: 0, snow: 0 },
+  cloudy: { sunMul: 0.50, ambientMul: 0.82, fogNearMul: 0.82, fogFarMul: 0.68, skySatMul: 0.42, rain: 0, snow: 0 },
+  rain:   { sunMul: 0.38, ambientMul: 0.78, fogNearMul: 0.70, fogFarMul: 0.56, skySatMul: 0.34, rain: 1, snow: 0 },
+  snow:   { sunMul: 0.58, ambientMul: 0.85, fogNearMul: 0.60, fogFarMul: 0.48, skySatMul: 0.52, rain: 0, snow: 1 }
+};
+
+function cloneTimeState(s){
+  return {
+    sunPos: s.sunPos.clone(), sunColor: s.sunColor.clone(), sunIntensity: s.sunIntensity,
+    hemiSky: s.hemiSky.clone(), hemiGround: s.hemiGround.clone(), hemiIntensity: s.hemiIntensity,
+    ambientColor: s.ambientColor.clone(), ambientIntensity: s.ambientIntensity,
+    fogColor: s.fogColor.clone(), fogNear: s.fogNear, fogFar: s.fogFar,
+    sky: s.sky.map(function(c){ return c.clone(); }),
+    waterColor: s.waterColor.clone(), windowGlow: s.windowGlow, mountainColor: s.mountainColor.clone()
+  };
+}
+function blendTime(dst, a, b, t){
+  dst.sunPos.copy(a.sunPos).lerp(b.sunPos, t);
+  dst.sunColor.copy(a.sunColor).lerp(b.sunColor, t);
+  dst.sunIntensity = a.sunIntensity + (b.sunIntensity - a.sunIntensity) * t;
+  dst.hemiSky.copy(a.hemiSky).lerp(b.hemiSky, t);
+  dst.hemiGround.copy(a.hemiGround).lerp(b.hemiGround, t);
+  dst.hemiIntensity = a.hemiIntensity + (b.hemiIntensity - a.hemiIntensity) * t;
+  dst.ambientColor.copy(a.ambientColor).lerp(b.ambientColor, t);
+  dst.ambientIntensity = a.ambientIntensity + (b.ambientIntensity - a.ambientIntensity) * t;
+  dst.fogColor.copy(a.fogColor).lerp(b.fogColor, t);
+  dst.fogNear = a.fogNear + (b.fogNear - a.fogNear) * t;
+  dst.fogFar = a.fogFar + (b.fogFar - a.fogFar) * t;
+  for (var i=0;i<6;i++) dst.sky[i].copy(a.sky[i]).lerp(b.sky[i], t);
+  dst.waterColor.copy(a.waterColor).lerp(b.waterColor, t);
+  dst.windowGlow = a.windowGlow + (b.windowGlow - a.windowGlow) * t;
+  dst.mountainColor.copy(a.mountainColor).lerp(b.mountainColor, t);
+}
+function cloneWeatherState(s){
+  return { sunMul:s.sunMul, ambientMul:s.ambientMul, fogNearMul:s.fogNearMul, fogFarMul:s.fogFarMul, skySatMul:s.skySatMul, rain:s.rain, snow:s.snow };
+}
+function blendWeather(dst, a, b, t){
+  dst.sunMul = a.sunMul + (b.sunMul - a.sunMul) * t;
+  dst.ambientMul = a.ambientMul + (b.ambientMul - a.ambientMul) * t;
+  dst.fogNearMul = a.fogNearMul + (b.fogNearMul - a.fogNearMul) * t;
+  dst.fogFarMul = a.fogFarMul + (b.fogFarMul - a.fogFarMul) * t;
+  dst.skySatMul = a.skySatMul + (b.skySatMul - a.skySatMul) * t;
+  dst.rain = a.rain + (b.rain - a.rain) * t;
+  dst.snow = a.snow + (b.snow - a.snow) * t;
+}
+
+var TIME_DURATION = 1.6, WEATHER_DURATION = 1.3;
+var CUR_TIME = cloneTimeState(TIME_STATES.day);
+var CUR_WEATHER = cloneWeatherState(WEATHER_STATES.clear);
+var timeTrans = { key:'day', from: cloneTimeState(TIME_STATES.day), to: TIME_STATES.day, t: 1 };
+var weatherTrans = { key:'clear', from: cloneWeatherState(WEATHER_STATES.clear), to: WEATHER_STATES.clear, t: 1 };
+
+// keep the segmented-button UI in sync regardless of caller (real click,
+// or the window.__setEnv debug hook used by the quality-gate script)
+function syncSegUI(groupId, key){
+  var el = document.getElementById(groupId);
+  if (!el) return;
+  Array.prototype.forEach.call(el.querySelectorAll('button'), function(b){
+    b.classList.toggle('active', b.dataset.k === key);
+  });
+}
+function setTimeOfDay(key){
+  syncSegUI('timeSeg', key);
+  if (!TIME_STATES[key] || (key === timeTrans.key && timeTrans.t >= 1)) return;
+  timeTrans.from = cloneTimeState(CUR_TIME); // freeze current interpolated state, not the old preset
+  timeTrans.to = TIME_STATES[key];
+  timeTrans.t = 0;
+  timeTrans.key = key;
+}
+function setWeather(key){
+  syncSegUI('weatherSeg', key);
+  if (!WEATHER_STATES[key] || (key === weatherTrans.key && weatherTrans.t >= 1)) return;
+  weatherTrans.from = cloneWeatherState(CUR_WEATHER);
+  weatherTrans.to = WEATHER_STATES[key];
+  weatherTrans.t = 0;
+  weatherTrans.key = key;
+}
+function stepTransitions(dt){
+  if (timeTrans.t < 1){
+    timeTrans.t = Math.min(1, timeTrans.t + dt / TIME_DURATION);
+    blendTime(CUR_TIME, timeTrans.from, timeTrans.to, smoothstep01(0,1,timeTrans.t));
+  }
+  if (weatherTrans.t < 1){
+    weatherTrans.t = Math.min(1, weatherTrans.t + dt / WEATHER_DURATION);
+    blendWeather(CUR_WEATHER, weatherTrans.from, weatherTrans.to, smoothstep01(0,1,weatherTrans.t));
+  }
+}
+
+var SKY_STOPS_POS = [0, 0.30, 0.52, 0.68, 0.84, 1];
+var _skyOut = [col(0), col(0), col(0), col(0), col(0), col(0)];
+var _tmpGray = col(0);
+function desaturate(c, satMul){
+  if (satMul >= 0.999) return c;
+  var lum = c.r*0.299 + c.g*0.587 + c.b*0.114;
+  _tmpGray.setRGB(lum, lum, lum);
+  c.lerp(_tmpGray, 1 - satMul);
+  return c;
+}
+function paintSky(){
+  var g = skyCtx.createLinearGradient(0,0,0,512);
+  for (var i=0;i<6;i++){
+    _skyOut[i].copy(CUR_TIME.sky[i]);
+    desaturate(_skyOut[i], CUR_WEATHER.skySatMul);
+    g.addColorStop(SKY_STOPS_POS[i], '#' + _skyOut[i].getHexString());
+  }
+  skyCtx.fillStyle = g;
+  skyCtx.fillRect(0,0,8,512);
+  skyTex.needsUpdate = true;
+}
+
+var WARM_GLOW = col(0xffb066);
+function applyEnvironment(){
+  paintSky();
+  sun.position.copy(CUR_TIME.sunPos);
+  sun.color.copy(CUR_TIME.sunColor);
+  sun.intensity = CUR_TIME.sunIntensity * CUR_WEATHER.sunMul;
+  hemi.color.copy(CUR_TIME.hemiSky);
+  hemi.groundColor.copy(CUR_TIME.hemiGround);
+  hemi.intensity = CUR_TIME.hemiIntensity * CUR_WEATHER.ambientMul;
+  fill.color.copy(CUR_TIME.ambientColor);
+  fill.intensity = CUR_TIME.ambientIntensity * CUR_WEATHER.ambientMul;
+  scene.fog.color.copy(CUR_TIME.fogColor);
+  desaturate(scene.fog.color, CUR_WEATHER.skySatMul);
+  scene.fog.near = CUR_TIME.fogNear * CUR_WEATHER.fogNearMul;
+  scene.fog.far = Math.max(scene.fog.near + 20, CUR_TIME.fogFar * CUR_WEATHER.fogFarMul);
+  if (current){
+    (current.waterMats || []).forEach(function(m){ m.color.copy(CUR_TIME.waterColor); });
+    if (current.windowMat){
+      current.windowMat.emissive.copy(WARM_GLOW).multiplyScalar(CUR_TIME.windowGlow * 0.85);
+    }
+  }
+}
+
+/* ---- background mountains: 2-3 low-poly ridgeline rings, one draw call
+ * each, merged as a single BufferGeometry per ring (no external merge
+ * utility needed since each ring already IS one mesh). Sits well outside
+ * the camera's orbit clamp (ZMAX below) so it reads from every azimuth.
+ * Colour = per-ring mix of the current time-of-day mountain colour toward
+ * the current fog colour (farther ring mixes in more fog = hazier). */
+var MOUNTAIN_RINGS = [];
+(function buildMountains(){
+  var defs = [
+    { radius: 340, baseY: -34, peakBase: 26, peakVar: 32, segs: 84, mixToFog: 0.12, seed: 3.1 },
+    { radius: 520, baseY: -34, peakBase: 34, peakVar: 44, segs: 72, mixToFog: 0.36, seed: 14.7 },
+    { radius: 700, baseY: -34, peakBase: 40, peakVar: 54, segs: 60, mixToFog: 0.62, seed: 27.4 }
+  ];
+  defs.forEach(function(d, ringIdx){
+    var seg = d.segs, pos = [], idxArr = [];
+    for (var i=0;i<=seg;i++){
+      var a = i/seg * Math.PI*2;
+      var ty = d.peakBase + ridgeNoise1D(a, d.seed) * d.peakVar;
+      var x = Math.cos(a)*d.radius, z = Math.sin(a)*d.radius;
+      pos.push(x, d.baseY, z,  x, ty, z);
+    }
+    for (i=0;i<seg;i++){
+      var b0=i*2, t0=i*2+1, b1=(i+1)*2, t1=(i+1)*2+1;
+      idxArr.push(b0,b1,t0,  t0,b1,t1);
+    }
+    var geo = new T.BufferGeometry();
+    geo.setIndex(idxArr);
+    geo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    var mat = new T.MeshBasicMaterial({ color: 0x7a97a0, fog: true, side: T.DoubleSide });
+    var mesh = new T.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -10 + ringIdx;
+    scene.add(mesh);
+    MOUNTAIN_RINGS.push({ mesh: mesh, mixToFog: d.mixToFog });
+  });
+})();
+var _mtnTmp = col(0);
+function updateMountains(){
+  MOUNTAIN_RINGS.forEach(function(r){
+    _mtnTmp.copy(CUR_TIME.mountainColor).lerp(CUR_TIME.fogColor, r.mixToFog);
+    desaturate(_mtnTmp, CUR_WEATHER.skySatMul);
+    r.mesh.material.color.copy(_mtnTmp);
+  });
+}
+
+/* ---- rain / snow: anchored to the camera's XZ position so the volume
+ * always surrounds the viewer (threejs-weather: "anchor the volume in
+ * the frustum"). Float32BufferAttribute COPIES the array handed to it,
+ * so we keep a reference to attr.array (not the original array) for the
+ * per-frame update -- the classic "nothing moves" trap.
+ *
+ * Rain and snow must read as visibly different weather, not two shades
+ * of the same round dot, so they use different primitives: snow is
+ * THREE.Points with a soft circular sprite (slow, sideways sway); rain is
+ * THREE.LineSegments -- a real 2-vertex streak per drop, pale blue-grey,
+ * low opacity, falling far faster than snow -- built directly from the
+ * drop's own fall/wind position each frame (drop head = current position,
+ * tail = a fixed offset back along the fall+wind direction). */
+var WEATHER_REDUCED = reducedMotion;
+var RAIN_N = WEATHER_REDUCED ? 260 : 2200;
+var SNOW_N = WEATHER_REDUCED ? 200 : 1300;
+function makeSoftDotTexture(){
+  var c = document.createElement('canvas');
+  c.width = c.height = 32;
+  var ctx = c.getContext('2d');
+  var g = ctx.createRadialGradient(16,16,0,16,16,16);
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,32,32);
+  return new T.CanvasTexture(c);
+}
+var SNOW_TEX = makeSoftDotTexture();
+function buildWeatherPoints(n, spread, height, size, color, opacityMax, tex){
+  var arr = new Float32Array(n*3);
+  for (var i=0;i<n;i++){
+    arr[i*3]   = (Math.random()-0.5)*spread;
+    arr[i*3+1] = Math.random()*height;
+    arr[i*3+2] = (Math.random()-0.5)*spread;
+  }
+  var geo = new T.BufferGeometry();
+  var attr = new T.Float32BufferAttribute(arr, 3);
+  attr.setUsage(T.DynamicDrawUsage);
+  geo.setAttribute('position', attr);
+  var mat = new T.PointsMaterial({ color: color, map: tex, size: size, transparent: true, opacity: 0, depthWrite: false, sizeAttenuation: true });
+  var pts = new T.Points(geo, mat);
+  pts.frustumCulled = false;
+  pts.visible = false;
+  scene.add(pts);
+  return { points: pts, mat: mat, arr: attr.array, attr: attr, n: n, spread: spread, height: height, opacityMax: opacityMax };
+}
+function buildRainStreaks(n, spread, height, opacityMax){
+  var arr = new Float32Array(n*3); // logical drop position (head)
+  for (var i=0;i<n;i++){
+    arr[i*3]   = (Math.random()-0.5)*spread;
+    arr[i*3+1] = Math.random()*height;
+    arr[i*3+2] = (Math.random()-0.5)*spread;
+  }
+  var lineArr = new Float32Array(n*2*3); // head+tail per drop, filled every frame
+  var geo = new T.BufferGeometry();
+  var attr = new T.Float32BufferAttribute(lineArr, 3);
+  attr.setUsage(T.DynamicDrawUsage);
+  geo.setAttribute('position', attr);
+  var mat = new T.LineBasicMaterial({ color: 0x9fb2c2, transparent: true, opacity: 0, depthWrite: false, fog: false });
+  var seg = new T.LineSegments(geo, mat);
+  seg.frustumCulled = false;
+  seg.visible = false;
+  scene.add(seg);
+  return { seg: seg, mat: mat, arr: arr, lineAttr: attr, n: n, spread: spread, height: height, opacityMax: opacityMax };
+}
+var RAIN = buildRainStreaks(RAIN_N, 100, 55, 0.42);
+var SNOW = buildWeatherPoints(SNOW_N, 110, 60, 0.34, 0xffffff, 0.85, SNOW_TEX);
+var _snowSway = 0;
+var RAIN_TAIL = 1.7; // metres of streak trailing each drop
+function updateWeatherParticles(dt, camX, camZ){
+  RAIN.seg.position.set(camX, 0, camZ);
+  SNOW.points.position.set(camX, 0, camZ);
+  var rainAmt = CUR_WEATHER.rain, snowAmt = CUR_WEATHER.snow;
+  RAIN.seg.visible = rainAmt > 0.005;
+  SNOW.points.visible = snowAmt > 0.005;
+  RAIN.mat.opacity = rainAmt * RAIN.opacityMax;
+  SNOW.mat.opacity = snowAmt * SNOW.opacityMax;
+  if (rainAmt > 0.005){
+    if (!WEATHER_REDUCED){
+      var arr = RAIN.arr, fall = 46*dt, wind = 6*dt; // ~11x snow's fall speed
+      for (var i=0;i<RAIN.n;i++){
+        var iy = i*3+1;
+        arr[iy] -= fall;
+        arr[iy-1] += wind;
+        if (arr[iy] < -2){
+          arr[iy] = RAIN.height * (0.6 + Math.random()*0.4);
+          arr[iy-1] = (Math.random()-0.5)*RAIN.spread;
+          arr[iy+1] = (Math.random()-0.5)*RAIN.spread;
+        }
+      }
+    }
+    // rebuild the head/tail line buffer from the drop positions -- tail
+    // trails opposite the fall+wind direction so each segment reads as a
+    // short streak rather than a dot.
+    var src = RAIN.arr, dst = RAIN.lineAttr.array;
+    for (var k=0;k<RAIN.n;k++){
+      var sx=src[k*3], sy=src[k*3+1], sz=src[k*3+2];
+      var d6=k*6;
+      dst[d6]=sx; dst[d6+1]=sy; dst[d6+2]=sz;
+      dst[d6+3]=sx-0.09; dst[d6+4]=sy+RAIN_TAIL; dst[d6+5]=sz;
+    }
+    RAIN.lineAttr.needsUpdate = true;
+  }
+  if (snowAmt > 0.005 && !WEATHER_REDUCED){
+    _snowSway += dt;
+    var sarr = SNOW.arr, sfall = 4.2*dt;
+    for (var j=0;j<SNOW.n;j++){
+      var sy2 = j*3+1;
+      sarr[sy2] -= sfall;
+      sarr[sy2-1] += Math.sin(_snowSway*0.8 + j*0.37) * 0.55 * dt;
+      sarr[sy2+1] += Math.cos(_snowSway*0.6 + j*0.53) * 0.4 * dt;
+      if (sarr[sy2] < -2){
+        sarr[sy2] = SNOW.height * (0.6 + Math.random()*0.4);
+        sarr[sy2-1] = (Math.random()-0.5)*SNOW.spread;
+        sarr[sy2+1] = (Math.random()-0.5)*SNOW.spread;
+      }
+    }
+    SNOW.attr.needsUpdate = true;
+  }
+}
+
+/* ====================================================================
+ * 4. active castle management (dispose-safe switch)
+ * ==================================================================== */
+var current = null; // { group, fadeGroups, interiorGroup, info }
+
+function disposeMaterial(mat){
+  if (!mat) return;
+  if (mat.map) mat.map.dispose();
+  mat.dispose();
+}
+function applyCastle(idx){
+  var def = CASTLES[idx];
+  if (current){
+    current.group.traverse(function(o){
+      if (o.geometry) o.geometry.dispose();
+      if (o.material){
+        if (Array.isArray(o.material)) o.material.forEach(disposeMaterial);
+        else disposeMaterial(o.material);
+      }
+    });
+    scene.remove(current.group);
+    current = null;
+  }
+  var built = def.build(T);
+  scene.add(built.group);
+  current = built;
+  currentIdx = idx;
+
+  document.getElementById('castleName').textContent = def.nameJa;
+  document.getElementById('castleMeta').textContent = def.flag + ' ' + def.countryJa + ' · ' + def.year + '年';
+  document.getElementById('castleDesc').textContent = def.description;
+  // reset fade state instantly so a new castle never appears mid-fade
+  built.fadeGroups.forEach(function(fg){ setGroupOpacity(fg, 1, true); });
+  hideTooltip();
+  updateLabelVisibility();
+}
+var currentIdx = 0;
+
+var select = document.getElementById('castleSelect');
+CASTLES.forEach(function(c, i){
+  var opt = document.createElement('option');
+  opt.value = i; opt.textContent = c.nameJa + ' — ' + c.countryJa + ' (' + c.year + ')';
+  select.appendChild(opt);
+});
+select.addEventListener('change', function(){ applyCastle(parseInt(select.value,10)); });
+
+/* ====================================================================
+ * 5. camera controls: orbit (drag/touch) + zoom (wheel/pinch), inertial
+ * ==================================================================== */
+var TARGET_Y = 6.0;
+var ZMIN = 20, ZMAX = 150; // camera distance clamp (metres)
+var EL_MIN = 0.05, EL_MAX = 1.25; // elevation clamp (radians)
+
+var orbAz = -Math.PI*0.22, orbEl = 0.42, orbDist = 105;
+var curAz = orbAz, curEl = orbEl, curDist = orbDist;
+
+function easeFactor(dt){
+  // frame-rate independent damping
+  return reducedMotion ? 1 : (1 - Math.pow(0.001, dt));
+}
+function placeCamera(k){
+  curAz += (orbAz - curAz) * k;
+  curEl += (orbEl - curEl) * k;
+  curDist += (orbDist - curDist) * k;
+  var ce = Math.cos(curEl), se = Math.sin(curEl);
+  camera.position.set(
+    curDist*ce*Math.sin(curAz),
+    TARGET_Y + curDist*se,
+    curDist*ce*Math.cos(curAz)
+  );
+  camera.lookAt(0, TARGET_Y*0.55, 0);
+}
+function layout(){
+  var w = window.innerWidth;
+  var h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / Math.max(1,h);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', layout);
+
+/* -- reveal: normalised 0 (far) .. 1 (near) from camera distance -- */
+function computeReveal(){
+  var t = (ZMAX - orbDist) / (ZMAX - ZMIN);
+  return Math.max(0, Math.min(1, t));
+}
+var camDir = new T.Vector3();
+function updateCamDir(){
+  camDir.set(Math.sin(curAz), 0, Math.cos(curAz));
+}
+
+var WALL_START = 0.35, WALL_END = 0.58;
+// roof fade band pulled down to sit almost on top of the wall band (was
+// 0.70-0.86, leaving the roof visibly lingering long after the walls had
+// faded) so the roof reads as gone at roughly the same reveal depth the
+// camera-facing walls do.
+var ROOF_START = 0.40, ROOF_END = 0.62;
+var FACE_DOT = 0.25;
+function smoothstep(a,b,x){
+  if (b<=a) return x<a?0:1;
+  var t = Math.max(0, Math.min(1, (x-a)/(b-a)));
+  return t*t*(3-2*t);
+}
+function setGroupOpacity(fg, op, instant){
+  fg.op = op;
+  var visible = op > 0.02;
+  fg.group.visible = visible;
+  if (visible){
+    var full = op >= 0.999;
+    fg.mat.transparent = !full;
+    fg.mat.depthWrite = full;
+    fg.mat.opacity = op;
+  }
+}
+function updateFade(reveal, dt){
+  if (!current) return;
+  var k = reducedMotion ? 1 : easeFactor(dt);
+  var anyMid = false, anyRoofGone = false;
+  current.fadeGroups.forEach(function(fg){
+    var dirFade = 0;
+    if (fg.dir){
+      var facing = fg.dir.x*camDir.x + fg.dir.z*camDir.z;
+      if (facing > FACE_DOT) dirFade = smoothstep(WALL_START, WALL_END, reveal);
+    }
+    var roofFade = fg.roof ? smoothstep(ROOF_START, ROOF_END, reveal) : 0;
+    var fade = Math.max(dirFade, roofFade);
+    var targetOp = 1 - fade;
+    var nextOp = fg.op + (targetOp - fg.op) * k;
+    if (Math.abs(nextOp - targetOp) < 0.003) nextOp = targetOp;
+    setGroupOpacity(fg, nextOp);
+    if (fade > 0.02 && fade < 0.98) anyMid = true;
+    if (fg.roof && roofFade > 0.9) anyRoofGone = true;
+  });
+  return { anyMid: anyMid, anyRoofGone: anyRoofGone };
+}
+
+/* -- pointer / touch / wheel handling -- */
+var ptrs = new Map();
+var dragging = false, lastX=0, lastY=0, pinchD=0, pinchDist=orbDist;
+function ptrDist(){
+  var a = Array.from(ptrs.values());
+  return Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+}
+var touchStart = null; // tap-vs-drag detection for touch tooltip picking
+canvas.addEventListener('pointerdown', function(e){
+  ptrs.set(e.pointerId, {x:e.clientX,y:e.clientY});
+  try{ canvas.setPointerCapture(e.pointerId); }catch(_e){}
+  if (e.pointerType === 'touch'){
+    if (ptrs.size === 1) touchStart = {x:e.clientX, y:e.clientY, t:performance.now()};
+  } else {
+    hideTooltip();
+  }
+  if (ptrs.size === 2){ dragging=false; pinchD = ptrDist(); pinchDist = orbDist; hideTooltip(); return; }
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  canvas.classList.add('drag');
+});
+canvas.addEventListener('pointermove', function(e){
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, {x:e.clientX,y:e.clientY});
+  if (ptrs.size >= 2){
+    var d = ptrDist();
+    if (pinchD > 8) orbDist = Math.max(ZMIN, Math.min(ZMAX, pinchDist * (pinchD/d)));
+    return;
+  }
+  if (!dragging){
+    if (e.pointerType !== 'touch') doPick(e.clientX, e.clientY);
+    return;
+  }
+  orbAz -= (e.clientX - lastX) * 0.0062;
+  orbEl = Math.max(EL_MIN, Math.min(EL_MAX, orbEl - (e.clientY - lastY) * 0.0046));
+  lastX = e.clientX; lastY = e.clientY;
+  hideTooltip();
+});
+canvas.addEventListener('pointerleave', function(e){
+  if (e.pointerType !== 'touch') hideTooltip();
+});
+function ptrEnd(e){
+  // resolve tap-vs-drag first, but call doPick only after `dragging` below
+  // is updated -- doPick bails out while dragging is still true, and a
+  // single-pointer tap leaves it true until the ptrs.size===0 branch runs.
+  var tapAt = null;
+  if (e && e.pointerType === 'touch' && touchStart){
+    var dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y;
+    if (Math.hypot(dx,dy) < 10 && performance.now() - touchStart.t < 600){
+      tapAt = { x: e.clientX, y: e.clientY };
+    } else {
+      hideTooltip();
+    }
+    touchStart = null;
+  }
+  if (e && ptrs.has(e.pointerId)) ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinchD = 0;
+  if (ptrs.size === 0){ dragging = false; canvas.classList.remove('drag'); }
+  else { var a = Array.from(ptrs.values())[0]; lastX=a.x; lastY=a.y; dragging=true; }
+  if (tapAt) doPick(tapAt.x, tapAt.y);
+}
+canvas.addEventListener('pointerup', ptrEnd);
+canvas.addEventListener('pointercancel', ptrEnd);
+canvas.addEventListener('wheel', function(e){
+  e.preventDefault();
+  var d = e.deltaMode===1 ? e.deltaY*16 : e.deltaY;
+  orbDist = Math.max(ZMIN, Math.min(ZMAX, orbDist * Math.exp(d*0.0016)));
+  hideTooltip();
+}, {passive:false});
+
+/* ====================================================================
+ * 5.5 hover / tap tooltip: raycasts ONLY against the current castle's
+ * `pickables` array (never the visual meshes), so cost stays flat
+ * regardless of scene complexity. Room boxes are only offered once the
+ * cutaway has revealed the interior (matches the label fade-in threshold
+ * the old sprite system used); structure boxes (towers / gatehouse) are
+ * always offered, exterior or not.
+ * ==================================================================== */
+var raycaster = new T.Raycaster();
+var pickNdc = new T.Vector2();
+var tooltipEl = document.getElementById('tooltip');
+var lastReveal = 0;
+function activePickables(){
+  if (!current || !current.pickables) return [];
+  if (lastReveal > 0.28) return current.pickables;
+  return current.pickables.filter(function(p){ return p.userData.pickInfo.kind === 'structure'; });
+}
+function doPick(clientX, clientY){
+  if (!current || dragging || ptrs.size >= 2){ return; }
+  var rect = canvas.getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom){ hideTooltip(); return; }
+  pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pickNdc, camera);
+  var targets = activePickables();
+  var hits = targets.length ? raycaster.intersectObjects(targets, false) : [];
+  if (hits.length){
+    showTooltip(hits[0].object.userData.pickInfo, clientX, clientY);
+  } else {
+    hideTooltip();
+  }
+}
+function showTooltip(info, x, y){
+  tooltipEl.innerHTML = '<div class="tt-title">' + info.name + '</div><div class="tt-desc">' + info.desc + '</div>';
+  tooltipEl.style.display = 'block';
+  var pad = 16;
+  var rectW = tooltipEl.offsetWidth, rectH = tooltipEl.offsetHeight;
+  var left = x + pad, top = y + pad;
+  if (left + rectW > window.innerWidth - 8) left = x - rectW - pad;
+  if (top + rectH > window.innerHeight - 8) top = y - rectH - pad;
+  tooltipEl.style.left = Math.max(4,left) + 'px';
+  tooltipEl.style.top = Math.max(4,top) + 'px';
+}
+function hideTooltip(){ tooltipEl.style.display = 'none'; }
+
+/* ====================================================================
+ * 6. reveal indicator UI
+ * ==================================================================== */
+var dots = [document.getElementById('dot0'), document.getElementById('dot1'), document.getElementById('dot2')];
+var revealText = document.getElementById('revealText');
+function updateRevealUI(reveal){
+  // stage 2 ("内観") now keys off WALL_END rather than the old ROOF_START:
+  // walls and roof fade over roughly the same band (Fix 3), so WALL_END
+  // is the meaningful "structure is gone" threshold for both.
+  var stage = reveal < WALL_START ? 0 : (reveal < WALL_END ? 1 : 2);
+  dots.forEach(function(d,i){ d.classList.toggle('on', i<=stage); });
+  revealText.textContent = stage===0 ? '外観' : (stage===1 ? '一部カットアウェイ' : '内観');
+}
+
+/* -- always-on room labels toggle: independent of the hover tooltip,
+ * gated by the same reveal threshold the room pickables use (0.28) so
+ * labels only appear once the cutaway has actually opened the interior
+ * up. Re-evaluated every frame (reveal changes continuously) and on
+ * toggle/castle-switch. -------------------------------------------- */
+var labelsOn = false;
+function updateLabelVisibility(){
+  if (!current || !current.labelGroup) return;
+  current.labelGroup.visible = labelsOn && lastReveal > 0.28;
+}
+document.getElementById('labelToggle').addEventListener('change', function(){
+  labelsOn = this.checked;
+  updateLabelVisibility();
+});
+
+function wireSeg(id, onPick){
+  var el = document.getElementById(id);
+  Array.prototype.forEach.call(el.querySelectorAll('button'), function(btn){
+    btn.addEventListener('click', function(){ onPick(btn.dataset.k); });
+  });
+}
+wireSeg('timeSeg', setTimeOfDay);
+wireSeg('weatherSeg', setWeather);
+
+/* ====================================================================
+ * 7. main loop
+ * ==================================================================== */
+applyCastle(0);
+layout();
+placeCamera(1);
+
+stepTransitions(0); applyEnvironment(); updateMountains(); // paint the correct sky before the first frame
+
+var prev = performance.now();
+function frame(now){
+  var dt = Math.min(0.05, (now - prev) / 1000);
+  prev = now;
+  var k = reducedMotion ? 1 : (1 - Math.pow(0.001, dt));
+  placeCamera(k);
+  updateCamDir();
+  var reveal = computeReveal();
+  lastReveal = reveal;
+  updateFade(reveal, dt);
+  updateRevealUI(reveal);
+  updateLabelVisibility();
+  stepTransitions(dt);
+  applyEnvironment();
+  updateMountains();
+  updateWeatherParticles(dt, camera.position.x, camera.position.z);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+document.getElementById('loading').style.display = 'none';
+requestAnimationFrame(frame);
+
+/* ====================================================================
+ * 8. debug hooks (do not affect production UI)
+ * ==================================================================== */
+window.__setZoom = function(t){
+  // t: 0 (far) .. 1 (near) -> maps to orbDist, snaps instantly (no easing)
+  t = Math.max(0, Math.min(1, t));
+  orbDist = ZMAX - t*(ZMAX-ZMIN);
+  curDist = orbDist;
+  placeCamera(1); updateCamDir();
+  var reveal = computeReveal();
+  lastReveal = reveal;
+  updateFade(reveal, 1);
+  updateRevealUI(reveal);
+  updateLabelVisibility();
+  renderer.render(scene, camera);
+};
+window.__setOrbit = function(az, el){
+  orbAz = az; orbEl = Math.max(EL_MIN, Math.min(EL_MAX, el));
+  curAz = orbAz; curEl = orbEl;
+  placeCamera(1); updateCamDir();
+  var reveal = computeReveal();
+  lastReveal = reveal;
+  updateFade(reveal, 1);
+  updateLabelVisibility();
+  renderer.render(scene, camera);
+};
+window.__applyCastle = applyCastle;
+window.__setLabels = function(on){
+  // testing helper: toggles always-on labels + syncs the UI checkbox,
+  // without requiring a real click.
+  labelsOn = !!on;
+  document.getElementById('labelToggle').checked = labelsOn;
+  updateLabelVisibility();
+  renderer.render(scene, camera);
+};
+window.__findPickScreen = function(nameSubstr){
+  // testing helper: projects the first pickable whose tooltip name
+  // contains `nameSubstr` to canvas screen coordinates (CSS pixels).
+  if (!current || !current.pickables) return null;
+  var hit = current.pickables.filter(function(p){ return p.userData.pickInfo.name.indexOf(nameSubstr) >= 0; })[0];
+  if (!hit) return null;
+  var v = hit.position.clone().project(camera);
+  var rect = canvas.getBoundingClientRect();
+  return { x: rect.left + (v.x*0.5+0.5)*rect.width, y: rect.top + (1-(v.y*0.5+0.5))*rect.height };
+};
+window.__setEnv = function(timeKey, weatherKey, instant){
+  // testing helper: switches time-of-day / weather, optionally skipping
+  // the cross-fade so quality-gate scripts can iterate combinations fast.
+  if (timeKey) setTimeOfDay(timeKey);
+  if (weatherKey) setWeather(weatherKey);
+  if (instant){
+    timeTrans.t = 1; CUR_TIME = cloneTimeState(timeTrans.to);
+    weatherTrans.t = 1; CUR_WEATHER = cloneWeatherState(weatherTrans.to);
+  }
+  stepTransitions(0); applyEnvironment(); updateMountains();
+  updateWeatherParticles(0, camera.position.x, camera.position.z);
+  renderer.render(scene, camera);
+};
+window.__pickAt = function(clientX, clientY){ doPick(clientX, clientY); };
+window.__scene = scene; window.__camera = camera; window.__renderer = renderer;
+})();
+</script>
+</body>
+</html>
