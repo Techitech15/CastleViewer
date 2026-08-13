@@ -3283,8 +3283,10 @@ function panBy(dx, dy){
   var rightX = Math.cos(curAz), rightZ = -Math.sin(curAz);
   var fwdX = -Math.sin(curAz), fwdZ = -Math.cos(curAz); // camera->target, ground-projected
   var scale = curDist * PAN_K;
-  orbTgtX -= (rightX*dx + fwdX*dy) * scale;
-  orbTgtZ -= (rightZ*dx + fwdZ*dy) * scale;
+  // vertical drag inverted by user preference: dragging down pulls the
+  // scene toward the viewer (target moves away), dragging up pushes it
+  orbTgtX -= (rightX*dx - fwdX*dy) * scale;
+  orbTgtZ -= (rightZ*dx - fwdZ*dy) * scale;
   clampPan();
 }
 canvas.addEventListener('contextmenu', function(e){ e.preventDefault(); });
