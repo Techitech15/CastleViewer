@@ -16,7 +16,8 @@
    - カットアウェイ二段階化: 外郭=既存帯域、ドンジョン=`tier:'inner'`(0.72–0.90/0.76–0.92)
 
 ## アーキテクチャ上の追加点(2026-08-13)
-- `CASTLES[].view` = `{targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, envScale}`。`applyCastle` が切替時に適用(カメラ距離リセット・影カメラ更新・山並み `envScale` 拡縮)。省略時はボディアム値。
+- `CASTLES[].view` = `{targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, camFar, panLimit, envScale, envLift}`。`applyCastle` が切替時に適用(カメラ距離・注視点リセット、camera.far 更新、影カメラ更新、山並みリングの拡縮 `envScale`+Y補正 `envLift`)。省略時はボディアム値。
+- カメラパン(コミット 2a50373): 右ドラッグ / Shift+左ドラッグ / 2本指ドラッグで注視点(`orbTgtX/Z`)を移動。ズーム距離比例、`panLimit` で半径クランプ、城切替でリセット。デバッグ用に `window.__setPan/__panBy/__debugState` 等のヘルパーあり。
 - section 0.5 ヘルパーに `'rect'` 種別(X/Z 独立半径)を追加。既存 `'square'`/`'circle'` は不変。
 - fadeGroups 記述子に `tier:'inner'` を追加可能(未指定=従来挙動)。
 
