@@ -1,36 +1,34 @@
-# 中世城3Dビューア 引継ぎメモ(2026-08-13 更新)
+# 中世城3Dビューア 引継ぎメモ(2026-08-14 更新)
 
 ## プロジェクト概要
 - 成果物: `C:\Dev\Claude\HTMLTown\castle-viewer\index.html`(単一HTML・ビルド不要・Three.js r128 UMDをcdnjsから読込)
-- 内容: 中世城の3D再現ビューア。ズームで手前の壁・屋根がフェードし内観表示(カットアウェイ)。時間帯(朝/昼/夕/夜)×天候(晴/曇/雨/雪)、遠景の山並み、部屋・構造物のマウスオーバーツールチップ(日英+解説)、ラベル常時表示トグル、城レジストリ `CASTLES` による複数城対応。
-- 運用体制: Fable=指示・判断・検証、実作業はSonnetサブエージェント。
-- Git 管理: このフォルダ(`castle-viewer/`)がリポジトリ。親フォルダ `HTMLTown` 直下の既存 HTML(england-castle.html / santorini.html)は別物・不干渉。
+- 内容: 中世城の3Dビューア。カットアウェイ(ズームで壁フェード→内観)、時間帯×天候、遠景山並み、日英ツールチップ、ラベル常時表示、カメラパン、住人シミュレーション、城レジストリ `CASTLES` による複数城対応
+- 運用体制: Fable=指示・判断・検証、実作業はSonnetサブエージェント(同一ファイルのため直列実行)
+- Git 管理: このフォルダ(`castle-viewer/`)がリポジトリ。親フォルダの既存 HTML は別物・不干渉
 
-## 収録城
-1. ボディアム城(イングランド, 1385)— v3 相当、挙動は引継ぎ前から不変
-2. ヴァンセンヌ城(フランス, 1380)— 2026-08-13 追加(コミット d55a846)
-   - 330×175m 外郭、塔9基(**中世姿=全塔42m級を採用**。方針判断済み)、門3、矩形の石造水堀
-   - 52m ドンジョン(16.5m角+四隅円形小塔 径6.6m+北付属塔=螺旋階段)、シェミーズ壁+専用堀+跳ね橋2、1階テラス入口
-   - 階別内観: 地下=貯蔵庫/1階=評議の間/2階=王の寝室(中央柱・暖炉)/3階=賓客/上層=兵士詰所・弾薬庫
-   - サント・シャペル: 簡略ゴシック(1380年時点「建設中」の旨をツールチップに記載)
-   - カットアウェイ二段階化: 外郭=既存帯域、ドンジョン=`tier:'inner'`(0.72–0.90/0.76–0.92)
+## 収録城(3城)
+1. **ボディアム城**(イングランド, 1385)— 水堀の方形城・双塔ゲートハウス
+2. **ヴァンセンヌ城**(フランス, 1380)— 実物準拠改修済み: 330×175m外郭・角塔9基(実名・実配置、西辺は塔なし)、西長辺中央のドンジョン(52m・マシクレーション冠)+シェミーズ(13m・歩廊・バルティザン)、40m級サント・シャペル。出典: Wikipedia/Wikimedia写真・公式平面図
+3. **マルボルク城**(ポーランド, 1406)— 赤レンガ+テラコッタ。高城(回廊四翼+主塔+教会後陣、tier:'inner'カットアウェイ+内観4室)・中城(大マスター宮殿)・低城(二重壁+乾堀+橋門)、ノガト川
 
-## アーキテクチャ上の追加点(2026-08-13)
-- `CASTLES[].view` = `{targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, camFar, panLimit, envScale, envLift}`。`applyCastle` が切替時に適用(カメラ距離・注視点リセット、camera.far 更新、影カメラ更新、山並みリングの拡縮 `envScale`+Y補正 `envLift`)。省略時はボディアム値。
-- カメラパン(コミット 2a50373): 右ドラッグ / Shift+左ドラッグ / 2本指ドラッグで注視点(`orbTgtX/Z`)を移動。ズーム距離比例、`panLimit` で半径クランプ、城切替でリセット。デバッグ用に `window.__setPan/__panBy/__debugState` 等のヘルパーあり。
-- section 0.5 ヘルパーに `'rect'` 種別(X/Z 独立半径)を追加。既存 `'square'`/`'circle'` は不変。
-- fadeGroups 記述子に `tier:'inner'` を追加可能(未指定=従来挙動)。
+## 主要システム
+- `CASTLES[].view` = {targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, camFar, panLimit, envScale, envLift}(applyCastle が切替時適用)
+- カメラパン: 右ドラッグ/Shift+左ドラッグ/2本指。`panLimit` でクランプ、切替リセット
+- ラベル: `buildLabelGroup`(pickables から自動生成)。外観=トグルONで常時、内観=リビール>0.28。**カメラ距離比例で毎フレーム再スケール(画面上約24px一定)**
+- 住人(section 6.5): 「住人」トグル。build() 戻り値 `life` = { gates(通路中心線ウェイポイント配列), courtyard(矩形配列), patrol, population }。農民=門を通って出入り(through/throughIn 状態)+中庭徘徊、衛兵=巡回。夜は農民1/3。ジオメトリ/マテリアル共有、切替で確実に破棄
+- 門: 3城とも実開口(貫通)。ポートカリスは巻き上げ位置、扉は開状態
+- デバッグヘルパー: `__applyCastle/__setPan/__panBy/__setZoom(0..1)/__setOrbit/__setEnv/__setLabels/__setResidents/__stepResidents/__residentStates/__pickAt/__findPickScreen/__debugState`(ペイン非表示時は canvas.toDataURL でキャプチャ可)
 
-## 検証結果(2026-08-13 品質ゲート合格)
-- ブラウザ実表示(localhost:8777)でコンソールエラー0件
-- 両城切替2往復以上、二段階カットアウェイ、外観/内観ツールチップ、ラベルトグル(リビール>0.28で表示)、夜+雪の窓明かり・降雪を確認
-- 既知の表示特性: 国旗絵文字は Windows Chrome では文字("FR"等)にフォールバック(OS制限、コード側のバグではない)
+## 検証状況(2026-08-14 時点、全ゲート合格)
+- node --check、スタブ実行(3城カウント: ボディアム18/18、ヴァンセンヌ22/24、マルボルク21/13)
+- 実表示: 3城切替往復・住人ON/OFF・カットアウェイ・ラベル・時間帯/天候でコンソールエラー0件
+- 目視: 3城の門開口貫通、農民の門通過・橋渡り、ラベル判読性、山並み、実物準拠形状
 
-## 未完了・検討事項
-- 納品済み: SendUserFile で index.html 送付済み
-- アーティファクト: 前セッションの `bodiam-castle-3d-viewer` は claude.ai チャット側の成果物でここからは更新不可。この環境で公開する場合は Three.js のインライン化(CSP対応)が必要 — 未実施(ユーザー判断待ち)
-- 任意の改善候補(未実施・提案のみ): 礼拝堂の規模拡大(実物比でやや小さい)、ヴァンセンヌのリビール中心がワールド原点のためドンジョン(西寄り70m)に完全には追従しない件
+## 検討事項(未実施・提案のみ)
+- マルボルクの色調が単調(壁と屋根が同系オレンジ)。差別化するなら屋根をより暗い赤褐色に
+- アーティファクト公開には Three.js のインライン化が必要(CSP対応、ユーザー判断待ち)
+- 国旗絵文字は Windows Chrome では文字表示(OS制限)
 
 ## 出典
-- https://en.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes
-- https://fr.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes
+- https://en.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes / https://fr.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes
+- https://en.wikipedia.org/wiki/Malbork_Castle
