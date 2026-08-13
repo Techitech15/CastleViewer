@@ -820,25 +820,38 @@ function buildBodiam(){
   buildGateTower(tG2,  gateCx, gateCz);
   registerPick(pickables, 'structure', 0, GATE_H/2, gateCz, 2*gateCx+GATE_W+1, GATE_H, GATE_PROJ*1.7,
     'ゲートハウス Gatehouse', '双塔式の主門。通路天井には殺人孔があり、かつて3基の木製ポートカリスが備わっていた。');
-  // gate arch lintel spanning the passage, with a portcullis grid hanging in the opening
+  // gate arch lintel spanning the passage, with a portcullis grid RAISED
+  // up into the housing above the passage (was hanging low enough to
+  // visually block the walk-through gap between the twin towers -- see
+  // life.gates / section 6.5, residents now actually walk this passage).
   var lintel = mkBox(GATE_GAP+1.2, 1.4, GATE_PROJ*0.9, tG1.mat);
   place(lintel, 0, GATE_H*0.62, gateCz, 0);
   tG1.group.add(lintel);
   (function buildPortcullis(){
     var pg = new T.Group();
     var barW = 0.12, gh = GATE_H*0.5, gw = GATE_GAP*0.72;
+    var RAISE = GATE_H - gh - 1.2; // tucks the grid up near the lintel/roof, clear of the passage below
     for (var i=-3;i<=3;i++){
-      pg.add(place(mkBox(barW, gh, barW, metalMat), i*(gw/6), gh/2+0.3, gateCz+GATE_PROJ*0.32));
+      pg.add(place(mkBox(barW, gh, barW, metalMat), i*(gw/6), gh/2+0.3+RAISE, gateCz+GATE_PROJ*0.32));
     }
     for (var j=0;j<4;j++){
-      pg.add(place(mkBox(gw, barW, barW, metalMat), 0, 0.6+j*(gh/3.2), gateCz+GATE_PROJ*0.32));
+      pg.add(place(mkBox(gw, barW, barW, metalMat), 0, 0.6+j*(gh/3.2)+RAISE, gateCz+GATE_PROJ*0.32));
     }
     tG1.group.add(pg);
   })();
-  // twin merlons/gate flag posts small timber gate doors (closed, in the recess)
-  var gateDoor = mkBox(GATE_GAP*0.9, GATE_H*0.42, 0.3, woodMat);
-  place(gateDoor, 0, GATE_H*0.21, gateCz+GATE_PROJ*0.44, 0);
-  interiorGroup.add(gateDoor);
+  // gate doors, modelled OPEN: two leaves swung flat against each tower's
+  // inner reveal (instead of one closed panel spanning the whole gap) so
+  // the passage between the twin towers reads as a real walk-through
+  // opening, matching the already-open GATE_GAP in wallN (section 1).
+  (function buildOpenGateDoors(){
+    var leafH = GATE_H*0.42, leafLen = GATE_GAP*0.46, leafY = GATE_H*0.21;
+    var leafZ = gateCz + GATE_PROJ*0.44;
+    [-1,1].forEach(function(side){
+      var leaf = mkBox(0.14, leafH, leafLen, woodMat);
+      place(leaf, side*(GATE_GAP/2-0.07), leafY, leafZ - leafLen/2, 0);
+      interiorGroup.add(leaf);
+    });
+  })();
 
   /* -------------------------------------------------------------- *
    * courtyard lawn (centre only) + wing stone floors (one step up) +
@@ -1156,9 +1169,15 @@ function buildBodiam(){
 
   /* ---- resident life data (section 6.5 住人システムが読む任意フィールド)
    * 門1つ(北の主門)+ 北の橋、狭い中庭は courtyard 矩形1枚、衛兵は中庭の縁
-   * を地面レベルで周回(壁がフェードしても浮かないよう常にy=0)。 -------- */
+   * を地面レベルで周回(壁がフェードしても浮かないよう常にy=0)。
+   * gate.path: 中庭側の門口(内側)から双塔間の通路を抜けた先(外側、橋2の
+   * 起点あたり)までの中心線。toGate/through が必ずこの線分を経由してから
+   * outside の消失フェードに入る(section 6.5 参照)。 -------------------- */
+  var gateOuterZ = gateCz - GATE_PROJ/2 - 0.3; // 双塔ゲートハウスの北端 = 橋2の起点付近
+  var gatePathLen = -OW - gateOuterZ; // 通路(内側口→外側口)の長さ
   var life = {
-    gates: [ { x:0, z:-OW, outDir:{x:0,z:-1}, vanishDist: MOAT_OUTER - OW + 6 } ],
+    gates: [ { path: [ {x:0, z:-OW}, {x:0, z:gateOuterZ} ], outDir:{x:0,z:-1},
+      vanishDist: (MOAT_OUTER - OW + 6) - gatePathLen } ],
     courtyard: [ { minX:-COURT_HALF, maxX:COURT_HALF, minZ:-COURT_HALF, maxZ:COURT_HALF } ],
     patrol: [
       [ COURT_HALF-0.8, 0, -(COURT_HALF-0.8)], [ COURT_HALF-0.8, 0,  COURT_HALF-0.8],
@@ -1298,8 +1317,18 @@ function buildVincennes(){
 
   // west wall gap (donjon + chemise bulge through here -- see section below)
   var W_GAP0 = 10, W_GAP1 = 90;
-  buildStraightWall(wallN, 0, -OHZ, 2*OHX, 0, [{x:-28,w:1.6,h:2.6},{x:28,w:1.6,h:2.6}]);
-  buildStraightWall(wallS, 0, OHZ, 2*OHX, Math.PI, [{x:-28,w:1.6,h:2.6},{x:28,w:1.6,h:2.6}]);
+  // north/south walls: split either side of the gate tower's own footprint
+  // (GATE_W / GATE2_W) rather than one continuous box -- the gate tower
+  // below now carves a real through-opening (see buildTower's opts.gate
+  // branch), and a solid wall panel spanning behind it would still block
+  // that opening even though the tower in front of it is pierced.
+  function splitWallForGate(fg, cz, ry, gateSpanW, winL, winR){
+    var half = gateSpanW/2, segLen = OHX - half, segCx = half + segLen/2;
+    buildStraightWall(fg, -segCx, cz, segLen, ry, winL);
+    buildStraightWall(fg,  segCx, cz, segLen, ry, winR);
+  }
+  splitWallForGate(wallN, -OHZ, 0, GATE_W, [{x:-20,w:1.6,h:2.6}], [{x:20,w:1.6,h:2.6}]);
+  splitWallForGate(wallS, OHZ, Math.PI, GATE2_W, [{x:-20,w:1.6,h:2.6}], [{x:20,w:1.6,h:2.6}]);
   buildStraightWall(wallE, OHX, 0, 2*OHZ, -Math.PI/2, [
     {x:-140,w:1.6,h:2.6},{x:-100,w:1.6,h:2.6},{x:-30,w:1.6,h:2.6},{x:30,w:1.6,h:2.6},
     {x:60,w:1.6,h:2.6},{x:130,w:1.6,h:2.6}
@@ -1313,15 +1342,35 @@ function buildVincennes(){
   registerPick(pickables, 'structure', -OHX, WH/2, -OHZ*0.55, WT*2, WH, OHZ*0.75, '西城壁 West Curtain Wall', '高さ11mの外郭城壁。中央でドンジョンのシェミーズに途切れる。');
 
   /* rectangular towers (both plain and gate) -- all 42m, full medieval
-   * height, proud of a continuous curtain wall (no gap cut into the wall
-   * itself; the two gate towers get a door recess + the main one a
-   * portcullis, matching Bodiam's south-postern "tower straddles the
-   * approach" treatment rather than a literal walk-through gap). */
+   * height, proud of a continuous curtain wall. The two gate towers
+   * (Tour du Village / Tour du Bois) now carve a REAL through-opening
+   * (GATE_OPEN_W wide x GATE_OPEN_H tall, spanning the tower's full depth
+   * `d`) instead of a door decal on solid stone: the body is split into
+   * left/right pillars + a lintel over the gap, exactly the same split
+   * technique buildStraightWall's gate-flanking segments use for the wall
+   * behind it (see splitWallForGate above), so residents walk an actual
+   * tunnel (life.gates path, section 6.5) rather than clipping through. */
+  var GATE_OPEN_W = 4.0, GATE_OPEN_H = 5.0;
   function buildTower(fg, cx, cz, ry, opts){
     var w = opts.w, d = opts.d, h = TOWER_H, roofH = opts.roofH || TOWER_ROOF_H;
-    var body = mkBox(w, h, d, fg.mat);
-    place(body, cx, h/2, cz, ry);
-    fg.group.add(body);
+    var co = Math.cos(ry), si = Math.sin(ry);
+    if (opts.gate){
+      var openW = Math.min(GATE_OPEN_W, w-2.6), openH = GATE_OPEN_H;
+      var pillarW = (w-openW)/2;
+      [-1,1].forEach(function(side){
+        var lx = side*(openW/2+pillarW/2);
+        var pillar = mkBox(pillarW, h, d, fg.mat);
+        place(pillar, cx+lx*co, h/2, cz-lx*si, ry);
+        fg.group.add(pillar);
+      });
+      var openLintel = mkBox(openW, h-openH, d, fg.mat);
+      place(openLintel, cx, openH+(h-openH)/2, cz, ry);
+      fg.group.add(openLintel);
+    } else {
+      var body = mkBox(w, h, d, fg.mat);
+      place(body, cx, h/2, cz, ry);
+      fg.group.add(body);
+    }
     var lip = mkBox(w*1.08, 0.7, d*1.1, fg.mat);
     place(lip, cx, h-0.6, cz, ry);
     fg.group.add(lip);
@@ -1330,32 +1379,41 @@ function buildVincennes(){
     roof.rotation.y = Math.PI/4;
     place(roof, cx, h+MER+roofH/2, cz);
     roofCaps.group.add(roof);
-    var storeys = Math.floor(h/5.4);
-    for (var s=0;s<storeys;s++){
-      var wm = mkBox(0.6,1.8,0.4, windowMat);
-      place(wm, cx+fg.dir.x*(d/2-0.02), 3.4+s*5.4, cz+fg.dir.z*(d/2-0.02), ry);
-      fg.group.add(wm);
+    if (!opts.gate){
+      // arrow-loop windows -- skipped on gate towers: their front face is
+      // now a real opening, a window column there would float in the void
+      var storeys = Math.floor(h/5.4);
+      for (var s=0;s<storeys;s++){
+        var wm = mkBox(0.6,1.8,0.4, windowMat);
+        place(wm, cx+fg.dir.x*(d/2-0.02), 3.4+s*5.4, cz+fg.dir.z*(d/2-0.02), ry);
+        fg.group.add(wm);
+      }
     }
     if (opts.gate){
-      var door = mkBox(opts.isMain?3.6:2.4, opts.isMain?4.6:3.4, 0.4, windowMat);
-      place(door, cx+fg.dir.x*(d/2-0.05), (opts.isMain?2.3:1.7), cz+fg.dir.z*(d/2-0.05), ry);
-      fg.group.add(door);
+      var openW2 = Math.min(GATE_OPEN_W, w-2.6), openH2 = GATE_OPEN_H;
       if (opts.isMain){
-        var lintel = mkBox(4.0, 1.0, d*0.85, fg.mat);
-        place(lintel, cx, h*0.5, cz, ry);
-        fg.group.add(lintel);
+        // portcullis, RAISED into the housing above the opening (a small
+        // peek below the lintel, mostly tucked into the solid stone above
+        // so it reads as "raised", not blocking the passage below it)
         var pg = new T.Group();
-        var co=Math.cos(ry), si=Math.sin(ry);
-        // per-tower material clone: both gate towers fade independently,
-        // so sharing metalMat would let one tower's fade fight the other's
-        var pgMat = metalMat.clone();
-        for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.1,3.8,0.1, pgMat), cx+bi*0.55*co, 3.4, cz-bi*0.55*si));
-        for (var bj=0;bj<4;bj++) pg.add(place(mkBox(3.8*Math.abs(co)+0.1, 0.1, 3.8*Math.abs(si)+0.1, pgMat), cx, 1.5+bj*0.95, cz));
-        // fade with the gate tower (like Bodiam's portcullis in tG1) --
-        // in interiorGroup it lingered as a floating grid once the tower
-        // itself had been cut away
+        var pgMat = metalMat.clone(); // per-tower clone: both gate towers fade independently
+        var gridH = 2.6, gridY = openH2 - 0.3 + gridH/2;
+        for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.1,gridH,0.1, pgMat), cx+bi*(openW2/7)*co, gridY, cz-bi*(openW2/7)*si));
+        for (var bj=0;bj<3;bj++) pg.add(place(mkBox(openW2*0.9,0.1,0.1, pgMat), cx, openH2-0.3+bj*(gridH/2.2), cz));
         fg.group.add(pg);
       }
+      // open double doors, swung flat against the new opening's own
+      // pillars (the reveals either side of the gap) instead of a single
+      // closed leaf blocking it -- decorative, so kept in interiorGroup
+      // like Bodiam's equivalent open gate doors (never fades).
+      var leafLen = d*0.42, leafH = openH2*0.94;
+      [-1,1].forEach(function(side){
+        var lx = side*(openW2/2-0.08);
+        var lz = d/2 - leafLen/2 - 0.15;
+        var leaf = mkBox(0.16, leafH, leafLen, woodMat);
+        place(leaf, cx+lx*co+fg.dir.x*lz, leafH/2+0.05, cz-lx*si+fg.dir.z*lz, ry);
+        interiorGroup.add(leaf);
+      });
     }
     registerPick(pickables, 'structure', cx, h*0.4, cz, w*1.7, h*0.8, d*1.7, opts.label, opts.desc);
   }
@@ -1787,10 +1845,15 @@ function buildVincennes(){
    * 2門、広大な中庭は複数矩形でシェミーズ内側(ドンジョン専用の堀の内側)
    * とサント・シャペルの躯体を避けて定義。衛兵の周回路は壁沿いの内周を
    * たどりつつ、ドンジョン複合体の周りだけ迂回する(常にy=0の地面上)。 */
+  // gate.path: 中庭側の門口(内側、塔の裏面)から塔躯体を貫く新しい開口を
+  // 抜けた先(外側、塔の表面)までの中心線。toGate/through がこの線分を
+  // 必ず経由してから outside の消失フェードに入る(section 6.5 参照)。
   var life = {
     gates: [
-      { x:0, z:-OHZ, outDir:{x:0,z:-1}, vanishDist: MOAT_OHZ - OHZ + 8 }, // 村門塔 Tour du Village(北)
-      { x:0, z: OHZ, outDir:{x:0,z:1},  vanishDist: MOAT_OHZ - OHZ + 8 }  // 木の門塔 Tour du Bois(南)
+      { path:[ {x:0,z:-OHZ+GATE_D/2}, {x:0,z:-OHZ-GATE_D/2} ], outDir:{x:0,z:-1},
+        vanishDist: (MOAT_OHZ - OHZ + 8) - GATE_D/2 },  // 村門塔 Tour du Village(北)
+      { path:[ {x:0,z: OHZ-GATE2_D/2}, {x:0,z: OHZ+GATE2_D/2} ], outDir:{x:0,z:1},
+        vanishDist: (MOAT_OHZ - OHZ + 8) - GATE2_D/2 }  // 木の門塔 Tour du Bois(南)
     ],
     courtyard: [
       { minX:-84, maxX:84,  minZ:-160, maxZ:-2 },  // 北側の広い区画(シェミーズ・礼拝堂より北)
@@ -2077,13 +2140,30 @@ function buildMalbork(){
     addCrenellations(fg.group, fg.mat, cx, cz, length, ry, height, thickness, mh);
   }
   ringSide(lowWallN, 0, -OUTER_HZ, 2*OUTER_HX, 0, OUTER_WT, OUTER_WH, 0.9);
-  ringSide(lowWallS, 0,  OUTER_HZ, 2*OUTER_HX, Math.PI, OUTER_WT, OUTER_WH, 0.9);
   ringSide(lowWallE, OUTER_HX, 0, 2*OUTER_HZ, -Math.PI/2, OUTER_WT, OUTER_WH, 0.9);
   ringSide(lowWallW, -OUTER_HX, 0, 2*OUTER_HZ, Math.PI/2, OUTER_WT, OUTER_WH, 0.9);
   ringSide(innWallN, 0, -INNER_HZ, 2*INNER_HX, 0, INNER_WT, INNER_WH, 1.2);
-  ringSide(innWallS, 0,  INNER_HZ, 2*INNER_HX, Math.PI, INNER_WT, INNER_WH, 1.2);
   ringSide(innWallE, INNER_HX, 0, 2*INNER_HZ, -Math.PI/2, INNER_WT, INNER_WH, 1.2);
   ringSide(innWallW, -INNER_HX, 0, 2*INNER_HZ, Math.PI/2, INNER_WT, INNER_WH, 1.2);
+  // south outer/inner ring sides: split either side of the bridge gate's
+  // GATE_X, leaving a real gap (GATE_OPEN_W wide) instead of one solid
+  // box -- the gate tower below carves its own through-opening on the
+  // same centreline, and a continuous wall panel behind/beside it would
+  // still block that opening otherwise. The inner wall has no tower to
+  // supply its own lintel, so it gets one built explicitly here.
+  var GATE_X = 42, GATE_OPEN_W = 4.0, GATE_OPEN_H = 5.0;
+  function splitRingForGate(fg, cz, ry, half, gateX, gateGapW, height, thickness, mh){
+    var gh = gateGapW/2;
+    var leftLen = (gateX-gh) - (-half), leftCx = (-half + (gateX-gh))/2;
+    var rightLen = half - (gateX+gh), rightCx = ((gateX+gh) + half)/2;
+    ringSide(fg, leftCx, cz, leftLen, ry, thickness, height, mh);
+    ringSide(fg, rightCx, cz, rightLen, ry, thickness, height, mh);
+  }
+  splitRingForGate(lowWallS, OUTER_HZ, Math.PI, OUTER_HX, GATE_X, GATE_OPEN_W, OUTER_WH, OUTER_WT, 0.9);
+  splitRingForGate(innWallS, INNER_HZ, Math.PI, INNER_HX, GATE_X, GATE_OPEN_W, INNER_WH, INNER_WT, 1.2);
+  var innGateLintel = mkBox(GATE_OPEN_W, INNER_WH-GATE_OPEN_H, INNER_WT, innWallS.mat);
+  place(innGateLintel, GATE_X, GATE_OPEN_H+(INNER_WH-GATE_OPEN_H)/2, INNER_HZ, 0);
+  innWallS.group.add(innGateLintel);
   registerPick(pickables, 'structure', 0, (OUTER_WH+INNER_WH)/4, -OUTER_HZ, OUTER_HX*1.6, INNER_WH, OUTER_WT*3,
     '二重城壁 Double Curtain Wall', '内壁(高さ約8m)と外壁(高さ約5m)からなる低城の二重防壁。間を乾いた堀が隔てる。');
 
@@ -2100,13 +2180,22 @@ function buildMalbork(){
   smallTower(lowWallE,  OUTER_HX,  80, false, 3.4, 9, 4.2);
 
   // Bridge Gate (主入口): single gate tower straddling the outer wall on
-  // its south side, east-leaning per spec ("南東に橋門"); the inner wall
-  // gets a plain door recess at the same X, and a timber bridge spans the
-  // dry ditch between the two.
-  var GATE_X = 42, GATE_W = 10, GATE_D = 8, GATE_H = 24, GATE_ROOF_H = 7.5;
-  var gateBody = mkBox(GATE_W, GATE_H, GATE_D, gateFg.mat);
-  place(gateBody, GATE_X, GATE_H/2, OUTER_HZ, 0);
-  gateFg.group.add(gateBody);
+  // its south side, east-leaning per spec ("南東に橋門"); the tower body
+  // now carves a REAL through-opening (GATE_OPEN_W x GATE_OPEN_H, full
+  // tower depth) instead of a door decal, matching the real gap just cut
+  // in both the outer and inner ring walls above -- a timber bridge spans
+  // the dry ditch between the two, its centreline on the same GATE_X.
+  var GATE_W = 10, GATE_D = 8, GATE_H = 24, GATE_ROOF_H = 7.5;
+  var gatePillarW = (GATE_W-GATE_OPEN_W)/2;
+  [-1,1].forEach(function(side){
+    var lx = side*(GATE_OPEN_W/2+gatePillarW/2);
+    var pillar = mkBox(gatePillarW, GATE_H, GATE_D, gateFg.mat);
+    place(pillar, GATE_X+lx, GATE_H/2, OUTER_HZ, 0);
+    gateFg.group.add(pillar);
+  });
+  var gateOpenLintel = mkBox(GATE_OPEN_W, GATE_H-GATE_OPEN_H, GATE_D, gateFg.mat);
+  place(gateOpenLintel, GATE_X, GATE_OPEN_H+(GATE_H-GATE_OPEN_H)/2, OUTER_HZ, 0);
+  gateFg.group.add(gateOpenLintel);
   var gateLip = mkBox(GATE_W*1.1, 0.7, GATE_D*1.1, gateFg.mat);
   place(gateLip, GATE_X, GATE_H-0.6, OUTER_HZ, 0);
   gateFg.group.add(gateLip);
@@ -2115,20 +2204,30 @@ function buildMalbork(){
   gateRoof.rotation.y = Math.PI/4;
   place(gateRoof, GATE_X, GATE_H+1.1+GATE_ROOF_H/2, OUTER_HZ);
   roofCaps.group.add(gateRoof);
-  var gateDoor = mkBox(3.4, 4.6, 0.4, windowMat);
-  place(gateDoor, GATE_X, 2.3, OUTER_HZ+GATE_D/2-0.05, 0);
-  gateFg.group.add(gateDoor);
+  // open double doors, swung flat against the opening's own pillars
+  // instead of a single closed leaf blocking it -- decorative, kept in
+  // interiorGroup (never fades) like the equivalent open doors at
+  // Bodiam's gatehouse and Vincennes' two gate towers.
+  (function buildOpenGateDoors(){
+    var leafLen = GATE_D*0.42, leafH = GATE_OPEN_H*0.94;
+    [-1,1].forEach(function(side){
+      var lx = side*(GATE_OPEN_W/2-0.08);
+      var leaf = mkBox(0.16, leafH, leafLen, woodMat);
+      place(leaf, GATE_X+lx, leafH/2+0.05, OUTER_HZ+GATE_D/2-leafLen/2-0.15, 0);
+      interiorGroup.add(leaf);
+    });
+  })();
   (function buildPortcullis(){
+    // RAISED into the housing above the opening (small peek below the
+    // ceiling, mostly tucked into the solid lintel stone above) so it no
+    // longer blocks the passage residents now walk through.
     var pg = new T.Group();
-    var gh = GATE_H*0.42, gw = 2.6;
     var pgMat = metalMat.clone();
-    for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.08, gh, 0.08, pgMat), GATE_X+bi*(gw/6), gh/2+0.2, OUTER_HZ+GATE_D*0.3));
-    for (var bj=0;bj<4;bj++) pg.add(place(mkBox(gw, 0.08, 0.08, pgMat), GATE_X, 0.5+bj*(gh/3.2), OUTER_HZ+GATE_D*0.3));
+    var gridH = 2.6, gridY = GATE_OPEN_H - 0.3 + gridH/2;
+    for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.08, gridH, 0.08, pgMat), GATE_X+bi*(GATE_OPEN_W/7), gridY, OUTER_HZ));
+    for (var bj=0;bj<3;bj++) pg.add(place(mkBox(GATE_OPEN_W*0.9, 0.08, 0.08, pgMat), GATE_X, GATE_OPEN_H-0.3+bj*(gridH/2.2), OUTER_HZ));
     gateFg.group.add(pg);
   })();
-  var innerDoor = mkBox(2.6, 3.8, 0.35, windowMat);
-  place(innerDoor, GATE_X, 1.9, INNER_HZ-0.05, 0);
-  innWallS.group.add(innerDoor);
   var bridge = mkBox(3.2, 0.32, (OUTER_HZ-INNER_HZ)+2.5, woodMat);
   place(bridge, GATE_X, -0.05, (OUTER_HZ+INNER_HZ)/2);
   group.add(bridge);
@@ -2425,8 +2524,16 @@ function buildMalbork(){
    * "between" the double wall) and detours through the cloister gate
    * into the High Castle courtyard, all on the y=0 bailey surface so
    * nothing floats once the low/middle-castle shell fades. ---------- */
+  // gate.path: 内壁の開口(内側口)→ 乾堀を渡る橋の中心線 → 外壁の橋門塔の
+  // 開口(外側口)まで、実際に貫通した4点の折れ線。toGate/through がこの
+  // 経路を必ず順に経由してから outside の消失フェードに入る(section 6.5)。
   var life = {
-    gates: [ { x:GATE_X, z:OUTER_HZ, outDir:{x:0,z:1}, vanishDist: (OUTER_HZ-INNER_HZ)+26 } ],
+    gates: [ { path: [
+        {x:GATE_X, z:INNER_HZ-INNER_WT/2},
+        {x:GATE_X, z:INNER_HZ+INNER_WT/2},
+        {x:GATE_X, z:OUTER_HZ-GATE_D/2},
+        {x:GATE_X, z:OUTER_HZ+GATE_D/2}
+      ], outDir:{x:0,z:1}, vanishDist: ((OUTER_HZ-INNER_HZ)+26) - GATE_D/2 } ],
     courtyard: [
       { minX:-50, maxX:58,  minZ:-130, maxZ:64 },   // 中城の広い中庭
       { minX:20,  maxX:60,  minZ:66,   maxZ:150 }   // 低城、高城の東〜南に開けた区画
@@ -3434,19 +3541,27 @@ var residentGroup = new T.Group();
 scene.add(residentGroup);
 var residents = []; // { obj, kind, state, ... } のフラット配列
 
+// gate.path は「中庭側の内側口 -> (壁/塔/橋を貫く中間waypoint...) -> 場外
+// 側の外側口」の中心線を並べた配列(最低2点)。内側口=path[0]、外側口=
+// path末尾。'through'/'throughIn' がこの中間区間を等身大のまま順に歩き、
+// 開口・橋の通路を実際に通り抜けて見えるようにする(壁や扉をすり抜けな
+// い)。'outside' のフェード(場外への消失)は外側口を起点に計測する。
+function gateOuterPoint(gate){ return gate.path[gate.path.length-1]; }
+function gateInnerPoint(gate){ return gate.path[0]; }
 function newFarmer(life){
   var obj = makeNpcObject('farmer');
   var npc = { obj:obj, kind:'farmer', speed: rand(1.0,1.5), idle:0 };
   var startAtGate = life.gates && life.gates.length && Math.random() < 0.3;
   if (startAtGate){
     var gate = life.gates[Math.floor(Math.random()*life.gates.length)];
+    var outer = gateOuterPoint(gate);
     var vd = gate.vanishDist || 40;
     var t = rand(0.08, 0.92);
     var travelled = vd*t;
     npc.gate = gate;
     npc.state = Math.random() < 0.5 ? 'outside' : 'returning'; // 橋の途中から半々で出入りを再現
     var dirSign = npc.state === 'outside' ? 1 : -1;
-    obj.position.set(gate.x + gate.outDir.x*travelled, 0, gate.z + gate.outDir.z*travelled);
+    obj.position.set(outer.x + gate.outDir.x*travelled, 0, outer.z + gate.outDir.z*travelled);
     obj.rotation.y = Math.atan2(gate.outDir.x*dirSign, gate.outDir.z*dirSign);
     obj.scale.setScalar(gateFadeScale(travelled, vd));
   } else {
@@ -3473,12 +3588,23 @@ function updateFarmer(npc, life, dt){
       }
     }
   } else if (npc.state === 'toGate'){
-    if (stepToward(obj, npc.gate.x, npc.gate.z, npc.speed, dt)) npc.state = 'outside';
+    var inner = gateInnerPoint(npc.gate);
+    if (stepToward(obj, inner.x, inner.z, npc.speed, dt)){
+      npc.pathIdx = 1;
+      npc.state = npc.pathIdx < npc.gate.path.length ? 'through' : 'outside';
+    }
+  } else if (npc.state === 'through'){
+    // 開口・橋を実寸のまま歩いて通り抜ける区間(壁や扉をすり抜けない)
+    var wp = npc.gate.path[npc.pathIdx];
+    if (stepToward(obj, wp.x, wp.z, npc.speed, dt)){
+      npc.pathIdx++;
+      if (npc.pathIdx >= npc.gate.path.length) npc.state = 'outside';
+    }
   } else if (npc.state === 'outside'){
-    var g = npc.gate, vd = g.vanishDist || 40;
-    var tx = g.x + g.outDir.x*vd, tz = g.z + g.outDir.z*vd;
+    var g = npc.gate, vd = g.vanishDist || 40, outer = gateOuterPoint(g);
+    var tx = outer.x + g.outDir.x*vd, tz = outer.z + g.outDir.z*vd;
     var arrived = stepToward(obj, tx, tz, npc.speed, dt);
-    var travelled = Math.hypot(obj.position.x-g.x, obj.position.z-g.z);
+    var travelled = Math.hypot(obj.position.x-outer.x, obj.position.z-outer.z);
     obj.scale.setScalar(gateFadeScale(travelled, vd));
     if (arrived){
       obj.visible = false;
@@ -3493,16 +3619,33 @@ function updateFarmer(npc, life, dt){
       npc.state = 'returning';
     }
   } else if (npc.state === 'returning'){
-    var g2 = npc.gate, vd2 = g2.vanishDist || 40;
-    var arrived2 = stepToward(obj, g2.x, g2.z, npc.speed, dt);
-    var travelled2 = Math.hypot(obj.position.x-g2.x, obj.position.z-g2.z);
+    var g2 = npc.gate, vd2 = g2.vanishDist || 40, outer2 = gateOuterPoint(g2);
+    var arrived2 = stepToward(obj, outer2.x, outer2.z, npc.speed, dt);
+    var travelled2 = Math.hypot(obj.position.x-outer2.x, obj.position.z-outer2.z);
     obj.scale.setScalar(gateFadeScale(travelled2, vd2));
     if (arrived2){
       obj.scale.setScalar(1);
-      var pt2 = pickCourtyardPoint(life.courtyard);
-      npc.wx = pt2.x; npc.wz = pt2.z;
-      npc.state = 'wander';
-      npc.idle = rand(0.3, 1.5);
+      npc.pathIdx = npc.gate.path.length - 2;
+      if (npc.pathIdx >= 0){
+        npc.state = 'throughIn';
+      } else {
+        var pt2b = pickCourtyardPoint(life.courtyard);
+        npc.wx = pt2b.x; npc.wz = pt2b.z;
+        npc.state = 'wander';
+        npc.idle = rand(0.3, 1.5);
+      }
+    }
+  } else if (npc.state === 'throughIn'){
+    // 場外から戻り、開口・橋を逆順に実寸のまま歩いて中庭側の内側口へ
+    var wp2 = npc.gate.path[npc.pathIdx];
+    if (stepToward(obj, wp2.x, wp2.z, npc.speed, dt)){
+      npc.pathIdx--;
+      if (npc.pathIdx < 0){
+        var pt2 = pickCourtyardPoint(life.courtyard);
+        npc.wx = pt2.x; npc.wz = pt2.z;
+        npc.state = 'wander';
+        npc.idle = rand(0.3, 1.5);
+      }
     }
   }
 }
@@ -3689,6 +3832,24 @@ window.__debugState = function(){
     residentsOn: residentsOn, residentCount: residents.length,
     residentGroupChildren: residentGroup.children.length
   };
+};
+window.__stepResidents = function(steps, dt){
+  // testing helper: fast-forwards the resident state machine without
+  // waiting on real time, then re-renders once. Lets a QA pass catch a
+  // farmer mid-gate-passage ('through'/'throughIn') deterministically
+  // instead of hoping a burst of screenshots lands on the right frame.
+  steps = steps || 1; dt = dt || 0.1;
+  for (var i=0;i<steps;i++) updateResidents(dt);
+  renderer.render(scene, camera);
+};
+window.__residentStates = function(){
+  // testing helper: dumps each resident's kind/state/position so a QA
+  // pass can confirm farmers actually reach 'through'/'throughIn' (i.e.
+  // walk the gate opening) rather than only ever 'wander'/'outside'.
+  return residents.map(function(npc){
+    return { kind: npc.kind, state: npc.state,
+      x: npc.obj.position.x, z: npc.obj.position.z, visible: npc.obj.visible };
+  });
 };
 window.__scene = scene; window.__camera = camera; window.__renderer = renderer;
 window.__MOUNTAIN_RINGS = MOUNTAIN_RINGS;
