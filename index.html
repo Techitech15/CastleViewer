@@ -1810,6 +1810,646 @@ function buildVincennes(){
 }
 
 /* ====================================================================
+ * 1.6 Malbork Castle (Zamek w Malborku) procedural builder
+ * ====================================================================
+ * Returns the same { group, fadeGroups, interiorGroup, info, pickables,
+ * windowMat, waterMats, labelGroup, life } contract as buildBodiam() /
+ * buildVincennes(). Largest of the three: a ~350 x 170m double-walled
+ * Low Castle ring (dry ditch between an 8m inner wall and a 5m outer
+ * wall) encircling the Middle Castle's open wing cluster and the High
+ * Castle's closed monastic quadrangle, with the Nogat river running
+ * along the west edge. Like Vincennes this is a TWO-TIER cutaway: the
+ * Low/Middle Castle shell (outer+inner ring walls, the middle-castle
+ * wings -- tier 'outer', the same global WALL_START/END + ROOF_START/
+ * END bands every castle shares) fades first; the High Castle's own
+ * four-wing cloister shell (tier 'inner', the global DONJON_WALL_START/
+ * END + DONJON_ROOF_START/END bands Vincennes' donjon also uses) only
+ * fades once the outer shell is already gone, revealing the cloister
+ * and its four rooms.
+ */
+function buildMalbork(){
+  var group = new T.Group();
+  var interiorGroup = new T.Group();
+  group.add(interiorGroup);
+  var fadeGroups = [];
+  var pickables = [];
+
+  function makeFadeGroup(name, dir, isRoof, colorHex, tier){
+    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    var g = new T.Group();
+    g.name = name;
+    group.add(g);
+    var desc = { group:g, mat:mat, dir:dir, roof: !!isRoof, op:1, name:name, tier: tier || 'outer' };
+    fadeGroups.push(desc);
+    return desc;
+  }
+  function norm(x,z){ var l = Math.hypot(x,z)||1; return {x:x/l, z:z/l}; }
+
+  /* ---- palette: red Gothic brick, terracotta roofs, sparing whitewash
+   * trim -- deliberately distinct from Bodiam/Vincennes' sandstone and
+   * limestone tones. ------------------------------------------------- */
+  var BRICK_WALL   = 0x9a4a32;
+  var BRICK_WALL_V = 0x8c4029; // slight variance for wings/towers
+  var BRICK_DARK   = 0x6e3320;
+  var ROOF_COL     = 0xb0492f; // terracotta tile
+  var WHITE_TRIM   = 0xe6dcc6;
+  var WINDOW_COL   = 0x1c150e;
+  var FLOOR_COL    = 0x9c8a74;
+  var STUB_COL     = 0x776a58;
+  var WOOD_COL     = 0x6b4f34;
+  var METAL_COL    = 0x2a2925;
+  var WATER_COL    = 0x3d5f62; // Nogat river
+  var GRASS_COL    = 0x5c7a48;
+  var GRASS_COL2   = 0x6c8a52;
+  var DITCH_COL    = 0x59703c; // dry-ditch floor (grass, not water)
+  var DITCH_MID    = 0x4a5a30;
+  var DITCH_EDGE   = 0x384a24;
+  var COBBLE_COL   = 0x8f897a; // High Castle cloister courtyard paving
+
+  var windowMat  = new T.MeshLambertMaterial({ color: WINDOW_COL });
+  var floorMat   = new T.MeshLambertMaterial({ color: FLOOR_COL });
+  var stubMat    = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
+  var woodMat    = new T.MeshLambertMaterial({ color: WOOD_COL });
+  var metalMat   = new T.MeshLambertMaterial({ color: METAL_COL });
+  var grassMat   = new T.MeshLambertMaterial({ color: GRASS_COL });
+  var grassMat2  = new T.MeshLambertMaterial({ color: GRASS_COL2 });
+  var cobbleMat  = new T.MeshLambertMaterial({ color: COBBLE_COL });
+  var trimMat    = new T.MeshLambertMaterial({ color: WHITE_TRIM });
+  var darkWoodMat= new T.MeshLambertMaterial({ color: 0x2a1c14 });
+  var stoneDarkMat = new T.MeshLambertMaterial({ color: BRICK_DARK });
+  var riverMat   = new T.MeshPhongMaterial({ color: WATER_COL, transparent:true, opacity:0.85, shininess:85, specular:0x9fd4e0 });
+
+  /* -------------------------------------------------------------- *
+   * shared small helpers (each castle keeps its own local copies --
+   * see buildBodiam/buildVincennes for the same pattern)
+   * -------------------------------------------------------------- */
+  function addCrenellations(target, mat, cx, cz, length, ry, topY, thickness, merlonH){
+    var mh = merlonH || 1.0, merlonW = 1.3, gapW = 1.15, mt = thickness*0.72;
+    var period = merlonW + gapW;
+    var count = Math.max(1, Math.floor(length/period));
+    var start = -(count*period)/2 + merlonW/2;
+    var co = Math.cos(ry), si = Math.sin(ry);
+    for (var i=0;i<count;i++){
+      var lx = start + i*period;
+      var wx = cx + lx*co, wz = cz - lx*si;
+      var m = mkBox(merlonW, mh, mt, mat);
+      place(m, wx, topY + mh/2, wz, ry);
+      target.add(m);
+    }
+  }
+  // symmetric gable roof: two mirrored lean slopes (outer eave -> centre
+  // ridge) via the same verified rotation math Bodiam's leanToRoof uses,
+  // plus a triangular gable-end infill (DoubleSide, orientation-agnostic)
+  // at each end of the ridge so wing corners never show a sky-gap.
+  function leanSlope(mat, spanAxis, spanA, spanB, outerCoord, innerCoord, outerY, innerY){
+    var run = outerCoord - innerCoord, rise = outerY - innerY;
+    var slant = Math.hypot(run, rise);
+    var spanLen = Math.abs(spanB - spanA) + 1.2;
+    var th = 0.4;
+    var geo = spanAxis === 'x'
+      ? new T.BoxGeometry(spanLen, th, slant)
+      : new T.BoxGeometry(slant, th, spanLen);
+    var mesh = new T.Mesh(geo, mat);
+    var midOI = (outerCoord+innerCoord)/2, midY = (outerY+innerY)/2, midSpan = (spanA+spanB)/2;
+    if (spanAxis === 'x'){
+      mesh.position.set(midSpan, midY, midOI);
+      mesh.rotation.x = (run > 0 ? -Math.atan2(rise,Math.abs(run)) : Math.atan2(rise,Math.abs(run)));
+    } else {
+      mesh.position.set(midOI, midY, midSpan);
+      mesh.rotation.z = (run > 0 ? Math.atan2(rise,Math.abs(run)) : -Math.atan2(rise,Math.abs(run)));
+    }
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    return mesh;
+  }
+  function gableRoof(target, mat, axis, cx, cz, spanA, spanB, halfWidth, eaveY, ridgeRise){
+    var ridgeY = eaveY + ridgeRise;
+    if (axis === 'x'){
+      target.add(leanSlope(mat, 'x', spanA, spanB, cz-halfWidth, cz, eaveY, ridgeY));
+      target.add(leanSlope(mat, 'x', spanA, spanB, cz+halfWidth, cz, eaveY, ridgeY));
+    } else {
+      target.add(leanSlope(mat, 'z', spanA, spanB, cx-halfWidth, cx, eaveY, ridgeY));
+      target.add(leanSlope(mat, 'z', spanA, spanB, cx+halfWidth, cx, eaveY, ridgeY));
+    }
+    var shape = new T.Shape();
+    shape.moveTo(-halfWidth,0); shape.lineTo(halfWidth,0); shape.lineTo(0,ridgeRise); shape.closePath();
+    var geo = new T.ShapeGeometry(shape);
+    var endMat = new T.MeshLambertMaterial({ color: mat.color.getHex(), side: T.DoubleSide });
+    [spanA, spanB].forEach(function(s){
+      var m = new T.Mesh(geo, endMat);
+      m.castShadow = true; m.receiveShadow = true;
+      // spanA/spanB are absolute world coordinates (same convention as
+      // leanSlope above), so `s` is used directly here -- NOT cx+s/cz+s.
+      if (axis === 'x'){ m.position.set(s, eaveY, cz); m.rotation.y = Math.PI/2; }
+      else { m.position.set(cx, eaveY, s); }
+      target.add(m);
+    });
+  }
+  function smallTower(fg, cx, cz, round, r, h, roofH){
+    var body = round ? mkCyl(r, r*1.05, h, 12, fg.mat) : mkBox(r*1.8, h, r*1.8, fg.mat);
+    place(body, cx, h/2, cz);
+    fg.group.add(body);
+    var roof = round ? mkCone(r*1.25, roofH, 12, roofCaps.mat) : mkCone(r*1.3, roofH, 4, roofCaps.mat);
+    if (!round) roof.rotation.y = Math.PI/4;
+    place(roof, cx, h+roofH/2, cz);
+    roofCaps.group.add(roof);
+  }
+
+  /* -------------------------------------------------------------- *
+   * rectangular moat/ground/bailey terrain builder -- identical to (and
+   * copied from, per this file's per-castle local-helper convention)
+   * buildVincennes' own buildRectMoatSystem: a rectangle isn't covered by
+   * the shared buildWaterMoatSystem (square-only, section 0.5), so both
+   * large castles keep their own copy of this rect-aware counterpart,
+   * built from the same top-level buildUndulatingGround/buildBankRamp.
+   * -------------------------------------------------------------- */
+  function buildRectMoatSystem(opts){
+    var g = opts.group;
+    var groundY = opts.groundY, waterY = opts.waterY;
+    var bailHX = opts.bailHalfX, bailHZ = opts.bailHalfZ, islandY = opts.islandY!=null?opts.islandY:0.02;
+    var moatOHX = opts.moatOuterHalfX, moatOHZ = opts.moatOuterHalfZ;
+    var bankWOut = opts.bankWidthOut!=null?opts.bankWidthOut:5.0;
+    var bankWIn = opts.bankWidthIn!=null?opts.bankWidthIn:3.5;
+    var waterHX = moatOHX - bankWOut, waterHZ = moatOHZ - bankWOut;
+    var waterInHX = bailHX + bankWIn, waterInHZ = bailHZ + bankWIn;
+
+    var groundSize = opts.groundSize||2200, groundSegs = opts.groundSegs||88;
+    var cellSize = groundSize/groundSegs;
+    var cutHalf = Math.max(moatOHX, moatOHZ) + Math.max(30, cellSize*2.5);
+    var ground = buildUndulatingGround(cutHalf, groundSize, groundSegs, opts.groundMat, cutHalf);
+    ground.position.y = groundY;
+    g.add(ground);
+
+    var collarShape = new T.Shape();
+    collarShape.moveTo(-cutHalf,-cutHalf); collarShape.lineTo(cutHalf,-cutHalf);
+    collarShape.lineTo(cutHalf,cutHalf); collarShape.lineTo(-cutHalf,cutHalf); collarShape.closePath();
+    var collarHole = new T.Path();
+    collarHole.moveTo(-moatOHX,-moatOHZ); collarHole.lineTo(-moatOHX,moatOHZ);
+    collarHole.lineTo(moatOHX,moatOHZ); collarHole.lineTo(moatOHX,-moatOHZ); collarHole.closePath();
+    collarShape.holes.push(collarHole);
+    var collarGeo = new T.ShapeGeometry(collarShape);
+    collarGeo.rotateX(-Math.PI/2);
+    var collar = new T.Mesh(collarGeo, opts.groundMat);
+    collar.position.y = groundY; collar.receiveShadow = true;
+    g.add(collar);
+
+    var islandShape = new T.Shape();
+    islandShape.moveTo(-bailHX,-bailHZ); islandShape.lineTo(bailHX,-bailHZ);
+    islandShape.lineTo(bailHX,bailHZ); islandShape.lineTo(-bailHX,bailHZ); islandShape.closePath();
+    var islandGeo = new T.ShapeGeometry(islandShape);
+    islandGeo.rotateX(-Math.PI/2);
+    var island = new T.Mesh(islandGeo, opts.islandMat);
+    island.position.y = islandY; island.receiveShadow = true;
+    g.add(island);
+
+    var colTop = new T.Color(opts.bankColorTop!=null?opts.bankColorTop:0x9c8a5e);
+    var colMid = new T.Color(opts.bankColorMid!=null?opts.bankColorMid:0x6e5c3e);
+    var colEdge = new T.Color(opts.bankColorEdge!=null?opts.bankColorEdge:0x332818);
+
+    var bankOuter = buildBankRamp('rect', moatOHX, waterHX, groundY, waterY, colTop, colMid, colEdge, 64, 6, moatOHZ, waterHZ);
+    g.add(bankOuter);
+    var bankInner = buildBankRamp('rect', bailHX, waterInHX, islandY, waterY, colTop, colMid, colEdge, 64, 6, bailHZ, waterInHZ);
+    g.add(bankInner);
+
+    var moatShape = new T.Shape();
+    moatShape.moveTo(-waterHX,-waterHZ); moatShape.lineTo(waterHX,-waterHZ);
+    moatShape.lineTo(waterHX,waterHZ); moatShape.lineTo(-waterHX,waterHZ); moatShape.closePath();
+    var hole = new T.Path();
+    hole.moveTo(-waterInHX,-waterInHZ); hole.lineTo(-waterInHX,waterInHZ);
+    hole.lineTo(waterInHX,waterInHZ); hole.lineTo(waterInHX,-waterInHZ); hole.closePath();
+    moatShape.holes.push(hole);
+    var moatGeo = new T.ShapeGeometry(moatShape);
+    moatGeo.rotateX(-Math.PI/2);
+    var waterMat = new T.MeshPhongMaterial({ color: opts.waterColor||0x2e5b66,
+      transparent:true, opacity:opts.waterOpacity!=null?opts.waterOpacity:0.82, shininess:90, specular:0x9fd4e0 });
+    var moatWater = new T.Mesh(moatGeo, waterMat);
+    moatWater.position.y = waterY;
+    g.add(moatWater);
+
+    return { ground:ground, island:island, moatWater:moatWater, waterMat:waterMat,
+      waterHalfX:waterHX, waterHalfZ:waterHZ, waterInnerHalfX:waterInHX, waterInnerHalfZ:waterInHZ,
+      waterY:waterY, groundY:groundY };
+  }
+
+  /* ================================================================
+   * LOW CASTLE: double brick ring wall + dry ditch + bridge gate.
+   * The ditch/ground/bailey terrain reuses the buildRectMoatSystem copy
+   * above with a shallow, opaque "water" plane standing in for a grass-
+   * floored dry ditch -- its material is deliberately left OUT of the
+   * returned waterMats list so the day/night water-colour hook never
+   * touches it.
+   * ================================================================ */
+  var OUTER_HX = 85, OUTER_HZ = 175;  // outer wall ring, half-extents (170 x 350m)
+  var INNER_HX = 65, INNER_HZ = 155;  // inner wall ring == the High/Middle Castle bailey footprint
+  var OUTER_WT = 1.2, OUTER_WH = 5;
+  var INNER_WT = 1.6, INNER_WH = 8;
+  var GROUND_Y = -0.6, DITCH_Y = GROUND_Y - 0.55; // shallow dry ditch (grass floor, not water)
+
+  var lowSys = buildRectMoatSystem({
+    group: group, groundY: GROUND_Y, waterY: DITCH_Y,
+    bailHalfX: INNER_HX, bailHalfZ: INNER_HZ, islandY: 0.02,
+    moatOuterHalfX: OUTER_HX, moatOuterHalfZ: OUTER_HZ,
+    bankWidthOut: 3.5, bankWidthIn: 2.5,
+    groundMat: grassMat, islandMat: grassMat2,
+    waterColor: DITCH_COL, waterOpacity: 1,
+    bankColorTop: GRASS_COL, bankColorMid: DITCH_MID, bankColorEdge: DITCH_EDGE,
+    groundSize: 2400, groundSegs: 96
+  });
+  lowSys.waterMat.shininess = 4;
+  lowSys.waterMat.specular.setHex(0x223318);
+  registerPick(pickables, 'structure', 0, DITCH_Y+0.3, -OUTER_HZ+OUTER_HZ*0.55, OUTER_HX*1.7, 1.0, (OUTER_HZ-INNER_HZ)*0.85,
+    '乾堀 Dry Moat', '水を張らない草地の空堀。低城の二重城壁を隔てる防御帯として全周をめぐる。');
+
+  var lowWallN = makeFadeGroup('lowOuterN', {x:0,z:-1}, false, BRICK_WALL);
+  var lowWallS = makeFadeGroup('lowOuterS', {x:0,z:1},  false, BRICK_WALL);
+  var lowWallE = makeFadeGroup('lowOuterE', {x:1,z:0},  false, BRICK_WALL);
+  var lowWallW = makeFadeGroup('lowOuterW', {x:-1,z:0}, false, BRICK_WALL);
+  var innWallN = makeFadeGroup('lowInnerN', {x:0,z:-1}, false, BRICK_WALL_V);
+  var innWallS = makeFadeGroup('lowInnerS', {x:0,z:1},  false, BRICK_WALL_V);
+  var innWallE = makeFadeGroup('lowInnerE', {x:1,z:0},  false, BRICK_WALL_V);
+  var innWallW = makeFadeGroup('lowInnerW', {x:-1,z:0}, false, BRICK_WALL_V);
+  var gateFg   = makeFadeGroup('bridgeGate', {x:0,z:1}, false, BRICK_WALL_V);
+  var roofCaps = makeFadeGroup('lowRoofCaps', null, true, ROOF_COL); // outer-tier small-tower + gate roofs
+
+  function ringSide(fg, cx, cz, length, ry, thickness, height, mh){
+    var wall = mkBox(length, height, thickness, fg.mat);
+    place(wall, cx, height/2, cz, ry);
+    fg.group.add(wall);
+    addCrenellations(fg.group, fg.mat, cx, cz, length, ry, height, thickness, mh);
+  }
+  ringSide(lowWallN, 0, -OUTER_HZ, 2*OUTER_HX, 0, OUTER_WT, OUTER_WH, 0.9);
+  ringSide(lowWallS, 0,  OUTER_HZ, 2*OUTER_HX, Math.PI, OUTER_WT, OUTER_WH, 0.9);
+  ringSide(lowWallE, OUTER_HX, 0, 2*OUTER_HZ, -Math.PI/2, OUTER_WT, OUTER_WH, 0.9);
+  ringSide(lowWallW, -OUTER_HX, 0, 2*OUTER_HZ, Math.PI/2, OUTER_WT, OUTER_WH, 0.9);
+  ringSide(innWallN, 0, -INNER_HZ, 2*INNER_HX, 0, INNER_WT, INNER_WH, 1.2);
+  ringSide(innWallS, 0,  INNER_HZ, 2*INNER_HX, Math.PI, INNER_WT, INNER_WH, 1.2);
+  ringSide(innWallE, INNER_HX, 0, 2*INNER_HZ, -Math.PI/2, INNER_WT, INNER_WH, 1.2);
+  ringSide(innWallW, -INNER_HX, 0, 2*INNER_HZ, Math.PI/2, INNER_WT, INNER_WH, 1.2);
+  registerPick(pickables, 'structure', 0, (OUTER_WH+INNER_WH)/4, -OUTER_HZ, OUTER_HX*1.6, INNER_WH, OUTER_WT*3,
+    '二重城壁 Double Curtain Wall', '内壁(高さ約8m)と外壁(高さ約5m)からなる低城の二重防壁。間を乾いた堀が隔てる。');
+
+  // small towers along the outer ring: 4 corners (round, conical roof) +
+  // west-side (riverside) and east-side mid towers (mixed round/square,
+  // per spec's "円錐/角錐のテラコッタ屋根")
+  [[-OUTER_HX,-OUTER_HZ,lowWallN],[OUTER_HX,-OUTER_HZ,lowWallN],
+   [OUTER_HX,OUTER_HZ,lowWallS],[-OUTER_HX,OUTER_HZ,lowWallS]].forEach(function(p){
+    smallTower(p[2], p[0], p[1], true, 4.2, 10, 4.5);
+  });
+  smallTower(lowWallW, -OUTER_HX, -60, true, 3.6, 9, 4.0);
+  smallTower(lowWallW, -OUTER_HX,  60, true, 3.6, 9, 4.0);
+  smallTower(lowWallE,  OUTER_HX, -80, false, 3.4, 9, 4.2);
+  smallTower(lowWallE,  OUTER_HX,  80, false, 3.4, 9, 4.2);
+
+  // Bridge Gate (主入口): single gate tower straddling the outer wall on
+  // its south side, east-leaning per spec ("南東に橋門"); the inner wall
+  // gets a plain door recess at the same X, and a timber bridge spans the
+  // dry ditch between the two.
+  var GATE_X = 42, GATE_W = 10, GATE_D = 8, GATE_H = 24, GATE_ROOF_H = 7.5;
+  var gateBody = mkBox(GATE_W, GATE_H, GATE_D, gateFg.mat);
+  place(gateBody, GATE_X, GATE_H/2, OUTER_HZ, 0);
+  gateFg.group.add(gateBody);
+  var gateLip = mkBox(GATE_W*1.1, 0.7, GATE_D*1.1, gateFg.mat);
+  place(gateLip, GATE_X, GATE_H-0.6, OUTER_HZ, 0);
+  gateFg.group.add(gateLip);
+  addCrenellations(gateFg.group, gateFg.mat, GATE_X, OUTER_HZ, GATE_W, 0, GATE_H, GATE_D, 1.1);
+  var gateRoof = mkCone(GATE_W*0.62, GATE_ROOF_H, 4, roofCaps.mat);
+  gateRoof.rotation.y = Math.PI/4;
+  place(gateRoof, GATE_X, GATE_H+1.1+GATE_ROOF_H/2, OUTER_HZ);
+  roofCaps.group.add(gateRoof);
+  var gateDoor = mkBox(3.4, 4.6, 0.4, windowMat);
+  place(gateDoor, GATE_X, 2.3, OUTER_HZ+GATE_D/2-0.05, 0);
+  gateFg.group.add(gateDoor);
+  (function buildPortcullis(){
+    var pg = new T.Group();
+    var gh = GATE_H*0.42, gw = 2.6;
+    var pgMat = metalMat.clone();
+    for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.08, gh, 0.08, pgMat), GATE_X+bi*(gw/6), gh/2+0.2, OUTER_HZ+GATE_D*0.3));
+    for (var bj=0;bj<4;bj++) pg.add(place(mkBox(gw, 0.08, 0.08, pgMat), GATE_X, 0.5+bj*(gh/3.2), OUTER_HZ+GATE_D*0.3));
+    gateFg.group.add(pg);
+  })();
+  var innerDoor = mkBox(2.6, 3.8, 0.35, windowMat);
+  place(innerDoor, GATE_X, 1.9, INNER_HZ-0.05, 0);
+  innWallS.group.add(innerDoor);
+  var bridge = mkBox(3.2, 0.32, (OUTER_HZ-INNER_HZ)+2.5, woodMat);
+  place(bridge, GATE_X, -0.05, (OUTER_HZ+INNER_HZ)/2);
+  group.add(bridge);
+  registerPick(pickables, 'structure', GATE_X, GATE_H*0.4, OUTER_HZ, GATE_W*1.7, GATE_H*0.8, GATE_D*1.7,
+    '橋門 Bridge Gate', '低城南東に開く主門。乾堀を渡る木橋が外壁のこの塔と内壁の入口を結ぶ。');
+
+  // Nogat river: a wide flat water band along the west edge. Sits well
+  // above the field's noise-undulation ceiling (see buildUndulatingGround,
+  // section 0) rather than being recessed into it, so no far shore /
+  // bank grading is needed -- spec explicitly doesn't require one.
+  var RIVER_X0 = -(OUTER_HX+8), RIVER_W = 55;
+  var river = new T.Mesh(new T.PlaneGeometry(RIVER_W, 2*OUTER_HZ+140), riverMat);
+  river.rotation.x = -Math.PI/2;
+  place(river, RIVER_X0-RIVER_W/2, GROUND_Y+2.6, 0);
+  group.add(river);
+  registerPick(pickables, 'structure', RIVER_X0-RIVER_W*0.3, GROUND_Y+2.6, 0, RIVER_W*0.7, 1.0, 2*OUTER_HZ*0.7,
+    'ノガト川 Nogat River', '城の西側を流れる川。舟運により建材の煉瓦や食料を運び込む生命線だった。');
+
+  /* ================================================================
+   * MIDDLE CASTLE: an L-shaped wing cluster (west wing + north wing)
+   * around a large open courtyard, with the Grand Master's Palace as a
+   * taller, more decorated block on the west wing's river-facing north
+   * end. Tier 'outer' -- fades with the rest of the low-castle shell.
+   * ================================================================ */
+  var mcWallFg = makeFadeGroup('midWings', {x:-1,z:0}, false, BRICK_WALL);
+  var mcRoofFg = makeFadeGroup('midRoofs', null, true, ROOF_COL);
+  var mcPalaceFg = makeFadeGroup('midPalace', {x:-1,z:0}, false, BRICK_WALL_V);
+
+  var MC_WX = -56, MC_WD = 12, MC_WH = 15;   // west wing centreline / depth / eave height
+  var MC_WZ0 = -114, MC_WZ1 = 56;             // west wing (regular block) Z extent
+  var MC_NZ = -138, MC_ND = 12, MC_NH = 15;   // north wing centreline / depth / eave height
+  var MC_NX0 = -50, MC_NX1 = 52;              // north wing X extent
+
+  function wingBlock(fg, cx, cz, w, d, h, windowsAxis){
+    var body = mkBox(w, h, d, fg.mat);
+    place(body, cx, h/2, cz);
+    fg.group.add(body);
+    var storeys = Math.max(1, Math.floor(h/4.2));
+    for (var s=0;s<storeys;s++){
+      var y = 2.6 + s*4.2;
+      if (y > h-1.5) break;
+      var win1 = mkBox(windowsAxis==='x'? 0.9:0.35, 1.8, windowsAxis==='x'? 0.35:0.9, windowMat);
+      place(win1, cx + (windowsAxis==='x'?0:w/2*0.98), y, cz + (windowsAxis==='x'?d/2*0.98:0));
+      fg.group.add(win1);
+      var win2 = win1.clone();
+      win2.position.set(cx - (windowsAxis==='x'?0:w/2*0.98), y, cz - (windowsAxis==='x'?d/2*0.98:0));
+      fg.group.add(win2);
+    }
+  }
+  // west wing, south of the palace block
+  wingBlock(mcWallFg, MC_WX, (MC_WZ0+MC_WZ1)/2, MC_WD, MC_WZ1-MC_WZ0, MC_WH, 'z');
+  gableRoof(mcRoofFg.group, mcRoofFg.mat, 'z', MC_WX, (MC_WZ0+MC_WZ1)/2, MC_WZ0, MC_WZ1, MC_WD/2, MC_WH, 5.5);
+  // north wing
+  wingBlock(mcWallFg, (MC_NX0+MC_NX1)/2, MC_NZ, MC_NX1-MC_NX0, MC_ND, MC_NH, 'x');
+  gableRoof(mcRoofFg.group, mcRoofFg.mat, 'x', (MC_NX0+MC_NX1)/2, MC_NZ, MC_NX0, MC_NX1, MC_ND/2, MC_NH, 5.5);
+  registerPick(pickables, 'structure', (MC_WX+ (MC_NX0+MC_NX1)/2)/2, 8, (MC_WZ1+MC_NZ)/2, 90, 15, 150,
+    '中城 Middle Castle', '高城の北に広がる区画。修道会の食料庫や工房が並ぶ翼棟が、広い中庭のL字を囲む。');
+
+  // Grand Master's Palace: taller decorated block on the west wing's
+  // river-facing north end, per spec ("北西端のノガト川に面して")
+  var GMP_Z0 = -140, GMP_Z1 = MC_WZ0, GMP_H = 20;
+  var gmpBody = mkBox(MC_WD+2, GMP_H, GMP_Z1-GMP_Z0, mcPalaceFg.mat);
+  place(gmpBody, MC_WX-1, GMP_H/2, (GMP_Z0+GMP_Z1)/2);
+  mcPalaceFg.group.add(gmpBody);
+  // tall decorative window column (facing the river, west face) -- per
+  // spec "装飾的な縦長窓列"
+  for (var gw=0; gw<5; gw++){
+    var wz = GMP_Z0 + 3.5 + gw*((GMP_Z1-GMP_Z0-7)/4);
+    var win = mkBox(0.4, GMP_H*0.42, 1.1, windowMat);
+    place(win, MC_WX-1-(MC_WD+2)/2*0.99, GMP_H*0.55, wz);
+    mcPalaceFg.group.add(win);
+    var cap = mkCone(0.75, 1.0, 3, windowMat);
+    cap.rotation.y = Math.PI/2;
+    place(cap, MC_WX-1-(MC_WD+2)/2*1.01, GMP_H*0.55+GMP_H*0.21+0.5, wz);
+    mcPalaceFg.group.add(cap);
+  }
+  // modest whitewash trim band (per spec "白い漆喰帯を控えめに")
+  var trimBand = mkBox(MC_WD+2.4, 0.6, GMP_Z1-GMP_Z0, trimMat);
+  place(trimBand, MC_WX-1, GMP_H*0.62, (GMP_Z0+GMP_Z1)/2);
+  mcPalaceFg.group.add(trimBand);
+  gableRoof(mcRoofFg.group, mcRoofFg.mat, 'z', MC_WX-1, (GMP_Z0+GMP_Z1)/2, GMP_Z0, GMP_Z1, (MC_WD+2)/2, GMP_H, 6.5);
+  registerPick(pickables, 'structure', MC_WX-1, GMP_H*0.5, (GMP_Z0+GMP_Z1)/2, MC_WD+4, GMP_H, GMP_Z1-GMP_Z0,
+    '大マスター宮殿 Grand Master’s Palace', 'ノガト川に面する中城北西端の宮殿。縦長の装飾窓が並ぶ、団長の政庁兼住居。');
+
+  /* ================================================================
+   * HIGH CASTLE: 60x60m closed cloister quadrangle around a 30x30m
+   * courtyard, four corner turrets, a 40m south-west main tower, and
+   * St Mary's Church apse projecting east. Tier 'inner' -- fades only
+   * once the low/middle-castle shell above has already faded away,
+   * per the same two-tier convention Vincennes' donjon uses.
+   * ================================================================ */
+  var HC_CX = -25, HC_CZ = 100, HC_HALF = 30, HC_WD = 15, HC_WH = 20, HC_RIDGE = 9;
+  var COURT_HALF = HC_HALF - HC_WD; // 15 -> 30x30m cloister courtyard
+
+  var hcWallN = makeFadeGroup('hcWallN', {x:0,z:-1}, false, BRICK_WALL_V, 'inner');
+  var hcWallS = makeFadeGroup('hcWallS', {x:0,z:1},  false, BRICK_WALL_V, 'inner');
+  var hcWallE = makeFadeGroup('hcWallE', {x:1,z:0},  false, BRICK_WALL_V, 'inner');
+  var hcWallW = makeFadeGroup('hcWallW', {x:-1,z:0}, false, BRICK_WALL_V, 'inner');
+  var hcRoof  = makeFadeGroup('hcRoof', null, true, ROOF_COL, 'inner');
+  var hcTurr  = makeFadeGroup('hcTurrets', null, true, BRICK_WALL_V, 'inner');
+  var hcTower = makeFadeGroup('hcMainTower', norm(-1,1), false, BRICK_WALL_V, 'inner');
+  var hcApse  = makeFadeGroup('hcApse', {x:1,z:0}, false, BRICK_WALL_V, 'inner');
+
+  function hcWingWall(fg, cx, cz, length, ry, gap){
+    if (!gap){
+      var wall = mkBox(length, HC_WH, 1.3, fg.mat);
+      place(wall, cx, HC_WH/2, cz, ry);
+      fg.group.add(wall);
+    } else {
+      var seg = (length-gap)/2;
+      var co = Math.cos(ry), si = Math.sin(ry);
+      [-1,1].forEach(function(sign){
+        var lx = sign*(gap/2+seg/2);
+        var w2 = mkBox(seg, HC_WH, 1.3, fg.mat);
+        place(w2, cx+lx*co, HC_WH/2, cz-lx*si, ry);
+        fg.group.add(w2);
+      });
+      // lintel closes the wall above the passage -- without it the gap
+      // would read as a full-height hole clear through to the sky rather
+      // than a gatehouse archway.
+      var doorH = 4.6;
+      var lintel = mkBox(gap, HC_WH-doorH, 1.3, fg.mat);
+      place(lintel, cx, doorH+(HC_WH-doorH)/2, cz, ry);
+      fg.group.add(lintel);
+      var arch = mkBox(gap*0.82, doorH, 0.5, windowMat);
+      place(arch, cx, doorH/2, cz, ry);
+      interiorGroup.add(arch);
+    }
+    addCrenellations(fg.group, fg.mat, cx, cz, length, ry, HC_WH, 1.3, 1.1);
+  }
+  function hcWindows(fg, cx, cz, ry, count, spread){
+    var co=Math.cos(ry), si=Math.sin(ry);
+    for (var i=0;i<count;i++){
+      var t = (i/(count-1) - 0.5) * spread;
+      var win = mkBox(0.7, 2.6, 0.35, windowMat);
+      place(win, cx+t*co, HC_WH*0.6, cz-t*si, ry);
+      fg.group.add(win);
+    }
+  }
+  // south wing (main tower side) / north wing (with cloister gate) /
+  // east wing (church) / west wing
+  hcWingWall(hcWallS, HC_CX, HC_CZ+HC_HALF, 2*HC_HALF, Math.PI);
+  hcWindows(hcWallS, HC_CX, HC_CZ+HC_HALF, Math.PI, 5, 44);
+  hcWingWall(hcWallN, HC_CX, HC_CZ-HC_HALF, 2*HC_HALF, 0, 4.2);
+  hcWindows(hcWallN, HC_CX, HC_CZ-HC_HALF, 0, 4, 40);
+  hcWingWall(hcWallE, HC_CX+HC_HALF, HC_CZ, 2*HC_HALF, -Math.PI/2);
+  hcWindows(hcWallE, HC_CX+HC_HALF, HC_CZ, -Math.PI/2, 5, 44);
+  hcWingWall(hcWallW, HC_CX-HC_HALF, HC_CZ, 2*HC_HALF, Math.PI/2);
+  hcWindows(hcWallW, HC_CX-HC_HALF, HC_CZ, Math.PI/2, 5, 44);
+
+  // NOTE: gableRoof's spanA/spanB are ABSOLUTE world coordinates (see
+  // leanSlope -- midSpan = (spanA+spanB)/2 is used directly as the
+  // roof's world position along the ridge axis), not offsets from cx/cz,
+  // so every call below adds HC_CX / HC_CZ explicitly.
+  gableRoof(hcRoof.group, hcRoof.mat, 'x', HC_CX, HC_CZ+HC_HALF-HC_WD/2, HC_CX-HC_HALF+1, HC_CX+HC_HALF-1, HC_WD/2, HC_WH, HC_RIDGE);
+  gableRoof(hcRoof.group, hcRoof.mat, 'x', HC_CX, HC_CZ-HC_HALF+HC_WD/2, HC_CX-HC_HALF+1, HC_CX+HC_HALF-1, HC_WD/2, HC_WH, HC_RIDGE);
+  gableRoof(hcRoof.group, hcRoof.mat, 'z', HC_CX+HC_HALF-HC_WD/2, HC_CZ, HC_CZ-HC_HALF+1, HC_CZ+HC_HALF-1, HC_WD/2, HC_WH, HC_RIDGE);
+  gableRoof(hcRoof.group, hcRoof.mat, 'z', HC_CX-HC_HALF+HC_WD/2, HC_CZ, HC_CZ-HC_HALF+1, HC_CZ+HC_HALF-1, HC_WD/2, HC_WH, HC_RIDGE);
+
+  // four corner pinnacles (小尖塔)
+  [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+    var cx = HC_CX+s[0]*(HC_HALF-1.6), cz = HC_CZ+s[1]*(HC_HALF-1.6);
+    var t = mkCyl(1.9, 2.0, 8, 10, hcTurr.mat);
+    place(t, cx, HC_WH+4, cz);
+    hcTurr.group.add(t);
+    var cap = mkCone(2.3, 4.5, 10, hcRoof.mat);
+    place(cap, cx, HC_WH+8+2.25, cz);
+    hcRoof.group.add(cap);
+  });
+
+  // south-west main tower (方形, ~40m, テラコッタの尖り屋根)
+  var MT_CX = HC_CX-HC_HALF, MT_CZ = HC_CZ+HC_HALF, MT_W = 8, MT_H = 40, MT_ROOF_H = 8;
+  var mtBody = mkBox(MT_W, MT_H, MT_W, hcTower.mat);
+  place(mtBody, MT_CX, MT_H/2, MT_CZ);
+  hcTower.group.add(mtBody);
+  var mtLip = mkBox(MT_W*1.1, 0.7, MT_W*1.1, hcTower.mat);
+  place(mtLip, MT_CX, MT_H-0.6, MT_CZ);
+  hcTower.group.add(mtLip);
+  for (var ms=0; ms<7; ms++){
+    var win = mkBox(0.6, 1.7, 0.35, windowMat);
+    place(win, MT_CX, 3.2+ms*5.2, MT_CZ+MT_W/2*0.99, 0);
+    hcTower.group.add(win);
+  }
+  var mtRoof = mkCone(MT_W*0.72, MT_ROOF_H, 4, hcRoof.mat);
+  mtRoof.rotation.y = Math.PI/4;
+  place(mtRoof, MT_CX, MT_H+0.7+MT_ROOF_H/2, MT_CZ);
+  hcRoof.group.add(mtRoof);
+  registerPick(pickables, 'structure', MT_CX, MT_H*0.42, MT_CZ, MT_W*1.8, MT_H*0.8, MT_W*1.8,
+    '主塔 Main Tower', '高城南西隅にそびえる高さ約40mの方形塔。テラコッタの尖り屋根を戴く、城内最高所。');
+
+  // St Mary's Church apse: polygonal projection east of the east wing
+  var APSE_CX = HC_CX+HC_HALF+5.5, APSE_CZ = HC_CZ-6, APSE_R = 6, APSE_H = HC_WH*0.9;
+  var apseBody = mkCyl(APSE_R, APSE_R, APSE_H, 6, hcApse.mat);
+  apseBody.rotation.y = Math.PI/6;
+  place(apseBody, APSE_CX, APSE_H/2, APSE_CZ);
+  hcApse.group.add(apseBody);
+  var apseRoof = mkCone(APSE_R*1.08, 4.5, 6, hcRoof.mat);
+  apseRoof.rotation.y = Math.PI/6;
+  place(apseRoof, APSE_CX, APSE_H+2.25, APSE_CZ);
+  hcRoof.group.add(apseRoof);
+  for (var af=0; af<3; af++){
+    // centred on angle 0 (+X, due east) -- the apse's outward-facing
+    // side, away from the wing it projects from
+    var ang = (af-1)*0.62;
+    var wx = APSE_CX + Math.cos(ang)*APSE_R*0.97, wz = APSE_CZ + Math.sin(ang)*APSE_R*0.97;
+    var awin = mkBox(0.55, APSE_H*0.55, 1.5, windowMat);
+    place(awin, wx, APSE_H*0.55, wz, -ang);
+    hcApse.group.add(awin);
+  }
+  registerPick(pickables, 'structure', APSE_CX, APSE_H*0.5, APSE_CZ, APSE_R*2.2, APSE_H, APSE_R*2.2,
+    '教会後陣 Church Apse', '聖母マリア教会の東端、多角形の後陣。大きなゴシック窓が特徴。');
+  registerPick(pickables, 'structure', HC_CX, HC_WH*0.5, HC_CZ, HC_HALF*2+6, HC_WH+HC_RIDGE, HC_HALF*2+6,
+    '高城 High Castle', '騎士団の心臓部。回廊が中庭を囲む四翼の修道院型建築で、教会・参事会室・食堂・団長居室を収めた。');
+
+  /* ---- cloister courtyard: cobbled paving + a small well canopy ---- */
+  var courtFloor = mkBox(2*COURT_HALF, 0.3, 2*COURT_HALF, cobbleMat);
+  place(courtFloor, HC_CX, -0.15, HC_CZ);
+  interiorGroup.add(courtFloor);
+  (function well(){
+    var wx=HC_CX-3, wz=HC_CZ+2;
+    var kerb = mkCyl(1.0,1.0,0.9,16, stoneDarkMat);
+    place(kerb, wx, 0.45, wz);
+    interiorGroup.add(kerb);
+    [[-0.8,-0.8],[0.8,-0.8],[0.8,0.8],[-0.8,0.8]].forEach(function(p){
+      var post = mkBox(0.16,2.2,0.16, woodMat);
+      place(post, wx+p[0], 1.1, wz+p[1]);
+      interiorGroup.add(post);
+    });
+    var canopy = mkCone(1.6, 1.1, 4, floorMat);
+    canopy.rotation.y = Math.PI/4;
+    place(canopy, wx, 2.75, wz);
+    interiorGroup.add(canopy);
+  })();
+
+  /* ---- four interior rooms (revealed once the inner-tier cutaway
+   * fades hcWallN/S/E/W + hcRoof) --------------------------------- */
+  function pickRoom(x0,x1,z0,z1,h,name,desc){
+    registerPick(pickables, 'room', (x0+x1)/2, h/2, (z0+z1)/2, Math.abs(x1-x0), h, Math.abs(z1-z0), name, desc);
+  }
+  // St Mary's Church: occupies the east wing + apse
+  var churchX0 = HC_CX+HC_HALF-HC_WD, churchX1 = HC_CX+HC_HALF+APSE_R;
+  var altar = mkBox(2.4, 1.3, 1.0, stoneDarkMat);
+  place(altar, churchX1-3, 0.65, APSE_CZ);
+  interiorGroup.add(altar);
+  for (var pw=0; pw<3; pw++){
+    var pillar = mkCyl(0.35,0.4, HC_WH-0.6, 8, stubMat);
+    place(pillar, HC_CX+HC_HALF-HC_WD/2, (HC_WH-0.6)/2, HC_CZ-10+pw*8);
+    interiorGroup.add(pillar);
+  }
+  pickRoom(churchX0, churchX1, HC_CZ-HC_HALF+1, HC_CZ+2, HC_WH-1, '聖母マリア教会 St Mary’s Church',
+    '東翼を占める修道会の主聖堂。後陣に祭壇を置く、騎士団国家の精神的中心。');
+  // Chapter House: south wing, near the main tower
+  var chX0 = HC_CX-HC_HALF+2, chX1 = HC_CX+4, chZ0 = HC_CZ+HC_HALF-HC_WD, chZ1 = HC_CZ+HC_HALF-1;
+  var chTable = mkBox(4.2, 0.7, 2.4, woodMat);
+  place(chTable, (chX0+chX1)/2, 0.35, (chZ0+chZ1)/2);
+  interiorGroup.add(chTable);
+  pickRoom(chX0, chX1, chZ0, chZ1, HC_WH-1, '参事会室 Chapter House',
+    '南翼に置かれた評議の間。団長と幹部騎士たちがここで会議を開いた。');
+  // Refectory: west wing, rib-vault-style column row
+  var rfX0 = HC_CX-HC_HALF+1, rfX1 = HC_CX-HC_HALF+HC_WD-1, rfZ0 = HC_CZ-8, rfZ1 = HC_CZ+8;
+  for (var rp=0; rp<3; rp++){
+    var rpillar = mkCyl(0.32,0.36, HC_WH-0.6, 8, stubMat);
+    place(rpillar, (rfX0+rfX1)/2, (HC_WH-0.6)/2, rfZ0+2+rp*6);
+    interiorGroup.add(rpillar);
+  }
+  var rfTable = mkBox(2.0, 0.65, 10, woodMat);
+  place(rfTable, (rfX0+rfX1)/2+1.6, 0.32, (rfZ0+rfZ1)/2);
+  interiorGroup.add(rfTable);
+  pickRoom(rfX0, rfX1, rfZ0, rfZ1, HC_WH-1, '食堂 Refectory',
+    '西翼の食堂。リブヴォールト風の柱列が天井を支え、騎士たちが共同で食事をとった。');
+  // Grand Master's Chamber: north wing, near the main tower side
+  var gmX0 = HC_CX-HC_HALF+2, gmX1 = HC_CX+2, gmZ0 = HC_CZ-HC_HALF+1, gmZ1 = HC_CZ-HC_HALF+HC_WD-2;
+  var gmBed = mkBox(2.2, 0.8, 3.4, darkWoodMat);
+  place(gmBed, (gmX0+gmX1)/2, 0.4, (gmZ0+gmZ1)/2);
+  interiorGroup.add(gmBed);
+  pickRoom(gmX0, gmX1, gmZ0, gmZ1, HC_WH-1, '大マスター居室 Grand Master’s Chamber',
+    '北翼に残る、団長のかつての私室。後にノガト川沿いの新宮殿へ機能が移った。');
+
+  /* ================================================================
+   * info payload + always-on labels + resident life data
+   * ================================================================ */
+  var info = { rooms: [
+    { name:'聖母マリア教会 (St Mary’s Church)', desc:'東翼+後陣。騎士団国家の精神的中心。' },
+    { name:'参事会室 (Chapter House)', desc:'南翼。団長と幹部騎士の評議の間。' },
+    { name:'食堂 (Refectory)', desc:'西翼。リブヴォールト風の柱列。' },
+    { name:'大マスター居室', desc:'北翼。団長のかつての私室。' }
+  ] };
+  var labelGroup = buildLabelGroup(group, pickables);
+
+  /* ---- resident life data: bridge gate is the sole in/out point;
+   * farmers wander the Middle + Low Castle open ground (never the High
+   * Castle cloister -- per spec that courtyard is guards-only); guards
+   * patrol a loop that hugs the inside of the inner wall (the space
+   * "between" the double wall) and detours through the cloister gate
+   * into the High Castle courtyard, all on the y=0 bailey surface so
+   * nothing floats once the low/middle-castle shell fades. ---------- */
+  var life = {
+    gates: [ { x:GATE_X, z:OUTER_HZ, outDir:{x:0,z:1}, vanishDist: (OUTER_HZ-INNER_HZ)+26 } ],
+    courtyard: [
+      { minX:-50, maxX:58,  minZ:-130, maxZ:64 },   // 中城の広い中庭
+      { minX:20,  maxX:60,  minZ:66,   maxZ:150 }   // 低城、高城の東〜南に開けた区画
+    ],
+    // clockwise loop hugging the inside of the inner wall (rect A / rect B
+    // above, both verified clear of every wing/tower footprint) with an
+    // out-and-back spur through the High Castle's north cloister gate
+    // (exactly HC_CX, straight through the 4.2m gap built into hcWallN)
+    // into the courtyard centre and back -- the one place farmers never
+    // go, guards always do.
+    patrol: [
+      [55,0,-125], [55,0,60], [55,0,140], [GATE_X,0,148], [GATE_X,0,INNER_HZ-4],
+      [35,0,66], [HC_CX,0,64], [HC_CX,0,HC_CZ], [HC_CX,0,64],
+      [-46,0,60], [-46,0,-125]
+    ],
+    population: { farmers: 25, guards: 9 }
+  };
+
+  return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
+    pickables: pickables, windowMat: windowMat, waterMats: [riverMat], labelGroup: labelGroup, life: life };
+}
+
+/* ====================================================================
  * 2. castle registry — add more entries here to extend the viewer.
  *    Each entry's build(THREE) must return
  *    { group, fadeGroups, interiorGroup, info, pickables, labelGroup,
@@ -1870,6 +2510,23 @@ var CASTLES = [
     view: { targetY: 20, zMin: 60, zMax: 600, initDist: 450,
       fogNear: 300, fogFar: 1200, shadowExtent: 250, shadowFar: 900,
       camFar: 2500, panLimit: 220, envScale: 2.2, envLift: -55 }
+  },
+  {
+    id: 'malbork',
+    name: 'Malbork Castle',
+    nameJa: 'マルボルク城',
+    country: 'Poland',
+    countryJa: 'ポーランド',
+    flag: '🇵🇱',
+    year: '1406',
+    description: 'チュートン騎士団が築いた世界最大級のレンガ造城塞。高城・中城・低城の三重構造と1万人を収容した威容を誇る、騎士修道会国家の首都。',
+    build: buildMalbork,
+    // largest of the three -- a ~350x170m double-walled outer bailey, a
+    // hair bigger than Vincennes' 330x175m enceinte, so its view tuning
+    // starts from Vincennes' own numbers and is pulled back/out further.
+    view: { targetY: 20, zMin: 60, zMax: 640, initDist: 480,
+      fogNear: 320, fogFar: 1300, shadowExtent: 260, shadowFar: 980,
+      camFar: 2700, panLimit: 235, envScale: 2.35, envLift: -55 }
   }
   // 今後の拡張: 他の城を追加する場合はここに { id, name, nameJa, country,
   // countryJa, flag, year, description, build, view } を追加するだけでよい。
