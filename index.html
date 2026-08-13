@@ -137,6 +137,14 @@
         <span class="knob"></span>
       </span>
     </div>
+    <div class="segRow toggleRow">
+      <label for="residentToggle">住人</label>
+      <span class="switch">
+        <input type="checkbox" id="residentToggle">
+        <span class="track"></span>
+        <span class="knob"></span>
+      </span>
+    </div>
   </div>
 
   <div id="tooltip" class="glass"></div>
@@ -1146,8 +1154,21 @@ function buildBodiam(){
   // (section 0) -- covers both structure and room pickables.
   var labelGroup = buildLabelGroup(group, pickables);
 
+  /* ---- resident life data (section 6.5 住人システムが読む任意フィールド)
+   * 門1つ(北の主門)+ 北の橋、狭い中庭は courtyard 矩形1枚、衛兵は中庭の縁
+   * を地面レベルで周回(壁がフェードしても浮かないよう常にy=0)。 -------- */
+  var life = {
+    gates: [ { x:0, z:-OW, outDir:{x:0,z:-1}, vanishDist: MOAT_OUTER - OW + 6 } ],
+    courtyard: [ { minX:-COURT_HALF, maxX:COURT_HALF, minZ:-COURT_HALF, maxZ:COURT_HALF } ],
+    patrol: [
+      [ COURT_HALF-0.8, 0, -(COURT_HALF-0.8)], [ COURT_HALF-0.8, 0,  COURT_HALF-0.8],
+      [-(COURT_HALF-0.8), 0,  COURT_HALF-0.8], [-(COURT_HALF-0.8), 0, -(COURT_HALF-0.8)]
+    ],
+    population: { farmers: 8, guards: 2 }
+  };
+
   return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
-    pickables: pickables, windowMat: windowMat, waterMats: [waterMat], labelGroup: labelGroup };
+    pickables: pickables, windowMat: windowMat, waterMats: [waterMat], labelGroup: labelGroup, life: life };
 }
 
 /* ====================================================================
@@ -1325,9 +1346,15 @@ function buildVincennes(){
         fg.group.add(lintel);
         var pg = new T.Group();
         var co=Math.cos(ry), si=Math.sin(ry);
-        for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.1,3.8,0.1, metalMat), cx+bi*0.55*co, 3.4, cz-bi*0.55*si));
-        for (var bj=0;bj<4;bj++) pg.add(place(mkBox(3.8*Math.abs(co)+0.1, 0.1, 3.8*Math.abs(si)+0.1, metalMat), cx, 1.5+bj*0.95, cz));
-        interiorGroup.add(pg);
+        // per-tower material clone: both gate towers fade independently,
+        // so sharing metalMat would let one tower's fade fight the other's
+        var pgMat = metalMat.clone();
+        for (var bi=-3;bi<=3;bi++) pg.add(place(mkBox(0.1,3.8,0.1, pgMat), cx+bi*0.55*co, 3.4, cz-bi*0.55*si));
+        for (var bj=0;bj<4;bj++) pg.add(place(mkBox(3.8*Math.abs(co)+0.1, 0.1, 3.8*Math.abs(si)+0.1, pgMat), cx, 1.5+bj*0.95, cz));
+        // fade with the gate tower (like Bodiam's portcullis in tG1) --
+        // in interiorGroup it lingered as a floating grid once the tower
+        // itself had been cut away
+        fg.group.add(pg);
       }
     }
     registerPick(pickables, 'structure', cx, h*0.4, cz, w*1.7, h*0.8, d*1.7, opts.label, opts.desc);
@@ -1756,8 +1783,30 @@ function buildVincennes(){
   var info = { rooms: donjonFloors.map(function(f){ return { name:f.name, desc:f.desc }; }) };
   var labelGroup = buildLabelGroup(group, pickables);
 
+  /* ---- resident life data (section 6.5): 村の塔門(北)と森の塔門(南)の
+   * 2門、広大な中庭は複数矩形でシェミーズ内側(ドンジョン専用の堀の内側)
+   * とサント・シャペルの躯体を避けて定義。衛兵の周回路は壁沿いの内周を
+   * たどりつつ、ドンジョン複合体の周りだけ迂回する(常にy=0の地面上)。 */
+  var life = {
+    gates: [
+      { x:0, z:-OHZ, outDir:{x:0,z:-1}, vanishDist: MOAT_OHZ - OHZ + 8 }, // 村門塔 Tour du Village(北)
+      { x:0, z: OHZ, outDir:{x:0,z:1},  vanishDist: MOAT_OHZ - OHZ + 8 }  // 木の門塔 Tour du Bois(南)
+    ],
+    courtyard: [
+      { minX:-84, maxX:84,  minZ:-160, maxZ:-2 },  // 北側の広い区画(シェミーズ・礼拝堂より北)
+      { minX:-84, maxX:84,  minZ:92,   maxZ:160 }, // 南側の広い区画
+      { minX:-60, maxX:-22, minZ:-2,   maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
+      { minX:38,  maxX:84,  minZ:-2,   maxZ:92 }   // 礼拝堂と東城壁の間の帯
+    ],
+    patrol: [
+      [80,0,-158], [80,0,158], [-80,0,158], [-80,0,90],
+      [-60,0,90], [-60,0,10], [-80,0,10], [-80,0,-158]
+    ],
+    population: { farmers: 24, guards: 6 }
+  };
+
   return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
-    pickables: pickables, windowMat: windowMat, waterMats: [waterMat, donjonMoat.waterMat], labelGroup: labelGroup };
+    pickables: pickables, windowMat: windowMat, waterMats: [waterMat, donjonMoat.waterMat], labelGroup: labelGroup, life: life };
 }
 
 /* ====================================================================
@@ -1990,10 +2039,14 @@ function syncSegUI(groupId, key){
 function setTimeOfDay(key){
   syncSegUI('timeSeg', key);
   if (!TIME_STATES[key] || (key === timeTrans.key && timeTrans.t >= 1)) return;
+  var wasNight = timeTrans.key === 'night';
   timeTrans.from = cloneTimeState(CUR_TIME); // freeze current interpolated state, not the old preset
   timeTrans.to = TIME_STATES[key];
   timeTrans.t = 0;
   timeTrans.key = key;
+  // 夜⇔非夜の切り替えだけ農民の人数が変わるので、その境をまたいだ時だけ
+  // 住人トグルON中の住人を再生成する(低コストな追従実装、6章参照)。
+  if (residentsOn && wasNight !== (key === 'night')) regenerateResidents();
 }
 function setWeather(key){
   syncSegUI('weatherSeg', key);
@@ -2309,6 +2362,9 @@ function applyCastle(idx){
   MOUNTAIN_RINGS.forEach(function(r){ r.mesh.scale.setScalar(ENV_SCALE); r.mesh.position.y = ENV_LIFT; });
 
   updateLabelVisibility();
+  // 城切替のたびに前の城の住人を破棄し、この城の `life` データから作り
+  // 直す(トグルOFF中は regenerateResidents 内で何もしない)。
+  regenerateResidents();
 }
 var currentIdx = 0;
 
@@ -2637,6 +2693,208 @@ document.getElementById('labelToggle').addEventListener('change', function(){
   updateLabelVisibility();
 });
 
+/* ====================================================================
+ * 6.5 住人(村人・衛兵) — 全城共通の汎用システム。
+ * 城の build() が返す任意フィールド `life` ({gates, courtyard, patrol,
+ * population}) を読んでウェイポイント歩行のNPCを配置する。ジオメトリ/
+ * マテリアルは種類ごとに一度だけ生成し(この直下のトップレベル変数)、
+ * 城切替やトグルOFFでは個体(THREE.Group)だけを破棄して使い回す --
+ * 共有ジオメトリ/マテリアルを毎回 dispose/再生成しないので 1体ごとの
+ * コストはゼロに近い。カットアウェイの opacity フェードとは無関係
+ * (常に不透明)なので、共有マテリアルへ per-NPC の transparent/opacity
+ * を書き込む必要がない。門をまたぐ「歩き去ってフェード消滅」は、その
+ * 代わりに一様スケールを 1→0 へ縮めることで表現する(遠ざかりながら
+ * 小さくなって消える、という安価な近似)。
+ * 衛兵の巡回はすべて y=0(地面)上のウェイポイントで組んである -- 城壁の
+ * 上を歩かせると、ズームインで壁がフェードした際に空中に浮いて見える
+ * ため、あえて壁沿いの地上ルートにしてある。
+ * ==================================================================== */
+var NPC_BODY_GEO  = new T.CylinderGeometry(0.16, 0.20, 1.4, 6);
+var NPC_HEAD_GEO  = new T.SphereGeometry(0.15, 6, 5);
+var NPC_SPEAR_GEO = new T.CylinderGeometry(0.018, 0.028, 1.9, 5);
+var FARMER_BODY_MAT = new T.MeshLambertMaterial({ color: 0x8a6a42 }); // 農民: 茶
+var FARMER_HEAD_MAT = new T.MeshLambertMaterial({ color: 0xd9ac7c }); // 肌
+var GUARD_BODY_MAT  = new T.MeshLambertMaterial({ color: 0x6b7078 }); // 衛兵: 鋼色
+var GUARD_HEAD_MAT  = new T.MeshLambertMaterial({ color: 0x555a60 }); // 兜
+var SPEAR_MAT       = new T.MeshLambertMaterial({ color: 0x2a2a2a }); // 槍
+
+function makeNpcObject(kind){
+  var g = new T.Group();
+  var body = new T.Mesh(NPC_BODY_GEO, kind === 'guard' ? GUARD_BODY_MAT : FARMER_BODY_MAT);
+  body.position.y = 0.7;
+  body.castShadow = true;
+  g.add(body);
+  var head = new T.Mesh(NPC_HEAD_GEO, kind === 'guard' ? GUARD_HEAD_MAT : FARMER_HEAD_MAT);
+  head.position.y = 1.4 + 0.15;
+  head.castShadow = true;
+  g.add(head);
+  if (kind === 'guard'){
+    var spear = new T.Mesh(NPC_SPEAR_GEO, SPEAR_MAT);
+    spear.position.set(0.24, 1.05, 0.02);
+    spear.rotation.z = 0.08;
+    spear.castShadow = true;
+    g.add(spear);
+  }
+  return g;
+}
+function rand(a,b){ return a + Math.random()*(b-a); }
+function pickCourtyardPoint(courtyard){
+  var rects = (courtyard && courtyard.length) ? courtyard : [{minX:-5,maxX:5,minZ:-5,maxZ:5}];
+  var r = rects[Math.floor(Math.random()*rects.length)];
+  return { x: rand(r.minX, r.maxX), z: rand(r.minZ, r.maxZ) };
+}
+// dt駆動の進行方向への向き補間(最短回転方向へ、最大角速度でクランプ)
+function faceToward(obj, dx, dz, dt, turnSpeed){
+  if (Math.abs(dx) < 1e-5 && Math.abs(dz) < 1e-5) return;
+  var targetAngle = Math.atan2(dx, dz);
+  var diff = targetAngle - obj.rotation.y;
+  while (diff > Math.PI) diff -= Math.PI*2;
+  while (diff < -Math.PI) diff += Math.PI*2;
+  var maxStep = (turnSpeed || 6) * dt;
+  obj.rotation.y += (Math.abs(diff) <= maxStep) ? diff : Math.sign(diff)*maxStep;
+}
+// waypoint (tx,tz) へ向けて speed*dt だけ進める。到達したら true を返す。
+function stepToward(obj, tx, tz, speed, dt){
+  var dx = tx - obj.position.x, dz = tz - obj.position.z;
+  var dist = Math.hypot(dx, dz);
+  if (dist < 0.05) return true;
+  var step = Math.min(dist, speed*dt);
+  obj.position.x += dx/dist*step;
+  obj.position.z += dz/dist*step;
+  faceToward(obj, dx, dz, dt, 6);
+  return step >= dist - 1e-4;
+}
+// 門〜消失点区間の進行距離からフェード用スケールを求める(区間後半60%
+// だけ 1→0.04 へ縮める。手前側はずっと等身大のまま)。
+function gateFadeScale(travelled, vanishDist){
+  var fadeStart = vanishDist*0.6;
+  if (travelled <= fadeStart) return 1;
+  return Math.max(0.04, 1 - (travelled-fadeStart)/(vanishDist-fadeStart));
+}
+
+var residentsOn = false;
+var residentGroup = new T.Group();
+scene.add(residentGroup);
+var residents = []; // { obj, kind, state, ... } のフラット配列
+
+function newFarmer(life){
+  var obj = makeNpcObject('farmer');
+  var npc = { obj:obj, kind:'farmer', speed: rand(1.0,1.5), idle:0 };
+  var startAtGate = life.gates && life.gates.length && Math.random() < 0.3;
+  if (startAtGate){
+    var gate = life.gates[Math.floor(Math.random()*life.gates.length)];
+    var vd = gate.vanishDist || 40;
+    var t = rand(0.08, 0.92);
+    var travelled = vd*t;
+    npc.gate = gate;
+    npc.state = Math.random() < 0.5 ? 'outside' : 'returning'; // 橋の途中から半々で出入りを再現
+    var dirSign = npc.state === 'outside' ? 1 : -1;
+    obj.position.set(gate.x + gate.outDir.x*travelled, 0, gate.z + gate.outDir.z*travelled);
+    obj.rotation.y = Math.atan2(gate.outDir.x*dirSign, gate.outDir.z*dirSign);
+    obj.scale.setScalar(gateFadeScale(travelled, vd));
+  } else {
+    var pt = pickCourtyardPoint(life.courtyard);
+    obj.position.set(pt.x, 0, pt.z);
+    npc.state = 'wander';
+    npc.wx = pt.x; npc.wz = pt.z;
+    npc.idle = rand(0, 2);
+  }
+  return npc;
+}
+function updateFarmer(npc, life, dt){
+  var obj = npc.obj;
+  if (npc.state === 'wander'){
+    if (npc.idle > 0){ npc.idle -= dt; return; }
+    if (stepToward(obj, npc.wx, npc.wz, npc.speed, dt)){
+      if (life.gates && life.gates.length && Math.random() < 0.12){
+        npc.gate = life.gates[Math.floor(Math.random()*life.gates.length)];
+        npc.state = 'toGate';
+      } else {
+        var pt = pickCourtyardPoint(life.courtyard);
+        npc.wx = pt.x; npc.wz = pt.z;
+        npc.idle = rand(0.6, 3.2); // たまに立ち止まる
+      }
+    }
+  } else if (npc.state === 'toGate'){
+    if (stepToward(obj, npc.gate.x, npc.gate.z, npc.speed, dt)) npc.state = 'outside';
+  } else if (npc.state === 'outside'){
+    var g = npc.gate, vd = g.vanishDist || 40;
+    var tx = g.x + g.outDir.x*vd, tz = g.z + g.outDir.z*vd;
+    var arrived = stepToward(obj, tx, tz, npc.speed, dt);
+    var travelled = Math.hypot(obj.position.x-g.x, obj.position.z-g.z);
+    obj.scale.setScalar(gateFadeScale(travelled, vd));
+    if (arrived){
+      obj.visible = false;
+      npc.state = 'hidden';
+      npc.hiddenT = rand(3, 9);
+    }
+  } else if (npc.state === 'hidden'){
+    npc.hiddenT -= dt;
+    if (npc.hiddenT <= 0){
+      obj.visible = true;
+      obj.scale.setScalar(0.04);
+      npc.state = 'returning';
+    }
+  } else if (npc.state === 'returning'){
+    var g2 = npc.gate, vd2 = g2.vanishDist || 40;
+    var arrived2 = stepToward(obj, g2.x, g2.z, npc.speed, dt);
+    var travelled2 = Math.hypot(obj.position.x-g2.x, obj.position.z-g2.z);
+    obj.scale.setScalar(gateFadeScale(travelled2, vd2));
+    if (arrived2){
+      obj.scale.setScalar(1);
+      var pt2 = pickCourtyardPoint(life.courtyard);
+      npc.wx = pt2.x; npc.wz = pt2.z;
+      npc.state = 'wander';
+      npc.idle = rand(0.3, 1.5);
+    }
+  }
+}
+function newGuard(life, i, count){
+  var obj = makeNpcObject('guard');
+  var patrol = (life.patrol && life.patrol.length >= 2) ? life.patrol : [[0,0,-3],[0,0,3]];
+  var idx = Math.floor((i/count) * patrol.length) % patrol.length;
+  var wp = patrol[idx];
+  obj.position.set(wp[0], 0, wp[2]);
+  return { obj:obj, kind:'guard', speed: rand(0.8,1.1), patrol:patrol, idx:idx };
+}
+function updateGuard(npc, dt){
+  var target = npc.patrol[npc.idx];
+  if (stepToward(npc.obj, target[0], target[2], npc.speed, dt)){
+    npc.idx = (npc.idx + 1) % npc.patrol.length;
+  }
+}
+function disposeResidents(){
+  // 共有ジオメトリ/マテリアルは dispose しない(城を跨いで使い回す) --
+  // 個体の THREE.Group を residentGroup から外すだけで十分。
+  residents.forEach(function(npc){ residentGroup.remove(npc.obj); });
+  residents.length = 0;
+}
+function regenerateResidents(){
+  disposeResidents();
+  if (!residentsOn || !current || !current.life) return;
+  var life = current.life;
+  var pop = life.population || { farmers:8, guards:2 };
+  var isNight = timeTrans.key === 'night';
+  var farmerCount = isNight ? Math.max(1, Math.round(pop.farmers/3)) : (pop.farmers||0);
+  var guardCount = pop.guards || 0;
+  var i;
+  for (i=0;i<farmerCount;i++) residents.push(newFarmer(life));
+  for (i=0;i<guardCount;i++) residents.push(newGuard(life, i, guardCount));
+  residents.forEach(function(npc){ residentGroup.add(npc.obj); });
+}
+function updateResidents(dt){
+  if (!residentsOn || !residents.length || !current || !current.life) return;
+  var life = current.life;
+  residents.forEach(function(npc){
+    if (npc.kind === 'guard') updateGuard(npc, dt);
+    else updateFarmer(npc, life, dt);
+  });
+}
+document.getElementById('residentToggle').addEventListener('change', function(){
+  residentsOn = this.checked;
+  regenerateResidents();
+});
+
 function wireSeg(id, onPick){
   var el = document.getElementById(id);
   Array.prototype.forEach.call(el.querySelectorAll('button'), function(btn){
@@ -2667,6 +2925,7 @@ function frame(now){
   updateFade(reveal, dt);
   updateRevealUI(reveal);
   updateLabelVisibility();
+  updateResidents(dt);
   stepTransitions(dt);
   applyEnvironment();
   updateMountains();
@@ -2710,6 +2969,14 @@ window.__setLabels = function(on){
   labelsOn = !!on;
   document.getElementById('labelToggle').checked = labelsOn;
   updateLabelVisibility();
+  renderer.render(scene, camera);
+};
+window.__setResidents = function(on){
+  // testing helper: toggles the 住人 (residents) system + syncs the UI
+  // checkbox, without requiring a real click.
+  residentsOn = !!on;
+  document.getElementById('residentToggle').checked = residentsOn;
+  regenerateResidents();
   renderer.render(scene, camera);
 };
 window.__findPickScreen = function(nameSubstr){
@@ -2761,7 +3028,9 @@ window.__debugState = function(){
     cameraPos: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     mountainRings: MOUNTAIN_RINGS.map(function(r){
       return { scale: r.mesh.scale.x, posY: r.mesh.position.y };
-    })
+    }),
+    residentsOn: residentsOn, residentCount: residents.length,
+    residentGroupChildren: residentGroup.children.length
   };
 };
 window.__scene = scene; window.__camera = camera; window.__renderer = renderer;
