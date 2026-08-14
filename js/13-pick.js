@@ -21,6 +21,14 @@ function doPick(clientX, clientY){
   if (!current || dragging || ptrs.size >= 2){ return; }
   var rect = canvas.getBoundingClientRect();
   if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom){ hideTooltip(); return; }
+  // labels first: they are a depthTest:false overlay drawn on top of
+  // everything, so whatever is under the cursor *visually* is the label,
+  // not the geometry behind it. Hit-tested in screen space (see
+  // labelHitAt) rather than by raycast, because the anti-overlap solver
+  // offsets each pill in screen space via Sprite.center -- a 3D ray would
+  // test the un-offset quad and miss every stacked label.
+  var lblInfo = labelHitAt(clientX - rect.left, clientY - rect.top);
+  if (lblInfo){ showTooltip(lblInfo, clientX, clientY); return; }
   pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pickNdc, camera);
@@ -80,6 +88,29 @@ var _lblEntries = []; // reused entry pool (no per-frame allocation)
 var _lblOrder = [];   // the pool's live slice, sorted near -> far
 var _lblRects = [];   // flat x0,y0,x1,y1 quads of the labels already placed
 var _lblKey = '';     // view fingerprint of the last solve
+/* -- label hover ------------------------------------------------------
+ * The same solve that places the pills records each *actually drawn* one
+ * as a canvas-pixel box plus its tooltip payload, so hovering a label is
+ * answered by a handful of rect tests (no raycast, no extra projection).
+ * Only labels that survived the pass are recorded -- one thinned out for
+ * want of a free slot, held back by the room-reveal gate, or behind the
+ * camera pushes no box, so it is correctly inert to the mouse. The list is
+ * rebuilt on exactly the frames the layout is (view fingerprint changed)
+ * and cleared whenever labels are off, so it can never describe a stale or
+ * invisible label. --------------------------------------------------- */
+var _lblHits = [];    // pooled { x0, y0, x1, y1, info } boxes, canvas px
+var _lblHitN = 0;     // live length of _lblHits (the pool itself is longer)
+function clearLabelHits(){
+  for (var i = 0; i < _lblHits.length; i++) _lblHits[i].info = null;
+  _lblHitN = 0;
+}
+function labelHitAt(px, py){
+  for (var i = 0; i < _lblHitN; i++){
+    var hb = _lblHits[i];
+    if (hb.info && px >= hb.x0 && px <= hb.x1 && py >= hb.y0 && py <= hb.y1) return hb.info;
+  }
+  return null;
+}
 function lblRectFree(x0, y0, x1, y1){
   for (var i = 0; i < _lblRects.length; i += 4){
     if (x0 < _lblRects[i+2] && x1 > _lblRects[i] &&
@@ -88,9 +119,12 @@ function lblRectFree(x0, y0, x1, y1){
   return true;
 }
 function updateLabelVisibility(){
-  if (!current || !current.labelGroup) return;
+  if (!current || !current.labelGroup){ clearLabelHits(); _lblKey = ''; return; }
   current.labelGroup.visible = labelsOn;
-  if (!labelsOn) return;
+  // labels off -> nothing is hoverable, and the fingerprint is invalidated
+  // so switching them back on re-solves (and re-fills the hit list) even
+  // though the view itself never moved
+  if (!labelsOn){ clearLabelHits(); _lblKey = ''; return; }
   var roomsOk = lastReveal > 0.28;
   var vw = window.innerWidth, vh = window.innerHeight;
   var key = current.labelGroup.id + '|' + (roomsOk ? 1 : 0) + '|' + vw + 'x' + vh + '|' +
@@ -98,6 +132,17 @@ function updateLabelVisibility(){
             camera.position.z.toFixed(2) + ',' + curAz.toFixed(4) + ',' + curEl.toFixed(4);
   if (key === _lblKey) return; // view unchanged -> last frame's layout still holds
   _lblKey = key;
+  // project() reads camera.matrixWorldInverse, which is only refreshed by
+  // renderer.render(). On the boot solve (and on any solve that runs before
+  // this frame's render) it is still the *previous* frame's -- at boot,
+  // literally the identity, which threw every anchor to a garbage screen
+  // point: measured, Bodiam placed 3 of 24 pills and put the NW tower's at
+  // (812,508) instead of (201,145), and with a static camera the fingerprint
+  // never changed so that layout stuck. Refreshing both matrices here costs
+  // one matrix invert on solve frames only, and makes the boxes recorded
+  // below exactly the boxes that get drawn.
+  camera.updateMatrixWorld();
+  current.labelGroup.updateWorldMatrix(true, false);
 
   var kids = current.labelGroup.children, i, n = 0;
   for (i = 0; i < kids.length; i++){
@@ -126,6 +171,7 @@ function updateLabelVisibility(){
   // comes straight out of the fov rather than from a per-label projection
   var pxUnit = vh / (2 * Math.tan(camera.fov * Math.PI / 360));
   _lblRects.length = 0;
+  _lblHitN = 0;
   for (i = 0; i < n; i++){
     var en = _lblOrder[i], sp = en.spr;
     _lblNdc.set(en.x, en.y, en.z).project(camera);
@@ -151,9 +197,56 @@ function updateLabelVisibility(){
     sp.userData.slot = placed;
     sp.center.set(0.5, -(LBL_GAP + placed * LBL_STEP));
     _lblRects.push(sx - pxW/2, cy - pxH/2, sx + pxW/2, cy + pxH/2);
+    // (sx, cy) is already the pill's true on-screen centre: `center.y` puts
+    // the sprite's own UV row -(LBL_GAP + slot*LBL_STEP) on the projected
+    // anchor, i.e. lifts the quad's midpoint by that many pill heights plus
+    // the half-height between UV -c and UV 0.5 -- exactly the cy above. So
+    // the collision rect the solver just used *is* the hover rect.
+    var hb = _lblHits[_lblHitN] || (_lblHits[_lblHitN] = {});
+    hb.x0 = sx - pxW/2; hb.y0 = cy - pxH/2;
+    hb.x1 = sx + pxW/2; hb.y1 = cy + pxH/2;
+    hb.info = sp.userData.pickInfo || null;
+    _lblHitN++;
   }
+  // release pooled entries past the live count so a castle switch can't
+  // leave the previous castle's pickInfo reachable (mirrors _lblEntries)
+  for (i = _lblHitN; i < _lblHits.length; i++) _lblHits[i].info = null;
 }
 document.getElementById('labelToggle').addEventListener('change', function(){
   labelsOn = this.checked;
   updateLabelVisibility();
 });
+
+/* -- testing helpers: the label counterparts of __findPickScreen. They read
+ * the same hit list doPick uses, so a test that hovers where these point is
+ * hovering exactly what the user sees. ------------------------------- */
+window.__findLabelScreen = function(nameSubstr){
+  // centre (client px) of the first *currently drawn* label whose tooltip
+  // name contains `nameSubstr`; null if that label is thinned out or off.
+  var rect = canvas.getBoundingClientRect();
+  for (var i = 0; i < _lblHitN; i++){
+    var hb = _lblHits[i];
+    if (!hb.info || hb.info.name.indexOf(nameSubstr) < 0) continue;
+    return { x: rect.left + (hb.x0 + hb.x1)/2, y: rect.top + (hb.y0 + hb.y1)/2,
+             w: hb.x1 - hb.x0, h: hb.y1 - hb.y0, name: hb.info.name };
+  }
+  return null;
+};
+window.__labelHitAt = function(clientX, clientY){
+  // the exact probe doPick runs before it raycasts: which label (if any)
+  // is under this client point. null when none / labels off.
+  var rect = canvas.getBoundingClientRect();
+  return labelHitAt(clientX - rect.left, clientY - rect.top);
+};
+window.__labelHits = function(){
+  // every drawn label's box + name, in draw (near -> far) order
+  var out = [], rect = canvas.getBoundingClientRect();
+  for (var i = 0; i < _lblHitN; i++){
+    var hb = _lblHits[i];
+    if (!hb.info) continue;
+    out.push({ name: hb.info.name, kind: hb.info.kind,
+               x: rect.left + (hb.x0 + hb.x1)/2, y: rect.top + (hb.y0 + hb.y1)/2,
+               w: hb.x1 - hb.x0, h: hb.y1 - hb.y0 });
+  }
+  return out;
+};

@@ -206,6 +206,10 @@ function buildLabelGroup(group, pickables){
     var ay = p.position.y + h/2;
     spr.position.set(p.position.x, ay, p.position.z);
     spr.userData.labelKind = pi.kind;
+    // same tooltip payload the pick volume carries, so hovering the label
+    // itself can show the identical tooltip without a second lookup
+    // (see labelHitAt / doPick, section 5.5)
+    spr.userData.pickInfo = pi;
     // anchor = top-centre of the pick volume, in the castle group's local
     // space. Kept separately from position because the layout pass needs a
     // stable point to project (position never moves now, but this keeps the
