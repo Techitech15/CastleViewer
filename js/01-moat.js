@@ -79,6 +79,16 @@ function buildBankRamp(kind, extentTop, extentBottom, yTop, yBottom, colTop, col
   geo.setAttribute('position', new T.Float32BufferAttribute(positions,3));
   geo.setAttribute('color', new T.Float32BufferAttribute(colors,3));
   geo.computeVertexNormals();
+  /* NOTE: T.VertexColors is NOT dead in the r128 build this page loads --
+   * three reviewers in a row have reported it as a removed-in-r125 constant
+   * that silently disables vertex colours, and all three were wrong. Probed
+   * against the actual CDN bundle: THREE.REVISION === 128, THREE.VertexColors
+   * === 2, and the material ends up with vertexColors === 2, which is truthy,
+   * so USE_COLOR is defined and the gradient renders. Confirmed by rendering
+   * two identical vertex-coloured quads side by side, one built with the
+   * constant and one with `true`: both come back coloured. Leave as is (or
+   * change to `true` purely for style) -- but do not "fix" a bug that is not
+   * here, and do not re-add per-castle workarounds that override it. */
   var mat = new T.MeshLambertMaterial({ vertexColors: T.VertexColors });
   var mesh = new T.Mesh(geo, mat);
   mesh.receiveShadow = true;
