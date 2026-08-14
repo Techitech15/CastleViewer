@@ -175,6 +175,23 @@ function buildCastelDelMonte(){
   var HILL_MID     = 0x5e5f38;
   var HILL_EDGE    = 0x474c2b;
   var FIELD_COL    = 0x555f3b; // 遠景の草地(プーリアらしい乾いた緑)
+  /* 丘のディテール用に足した色。上の HILL_* と同じ基準(乗算後にどの
+   * チャンネルも 235 を超えない = 素の値で 118 以下)で選んである。実測の
+   * 検算は下の buildIsolatedHill のコメント参照。 */
+  /* 岩は「上を向いた平らな面」を持つので、地面と同じ 118 上限に置くと
+   * 太陽へ傾いた面が実測 241 まで上がり、草地の上に白い紙を撒いたように
+   * 見えた(3周目のスクリーンショットで実測)。地面より一段低い水準に
+   * 落として、それでも草地より確実に明るい = 石灰岩に見える値にする。 */
+  // 太陽に正対した面には水平面(x1.93)ではなく最大 x2.29 が乗る(実測:
+  // 0x6a6452 の岩で 243 まで上がった)。その最悪面でも 235 を超えないよう
+  // 逆算した値が 102 -> 0x666050。水平面では(197,185,154)で、乾いた牧草
+  // (183,168,97)より確実に明るく、石灰岩として読める。
+  var HILL_ROCK    = 0x666050; // 石灰岩の露頭(明)
+  var HILL_ROCK_D  = 0x565343; // 石灰岩の露頭(暗)。個体差で色を散らす
+  var HILL_ROAD    = 0x6f6549; // 頂上へ登る土の坂道(乾いた石灰岩の砂利道)
+  var HILL_GULLY   = 0x4a4028; // 襞(浅い谷)の底に出る土
+  var HILL_SCRUB   = 0x3e4b27; // 風衝低木(明)。中景の木より沈んだオリーブ系の緑
+  var HILL_SCRUB_D = 0x333e1f; // 風衝低木(暗)
 
   var windowMat  = new T.MeshLambertMaterial({ color: WINDOW_COL });
   var floorMat   = new T.MeshLambertMaterial({ color: FLOOR_COL, side: T.DoubleSide });
@@ -187,7 +204,6 @@ function buildCastelDelMonte(){
   var darkMat    = new T.MeshLambertMaterial({ color: STONE_DARK });
   var cisternMat = new T.MeshBasicMaterial({ color: CISTERN_COL });
   var hillFieldMat = new T.MeshLambertMaterial({ color: FIELD_COL });
-  var hillTopMat   = new T.MeshLambertMaterial({ color: HILL_TOP });
   /* 内装用マテリアル。床系は「下から見上げると天井面」になるので必ず
    * DoubleSide -- 1階の部屋の天井は2階の床メッシュそのものだから。 */
   function floorMatOf(hex){ return new T.MeshLambertMaterial({ color: hex, side: T.DoubleSide }); }
@@ -1528,38 +1544,274 @@ function buildCastelDelMonte(){
     });
   })();
 
-  /* -------------------------------------------------------------- *
-   * 丘の頂上(標高約540m相当)-- 周囲になだらかな盛り上がりを作る。
-   * buildUndulatingGround はフラットな円+ノイズの起伏止まりで、なだら
-   * かな「丘」の裾を表現できないため(平坦→起伏はあっても隆起はしない)、
-   * 既存の buildBankRamp/buildCircularSkirt(01-moat.js、堀の土手と同じ
-   * 仕組み)を土手ではなく"逆方向の丘"として流用する: 建物の基準面
-   * y=0 を丘の頂上(プラトー)とし、そこから外側へ向かって周囲の野原
-   * (y=-HILL_DROP)まで下る一枚の傾斜面を作る。堀がないぶん、そこに
-   * 水面は張らない。
-   * -------------------------------------------------------------- */
+  /* ================================================================ *
+   * 孤立丘(モンテ)-- 標高約540m、ムルジェ台地から独立して盛り上がる
+   * 石灰岩(カルスト)の丘。
+   * ---------------------------------------------------------------- *
+   * 旧実装は buildCircularSkirt(01-moat.js の堀の土手)を3段重ねた
+   * 回転体だった。断面こそ凸型になったが、方位に対して完全に一様な
+   * ため、低い視点で見ると「のっぺりした円錐台の上に城が載っている」
+   * ようにしか見えなかった(修正前スクリーンショットで確認済み)。
+   * 実物の写真(Wikimedia Commons: 02_Castel_del_Monte_(Andria),
+   * gos_dalt_del_camí.jpg / 03_..._vist_des_del_sud-est.jpg を取得して
+   * 目視)で確認できる特徴は次の4点で、いずれも回転体では出せない:
+   *   (1) 斜面は一様な円錐ではなく、浅い尾根と谷(襞)が方位ごとに走る
+   *   (2) 草地のあちこちに白っぽい石灰岩が露出し、板状の露頭も出る
+   *   (3) 風で傾いた低木がまばらに点在し、丘の稜線を不揃いにする
+   *   (4) 頂上の平坦部と斜面の境界は明確な角ではなく丸い肩になっている
+   * そこで回転体をやめ、**方位 x 半径のハイトフィールド**を1枚の
+   * 頂点カラー付きメッシュとして自前で張る。
+   *
+   * ---- 城の外形との独立性 ------------------------------------------
+   * この節は y<=0 の地形しか触らない。城本体(正八角形・塔中心半径
+   * Rt=23.78m・全幅56.1m・外壁19.8m/塔23.6m)と内装のコードは1行も
+   * 変更していない。32方位の水平レイキャストによる外形計測が修正前後で
+   * 完全に一致することを別途確認済み(完了報告参照)。
+   *
+   * ---- 周囲のシステムとの境界(触ってはいけないものを壊さない)----
+   *  a) 中景(オリーブ畑など)は 15-nature.js の担当。あちらは「城の
+   *     代表寸法の2.6倍を超える平たいメッシュ」だけを地面(TERRAIN)と
+   *     見なし、それ以外は自然物を置かない除外ボックスへ加算する。
+   *     丘メッシュの外接は 2*R_HILLBASE=236m で閾値(約367m)に届かない
+   *     ので、旧スカートと同じく除外側に落ちる = 丘の上に畑が生えない。
+   *     裾の最大半径を旧実装と同じ 118m に固定してあるのはこのため
+   *     (広げると除外ボックスが動き、中景の開始位置が変わってしまう)。
+   *  b) 裾の頂点カラーは最後に FIELD_COL そのものへ寄せてあるので、
+   *     丘の縁と中景の草地の間に色の段差が出ない。加えて裾は野原面より
+   *     RIM_LIFT だけ高く終わらせ、同一平面での Z ファイトを避ける。
+   *  c) 住人(life)は +Z(主玄関側)を半径34mまで歩いて消える。頂上
+   *     平坦部の縁 crestR() は最小でも 34.5m あるので、住人が歩く範囲は
+   *     旧実装と同じ完全な平面(y=0)のまま。坂道・岩・低木もすべて
+   *     crestR() より外にしか置かない。
+   *
+   * ---- 色 ----------------------------------------------------------
+   * 昼の水平上向き面には実測で R x1.93 / G x1.89 / B x1.80 が乗る
+   * (修正前の画面で HILL_TOP 0x5f5936 =(95,89,54) が (183,168,97) に
+   * なることをピクセル実測して確認)。新しく足した岩・道・低木の色は
+   * すべて最大チャンネル 118 以下に収めてあり、乗算後も 235 を超えない。
+   * ================================================================ */
   // 塔を正しい位置(半径23.78m + 外接4.28m = 28.1m)へ出したので、
   // 頂上の平坦部は 31m では塔の足元ぎりぎりになる。空撮写真でも城の
-  // 周囲には十分な広さの平坦な敷地が広がっているので 36m に広げる。
+  // 周囲には十分な広さの平坦な敷地が広がっているので 36m を基準にする
+  // (実際の縁 crestR() はこの前後で方位ごとに揺らぐ)。
   var R_PLATEAU = 36, R_HILLBASE = 118, HILL_DROP = 17;
-  var plateau = new T.Mesh(new T.CircleGeometry(R_PLATEAU, 32), hillTopMat);
-  plateau.rotation.x = -Math.PI/2;
-  plateau.position.y = 0.0;
-  plateau.receiveShadow = true;
-  group.add(plateau);
-  // 単一の直線スロープ(旧: 34m -> 88m を一様に -12m)では、城が平らな
-  // 円盤に載っているようにしか見えなかった。頂上付近はゆるく、中腹で
-  // 最も急に、裾でまた緩く -- という凸型の断面を3段のスカートで作る
-  // ことで、丘そのもののシルエットが出るようにする。
-  var HILL_TIERS = [
-    { r0:R_PLATEAU, r1:56,          y0:0.0,   y1:-4.2,       cTop:HILL_TOP, cEdge:HILL_TOP },
-    { r0:56,        r1:86,          y0:-4.2,  y1:-11.6,      cTop:HILL_TOP, cEdge:HILL_MID },
-    { r0:86,        r1:R_HILLBASE,  y0:-11.6, y1:-HILL_DROP, cTop:HILL_MID, cEdge:HILL_EDGE }
-  ];
-  HILL_TIERS.forEach(function(t){
-    group.add(buildCircularSkirt(0, 0, t.r0, t.r1, t.y0, t.y1,
-      new T.Color(t.cTop), new T.Color(t.cTop), new T.Color(t.cEdge)));
-  });
+  (function buildIsolatedHill(){
+    var A_SEG = 144;                 // 方位分割。襞の最高次(21周期)に約7点/波
+    var SLOPE_RINGS = 34;            // 斜面の半径方向分割
+    var FLAT_F = [0.30, 0.62, 1.0];  // 頂上平坦部のリング(crestR に対する比)
+    var RIM_LIFT = 0.06;             // 裾を野原面より6cm上げる(同一平面回避)
+
+    /* 方位ゆらぎ。**整数次の正弦だけ**で作るのが要点で、こうしないと
+     * θ=0 と θ=2π で値が食い違い、丘に縦の継ぎ目が1本入る。00-core.js の
+     * ridgeNoise1D は 7.3 / 12.7 / 21.1 次を含む非周期関数なので(山並みの
+     * ような開いた稜線には使えても)閉じたリングには使えない。 */
+    function azWave(a, s){           // 低周波: 丘全体の非対称(輪郭の歪み)
+      return 0.62*Math.sin(a + s) + 0.26*Math.sin(2*a + s*1.7 + 0.9)
+           + 0.12*Math.sin(3*a - s*2.3 + 2.1);
+    }
+    function azRidge(a, s){          // 中〜高周波: 斜面を走る尾根と谷(襞)
+      return 0.44*Math.sin(5*a + s) + 0.30*Math.sin(8*a - s*1.3 + 1.2)
+           + 0.16*Math.sin(13*a + s*0.7 + 2.6) + 0.10*Math.sin(21*a - s*2.1 + 0.4);
+    }
+    // 頂上平坦部の縁(34.5〜40.7m)。住人が歩く 34m は必ず内側に入る。
+    function crestR(a){ return 37.6 + 3.1*azWave(a, 0.7); }
+    // 裾(96〜118m)。最大値は旧実装の R_HILLBASE と同じ 118m に一致させる。
+    function baseR(a){ return 107 + 11*azWave(a, 2.9); }
+
+    /* 断面。u=0(平坦部の縁)から u=1(裾)への落差の割合。両端で傾きが
+     * 0 になるので、頂上との境界は角ではなく丸い肩になり、裾も野原へ
+     * 接線方向に収束する。指数 0.86 は旧3段スカートの制御点
+     * (u=0.244 で -0.247 / u=0.61 で -0.682)を再現する値を逆算したもの
+     * -- 「上ほど急、裾ほど緩い」という調整済みの全体印象は保つ。 */
+    // 指数を方位でも振ることで、方位によって傾斜そのものが変わる
+    // (0.70=上が急で腹が張った斜面 / 1.02=上が緩く裾で切れ落ちる斜面)。
+    function profile(u, a){ return smoothstep01(0, 1, Math.pow(u, 0.86 + 0.16*azWave(a, 5.3))); }
+
+    /* 頂上へ登る坂道。主玄関(+Z = θ=π/2)の真下から蛇行しながら下る。
+     * 住人が門の外へ歩いて消える先がちょうどこの道の起点になる。 */
+    function roadAz(u){ return Math.PI/2 + 0.52*Math.sin(u*3.1) + 0.30*u; }
+    function roadMask(a, u, r){
+      var d = a - roadAz(u);
+      d = Math.atan2(Math.sin(d), Math.cos(d));       // -π..π へ正規化
+      var half = 3.4 / Math.max(r, 8);                // 幅約6.8m(半径によらず一定)
+      return 1 - smoothstep01(half*0.5, half, Math.abs(d));
+    }
+    /* 斜面のディテール。sin(πu) の包絡を掛けてあるので u=0 と u=1 で
+     * 必ず 0 になる = 頂上の平坦さと裾の高さは断面どおりに保たれる。 */
+    function detail(a, u, x, z, env){
+      var flute = azRidge(a + 0.30*u, 1.3) * (1.10 + 1.70*u);  // 襞。裾ほど幅広に
+      var bench = 0.58 * Math.sin((u*3.35 + 0.11*azWave(a, 4.2)) * Math.PI*2); // 岩盤の段差
+      var lump  = hashNoise2(x*1.9, z*1.9) * 0.60;             // 全体のごつごつ
+      return (flute + bench + lump) * env;
+    }
+    function hillY(a, u, x, z, r){
+      if (u <= 0) return 0;
+      if (u >= 1) return -HILL_DROP + RIM_LIFT;
+      var sn = Math.sin(Math.PI*u);
+      var rm = roadMask(a, u, r);
+      return -(HILL_DROP - RIM_LIFT)*profile(u, a)
+           + detail(a, u, x, z, Math.pow(sn, 0.62)) * (1 - 0.88*rm)
+           - 0.38 * rm * Math.pow(sn, 0.35);          // 道の切り土(浅い溝)
+    }
+    // 岩・低木を斜面へ正確に接地させるためのワールド座標版
+    function surfaceY(x, z){
+      var r = Math.hypot(x, z), a = Math.atan2(z, x);
+      var rc = crestR(a), rb = baseR(a);
+      if (r <= rc) return 0;
+      if (r >= rb) return -HILL_DROP + RIM_LIFT;
+      return hillY(a, (r - rc)/(rb - rc), x, z, r);
+    }
+    /* 斜面の法線。岩を「斜面に寝かせる」のに使う。平らな板を水平のまま
+     * 置くと、傾いた地面から角が浮いて板が宙に浮いて見える(1周目の
+     * スクリーンショットで実際にそうなった)ので、必ずこれで寝かせる。 */
+    var _hillUp = new T.Vector3(0, 1, 0), _hillN = new T.Vector3();
+    function surfaceNormal(x, z){
+      var d = 1.2;
+      var gx = (surfaceY(x+d, z) - surfaceY(x-d, z)) / (2*d);
+      var gz = (surfaceY(x, z+d) - surfaceY(x, z-d)) / (2*d);
+      return _hillN.set(-gx, 1, -gz).normalize();
+    }
+
+    /* ---- 丘のメッシュ(頂点カラー) ------------------------------ */
+    var cTop = new T.Color(HILL_TOP), cMid = new T.Color(HILL_MID);
+    var cEdge = new T.Color(HILL_EDGE), cFld = new T.Color(FIELD_COL);
+    var cRock = new T.Color(HILL_ROCK), cRoad = new T.Color(HILL_ROAD);
+    var cGully = new T.Color(HILL_GULLY);
+    var tmp = new T.Color();
+    var RINGS = FLAT_F.length + SLOPE_RINGS;
+    var pos = [0, 0, 0], col = [cTop.r, cTop.g, cTop.b], idx = [];
+    var i, j, k;
+    for (j=0;j<RINGS;j++){
+      for (i=0;i<A_SEG;i++){
+        var a = i/A_SEG * Math.PI*2, ca = Math.cos(a), sa = Math.sin(a);
+        var rc = crestR(a), rb = baseR(a), r, u;
+        if (j < FLAT_F.length){ u = 0; r = rc * FLAT_F[j]; }
+        else { u = (j - FLAT_F.length + 1) / SLOPE_RINGS; r = rc + (rb - rc)*u; }
+        var x = ca*r, z = sa*r;
+        pos.push(x, hillY(a, u, x, z, r), z);
+        // 高度による基本色: 頂上=乾いた牧草 -> 中腹=土と岩 -> 裾=中景の草地
+        if (u < 0.34) tmp.copy(cTop).lerp(cMid, smoothstep01(0, 0.34, u));
+        else tmp.copy(cMid).lerp(cEdge, smoothstep01(0.34, 0.82, u));
+        tmp.lerp(cFld, smoothstep01(0.82, 1.0, u));   // 裾は中景と同色 = 境界が消える
+        // 頂上の平坦部まで含めて、乾いた草地の斑を薄く入れる(一様な
+        // 単色だと平坦部がそのまま「円盤」に見えてしまうため)
+        tmp.lerp(cGully, 0.16 * smoothstep01(-0.2, 1.4, hashNoise2(x*1.3 + 12, z*1.3 - 7)));
+        if (u > 0){
+          var sn = Math.sin(Math.PI*u);
+          // 石灰岩の露出。斜面の中腹にまだらに出る(頂上と裾では出さない)
+          tmp.lerp(cRock, smoothstep01(0.55, 1.20, hashNoise2(x*3.1 + 40, z*3.1 - 25))
+                          * Math.pow(sn, 0.5) * 0.34);
+          // 襞の谷筋は草が薄く土が出る
+          tmp.lerp(cGully, Math.max(0, -azRidge(a + 0.30*u, 1.3))
+                           * smoothstep01(0.06, 0.35, u) * (1 - smoothstep01(0.80, 1, u)) * 0.35);
+          tmp.lerp(cRoad, roadMask(a, u, r) * 0.86);
+        }
+        col.push(tmp.r, tmp.g, tmp.b);
+      }
+    }
+    // 中心のファン(頂上は完全な平面なので三角形の向きだけ合わせればよい)
+    for (i=0;i<A_SEG;i++) idx.push(0, 1 + (i+1)%A_SEG, 1 + i);
+    for (j=0;j<RINGS-1;j++){
+      for (i=0;i<A_SEG;i++){
+        var i2 = (i+1)%A_SEG, o0 = 1 + j*A_SEG, o1 = 1 + (j+1)*A_SEG;
+        idx.push(o0+i, o0+i2, o1+i,  o0+i2, o1+i2, o1+i);   // 法線が +Y になる巻き順
+      }
+    }
+    var hillGeo = new T.BufferGeometry();
+    hillGeo.setIndex(idx);
+    hillGeo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+    hillGeo.setAttribute('color', new T.Float32BufferAttribute(col, 3));
+    hillGeo.computeVertexNormals();
+    var hill = new T.Mesh(hillGeo, new T.MeshLambertMaterial({ vertexColors: true }));
+    hill.receiveShadow = true;      // castShadow は付けない(丘自身は影を落とす相手がいない)
+    group.add(hill);
+
+    /* ---- 石灰岩の露頭 ---------------------------------------------- *
+     * 実物の写真では、草地から白っぽい石が顔を出しているのと、層理に
+     * 沿って板状に割れた岩が斜面に転がっているのが両方見える。前者を
+     * 十二面体、後者を薄い箱で作り分ける。 */
+    var seed = 8123457;
+    function rnd(){ seed = (seed*1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+    /* 斜面に寝かせる姿勢: 「Y 軸まわりにランダムに回す」->「地面の法線へ
+     * 合わせる」->「わずかに乱す」の合成。Euler では順序を間違えると
+     * 傾きの向きまで回ってしまうのでクォータニオンで組む。 */
+    var _qAlign = new T.Quaternion(), _qSpin = new T.Quaternion(), _qJit = new T.Quaternion();
+    var _eJit = new T.Euler();
+    function bedOnSlope(mesh, x, z, jitter){
+      _qAlign.setFromUnitVectors(_hillUp, surfaceNormal(x, z));
+      _qSpin.setFromAxisAngle(_hillUp, rnd()*Math.PI*2);
+      _eJit.set((rnd()-0.5)*jitter, 0, (rnd()-0.5)*jitter);
+      _qJit.setFromEuler(_eJit);
+      mesh.quaternion.copy(_qAlign).multiply(_qJit).multiply(_qSpin);
+    }
+    var rockMat  = new T.MeshLambertMaterial({ color: HILL_ROCK });
+    var rockMatD = new T.MeshLambertMaterial({ color: HILL_ROCK_D });
+    for (k=0;k<52;k++){
+      // u<=0.90 に抑えるのは、岩の外接が裾(最大118m)を越えて 15-nature.js の
+      // 除外ボックスを広げてしまわないようにするため(中景の畑の位置が動く)。
+      var ra = rnd()*Math.PI*2, ru = 0.05 + 0.85*rnd();
+      var rrc = crestR(ra), rrb = baseR(ra);
+      var rr = rrc + (rrb - rrc)*ru;
+      var rx = Math.cos(ra)*rr, rz = Math.sin(ra)*rr;
+      var slab = rnd() < 0.32;
+      var s = 0.40 + 1.85*Math.pow(rnd(), 2.1);   // 大半は 1m 未満、稀に 2m 級
+      // 板状の岩は上面が水平に近く直射をまともに受けるので、明色ばかりだと
+      // 草地の上に白い紙が散らばったように見える(2周目のスクリーンショットで
+      // 実際にそうなった)。厚みを増やし、暗色の個体を多めに選ぶ。
+      var useDark = rnd() < (slab ? 0.65 : 0.45);
+      if (roadMask(ra, ru, rr) > 0.20) continue;   // 道の上には置かない
+      var rock = new T.Mesh(
+        slab ? new T.BoxGeometry(s*1.7, s*0.60, s*1.2) : new T.DodecahedronGeometry(s, 0),
+        useDark ? rockMatD : rockMat);
+      rock.position.set(rx, surfaceY(rx, rz) - s*(slab ? 0.26 : 0.42), rz);
+      bedOnSlope(rock, rx, rz, slab ? 0.2 : 0.5);
+      rock.castShadow = true; rock.receiveShadow = true;
+      group.add(rock);
+    }
+    /* 大きめの露頭。実物では、斜面のところどころで岩盤そのものが地表に
+     * 顔を出し、割れた塊が数個ずつ固まって残る。小石を撒くだけでは
+     * 斜面に「引っかかり」が出ないので、これを6か所だけ置く。 */
+    for (k=0;k<6;k++){
+      var oa = rnd()*Math.PI*2, ou = 0.24 + 0.50*rnd();
+      var orc = crestR(oa), orb = baseR(oa);
+      var or_ = orc + (orb - orc)*ou;
+      var ox = Math.cos(oa)*or_, oz = Math.sin(oa)*or_;
+      var lumps = 3 + Math.floor(rnd()*3);
+      if (roadMask(oa, ou, or_) > 0.25) continue;
+      for (var q=0;q<lumps;q++){
+        var jx = ox + (rnd()-0.5)*5.2, jz = oz + (rnd()-0.5)*5.2;
+        var os = 1.15 + 1.5*rnd();
+        var chunk = new T.Mesh(new T.DodecahedronGeometry(os, 0), rnd() < 0.5 ? rockMatD : rockMat);
+        chunk.scale.set(0.9 + rnd()*0.4, 0.55 + rnd()*0.3, 0.85 + rnd()*0.4); // 平べったい岩盤の割れ目
+        chunk.position.set(jx, surfaceY(jx, jz) - os*0.16, jz);
+        bedOnSlope(chunk, jx, jz, 0.36);
+        chunk.castShadow = true; chunk.receiveShadow = true;
+        group.add(chunk);
+      }
+    }
+
+    /* ---- 風衝低木 --------------------------------------------------- *
+     * まばらに、風下へ傾けて置く。稜線を不揃いにして丘のスケールを
+     * 読ませるのが目的なので、数は増やしすぎない。写真で見えるのは
+     * オリーブ/乳香樹系の濃く沈んだ緑なので、中景の木より暗くする。 */
+    var scrubMat  = new T.MeshLambertMaterial({ color: HILL_SCRUB });
+    var scrubMatD = new T.MeshLambertMaterial({ color: HILL_SCRUB_D });
+    for (k=0;k<28;k++){
+      var ba = rnd()*Math.PI*2, bu = 0.02 + 0.86*rnd();
+      var brc = crestR(ba), brb = baseR(ba);
+      var br = brc + (brb - brc)*bu;
+      var bx = Math.cos(ba)*br, bz = Math.sin(ba)*br;
+      var bh = 0.75 + 1.35*rnd();
+      var bDark = rnd() < 0.5;
+      if (roadMask(ba, bu, br) > 0.25) continue;
+      var bush = new T.Mesh(new T.IcosahedronGeometry(bh*0.60, 1), bDark ? scrubMatD : scrubMat);
+      bush.scale.set(1.30, 0.66, 1.05);
+      bush.position.set(bx, surfaceY(bx, bz) + bh*0.24, bz);
+      bedOnSlope(bush, bx, bz, 0.42);              // 風で傾いた姿勢
+      bush.castShadow = true; bush.receiveShadow = true;
+      group.add(bush);
+    }
+  })();
   var field = buildUndulatingGround(R_HILLBASE, 1200, 64, hillFieldMat, null);
   field.position.y = -HILL_DROP;
   group.add(field);
