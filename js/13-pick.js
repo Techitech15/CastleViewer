@@ -232,8 +232,27 @@ function lblRectFree(x0, y0, x1, y1){
   }
   return true;
 }
+/* Mark the labels that have an image clip behind them. Runs once per castle
+ * (the fingerprint is the label group plus whether the clip registry loaded
+ * at all), not per frame -- rebuilding a pill's canvas texture is cheap but
+ * pointless to repeat. Deliberately placed here rather than in
+ * buildLabelGroup because the clip lookup is keyed by castle id, which is
+ * only settled once applyCastle has moved currentIdx. */
+var _badgeKey = '';
+function syncLabelBadges(){
+  var key = current.labelGroup.id + '|' + (window.CASTLE_CLIPS ? 1 : 0);
+  if (key === _badgeKey) return;
+  _badgeKey = key;
+  var changed = false;
+  current.labelGroup.children.forEach(function(spr){
+    if (setLabelBadge(spr, !!tooltipClipFor(spr.userData.pickInfo))) changed = true;
+  });
+  // widened pills invalidate the cached screen-space layout
+  if (changed) _lblKey = '';
+}
 function updateLabelVisibility(){
   if (!current || !current.labelGroup){ clearLabelHits(); _lblKey = ''; return; }
+  syncLabelBadges();
   current.labelGroup.visible = labelsOn;
   // labels off -> nothing is hoverable, and the fingerprint is invalidated
   // so switching them back on re-solves (and re-fills the hit list) even

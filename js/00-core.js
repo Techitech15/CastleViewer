@@ -144,13 +144,19 @@ function roundRectPath(ctx,x,y,w,h,r){
   ctx.arcTo(x,y,x+w,y,r);
   ctx.closePath();
 }
-function makeTextSprite(text, worldHeight){
+/* `withBadge` draws a small accent-coloured play triangle at the left of
+ * the pill, marking a label that has an image clip behind it. The badge is
+ * decided per castle at runtime (a clip exists or it does not), not at
+ * build time, so it is applied by setLabelBadge() below rather than here --
+ * this function only knows how to draw the two variants. */
+function makeTextSprite(text, worldHeight, withBadge){
   var fontSize = 30, padX = 16, padY = 10;
+  var badgeW = withBadge ? Math.round(fontSize * 0.82) : 0;
   var c = document.createElement('canvas');
   var ctx = c.getContext('2d');
   ctx.font = '700 ' + fontSize + 'px sans-serif';
   var textW = Math.ceil(ctx.measureText(text).width);
-  c.width = textW + padX*2;
+  c.width = textW + padX*2 + badgeW;
   c.height = fontSize + padY*2;
   ctx.font = '700 ' + fontSize + 'px sans-serif'; // canvas resize resets ctx state
   ctx.textBaseline = 'middle';
@@ -161,8 +167,18 @@ function makeTextSprite(text, worldHeight){
   ctx.lineWidth = 1.4;
   ctx.strokeStyle = 'rgba(238,230,211,0.4)';
   ctx.stroke();
+  if (withBadge){
+    var bx = padX * 0.75, bcy = c.height/2, bs = fontSize * 0.34;
+    ctx.beginPath();
+    ctx.moveTo(bx, bcy - bs);
+    ctx.lineTo(bx + bs*1.5, bcy);
+    ctx.lineTo(bx, bcy + bs);
+    ctx.closePath();
+    ctx.fillStyle = '#d7b26a'; // --accent, same as the UI highlight
+    ctx.fill();
+  }
   ctx.fillStyle = '#f2ead6';
-  ctx.fillText(text, c.width/2, c.height/2 + 1);
+  ctx.fillText(text, badgeW + padX + textW/2, c.height/2 + 1);
   var tex = new T.CanvasTexture(c);
   var mat = new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false });
   var spr = new T.Sprite(mat);
@@ -171,6 +187,29 @@ function makeTextSprite(text, worldHeight){
   var h = worldHeight || 0.9;
   spr.scale.set(h * (c.width/c.height), h, 1);
   return spr;
+}
+
+/* Swap a label pill between its plain and badged forms. Which labels carry
+ * a clip is only knowable once the viewer is on a given castle (the clip
+ * registry is keyed by castle id), so the badge is applied after the fact
+ * instead of at build time. Returns true when the sprite actually changed,
+ * so the caller can invalidate the label layout -- the pill gets wider, so
+ * its cached aspect ratio has to be refreshed too. */
+function setLabelBadge(spr, want){
+  want = !!want;
+  if (!!spr.userData.hasClip === want) return false;
+  var pi = spr.userData.pickInfo;
+  if (!pi) return false;
+  var fresh = makeTextSprite(pi.name.split(' ')[0],
+    pi.kind === 'structure' ? 1.4 : 0.85, want);
+  if (spr.material){
+    if (spr.material.map) spr.material.map.dispose();
+    spr.material.dispose();
+  }
+  spr.material = fresh.material;
+  spr.userData.hasClip = want;
+  spr.userData.aspect = fresh.scale.x / fresh.scale.y;
+  return true;
 }
 
 /* always-on label group, built from a castle's `pickables` list. Shared
