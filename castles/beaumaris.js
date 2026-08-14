@@ -146,6 +146,75 @@ function buildBeaumaris(){
   var courtGrassMat = new T.MeshLambertMaterial({ color: COURT_GRASS_COL });
   var wellMat   = new T.MeshBasicMaterial({ color: 0x2e6a7a });
 
+  /* ---- interior / garden palette ---------------------------------------
+   * Same clipping ceiling applies as for the stone tones above: any channel
+   * over ~0x86 blows out to white on an up-facing Lambert surface under the
+   * noon rig, so every tone below is kept under it (the only exceptions are
+   * the two MeshBasicMaterial fire glows, which are meant to read as light
+   * sources and are not lit by the rig at all). */
+  /* Measured against the first interior render: the day rig multiplies an
+     up-facing Lambert channel by ~2.0, so 0x7e straw rendered (252,222,132)
+     -- a neon yellow floor. Every tone here is therefore chosen so its
+     BRIGHTEST channel stays under ~0x6e (110), which lands the lit result
+     around 220 and keeps the interiors readable next to the 0x77 stonework. */
+  var STRAW_COL   = 0x60563a;
+  var SOIL_COL    = 0x43352a;
+  var LEAF_A_COL  = 0x3d5e2f;
+  var LEAF_B_COL  = 0x4a6c37;
+  var HEDGE_COL   = 0x36512c;
+  var TRUNK_COL   = 0x453728;
+  var IRON_COL    = 0x3a3b3d;
+  var LINEN_COL   = 0x6d6a5d;
+  var CLOTH_R_COL = 0x6a2e29;
+  var CLOTH_B_COL = 0x32415f;
+  var PATH_COL    = 0x5f5a50;
+  var SACK_COL    = 0x5e5438;
+  var POT_COL     = 0x2f2c28;
+  var PALE_COL    = 0x6c6858;   // dressed ashlar: altar, chapel furniture
+  var FLAG_COL    = 0x5c574d;   // flagged service floors (kitchen, store)
+  var WOOD_L_COL  = 0x5f4e37;   // lighter joinery, so beds/tables read apart from beams
+  var HORSE_A_COL = 0x4a3a2a;
+  var HORSE_B_COL = 0x5e523f;
+
+  var strawMat  = new T.MeshLambertMaterial({ color: STRAW_COL });
+  var soilMat   = new T.MeshLambertMaterial({ color: SOIL_COL });
+  var leafAMat  = new T.MeshLambertMaterial({ color: LEAF_A_COL });
+  var leafBMat  = new T.MeshLambertMaterial({ color: LEAF_B_COL });
+  var hedgeMat  = new T.MeshLambertMaterial({ color: HEDGE_COL });
+  var trunkMat  = new T.MeshLambertMaterial({ color: TRUNK_COL });
+  var ironMat   = new T.MeshLambertMaterial({ color: IRON_COL });
+  var linenMat  = new T.MeshLambertMaterial({ color: LINEN_COL });
+  var clothRMat = new T.MeshLambertMaterial({ color: CLOTH_R_COL });
+  var clothBMat = new T.MeshLambertMaterial({ color: CLOTH_B_COL });
+  var pathMat   = new T.MeshLambertMaterial({ color: PATH_COL });
+  var sackMat   = new T.MeshLambertMaterial({ color: SACK_COL });
+  var potMat    = new T.MeshLambertMaterial({ color: POT_COL });
+  var paleMat   = new T.MeshLambertMaterial({ color: PALE_COL });
+  var flagMat   = new T.MeshLambertMaterial({ color: FLAG_COL });
+  var woodLMat  = new T.MeshLambertMaterial({ color: WOOD_L_COL });
+  var fireMat   = new T.MeshBasicMaterial({ color: 0xd0752a });
+  var emberMat  = new T.MeshBasicMaterial({ color: 0x8f3f18 });
+  var glassRMat = new T.MeshBasicMaterial({ color: 0x8c3730 });
+  var glassBMat = new T.MeshBasicMaterial({ color: 0x2f4f86 });
+
+  /* interiorGroup shorthand -- every furnishing below goes through these so
+     nothing is accidentally left in a fading shell group. */
+  function iProp(w,h,d,mat,x,y,z,ry){ var m = mkBox(w,h,d,mat); place(m,x,y,z,ry); interiorGroup.add(m); return m; }
+  function iCyl(rt,rb,h,seg,mat,x,y,z,ry){ var m = mkCyl(rt,rb,h,seg,mat); place(m,x,y,z,ry); interiorGroup.add(m); return m; }
+  function iCone(r,h,seg,mat,x,y,z,ry){ var m = mkCone(r,h,seg,mat); place(m,x,y,z,ry); interiorGroup.add(m); return m; }
+  /* low-poly rounded blob -- orchard canopies and vegetable tufts. Cones read
+     as conifers, which is wrong for both a castle kitchen garden and a
+     courtyard fruit tree; 6x4 segments keeps it firmly in the viewer's
+     faceted style while reading as a broadleaf shape. */
+  function iBlob(r, seg, mat, x, y, z, sy){
+    var m = new T.Mesh(new T.SphereGeometry(r, seg||6, Math.max(3, Math.round((seg||6)*0.6))), mat);
+    m.castShadow = true; m.receiveShadow = true;
+    m.position.set(x, y, z);
+    if (sy) m.scale.y = sy;
+    interiorGroup.add(m);
+    return m;
+  }
+
   /* -------------------------------------------------------------- *
    * footprint constants (metres) -- see the provenance note above for
    * which are measured and which are estimated
@@ -606,12 +675,6 @@ function buildBeaumaris(){
     m.rotation.z = Math.atan2(rise, run);
     return m;
   }
-  function rangeProp(x, z, w, h, d, mat, ry){
-    var m = mkBox(w, h, d, mat);
-    place(m, x, RANGE_FLOOR_Y + h/2, z, ry||0);
-    interiorGroup.add(m);
-    return m;
-  }
   function buildRange(side, z0, z1, chimneyZ){
     var xIn = side*RANGE_IN_X, xOut = side*INNER_IN_HX;
     var xMid = (xIn+xOut)/2, zc = (z0+z1)/2, len = z1-z0;
@@ -662,15 +725,181 @@ function buildBeaumaris(){
   var WX_IN = -RANGE_IN_X, WX_OUT = -INNER_IN_HX;   // west range, courtyard face / curtain face
   var EX_IN =  RANGE_IN_X, EX_OUT =  INNER_IN_HX;   // east range
 
+  /* -------------------------------------------------------------- *
+   * shared furnishing kit
+   * -------------------------------------------------------------- *
+   * All of it is pure box/cylinder/cone assembly kept deliberately blocky --
+   * the whole viewer is low-poly and a detailed prop would read as a bug next
+   * to the 16-segment towers. Nothing here is sourced: no inventory of
+   * Beaumaris' fittings survives, so every piece is a generic 13th-14th c.
+   * furnishing chosen to make the room's USE legible from the cutaway.
+   * -------------------------------------------------------------- */
+  var FY = RANGE_FLOOR_Y;               // range floor top, y
+
+  // floor covering laid over buildRange's stone slab (straw, boards, rushes)
+  function floorSkin(xa, xb, za, zb, mat, y){
+    return iProp(Math.abs(xb-xa), 0.07, Math.abs(zb-za), mat, (xa+xb)/2, (y!=null?y:FY)+0.035, (za+zb)/2);
+  }
+  // barrel: an 8-sided cylinder with two darker hoops
+  function barrel(x, z, r, h, y){
+    var b = y!=null?y:FY;
+    iCyl(r*0.88, r*0.88, h, 8, woodMat, x, b+h/2, z);
+    iCyl(r, r, h*0.13, 8, darkMat, x, b+h*0.28, z);
+    iCyl(r, r, h*0.13, 8, darkMat, x, b+h*0.72, z);
+  }
+  // 4-legged trestle table
+  function table(x, z, w, d, h, ry, mat){
+    var m = mat || woodLMat;
+    iProp(w, 0.14, d, m, x, FY+h, z, ry);
+    var co = Math.cos(ry||0), si = Math.sin(ry||0);
+    [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(function(s){
+      var lx = s[0]*(w/2-0.24), lz = s[1]*(d/2-0.18);
+      iProp(0.16, h, 0.16, m, x + lx*co + lz*si, FY+h/2, z - lx*si + lz*co, ry);
+    });
+  }
+  // corn-domed sack
+  function sack(x, z, s, y){
+    var b = y!=null?y:FY;
+    iProp(s*0.85, s*0.95, s*0.7, sackMat, x, b+s*0.48, z);
+    iProp(s*0.5, s*0.3, s*0.42, sackMat, x, b+s*1.05, z);
+  }
+  // hay / straw pile: two stacked cones
+  function hayPile(x, z, r, h, y){
+    var b = y!=null?y:0;
+    iCone(r, h*0.72, 7, strawMat, x, b+h*0.36, z);
+    iCone(r*0.62, h*0.5, 7, strawMat, x, b+h*0.78, z);
+  }
+  // stacked firewood: a low crib of round billets
+  function woodStack(x, z, w, rows, ry){
+    for (var r=0;r<rows;r++){
+      var n = Math.max(2, Math.round(w/0.34));
+      for (var i=0;i<n;i++){
+        var lx = -w/2 + 0.17 + i*0.34 + (r%2?0.08:0);
+        var log = mkCyl(0.15, 0.15, 1.5, 6, woodMat);
+        log.rotation.z = Math.PI/2;
+        var co = Math.cos(ry||0), si = Math.sin(ry||0);
+        place(log, x + lx*co, FY + 0.17 + r*0.32, z - lx*si, ry);
+        interiorGroup.add(log);
+      }
+    }
+  }
+  // hearth fire: ember bed + a few flame shards (MeshBasic, so it stays bright
+  // at dusk/night when the rest of the interior goes dark)
+  function fire(x, z, s, y){
+    var b = y!=null?y:FY;
+    iProp(s*1.3, 0.12, s*1.3, emberMat, x, b+0.08, z);
+    for (var i=0;i<3;i++){
+      var a = i*2.1;
+      iCone(s*0.34, s*(0.8+0.22*i), 5, fireMat, x+Math.cos(a)*s*0.28, b+s*(0.42+0.11*i), z+Math.sin(a)*s*0.28);
+    }
+  }
+  /* Open roof truss under a lean-to. First attempt was a tie beam plus a
+     free-floating raking strut, which rendered as loose sticks poking above
+     the (faded) roof line. This version is a proper couple: a tie beam at
+     collar height, a rafter lying just under the roof pitch, and a queen post
+     between them -- so it reads as carpentry no matter which way the roof has
+     faded. yIn/yOut track leanRoofX's own end heights minus the rafter depth. */
+  function truss(side, z){
+    var xIn  = side>0 ? RANGE_IN_X   : -RANGE_IN_X;
+    var xOut = side>0 ? INNER_IN_HX  : -INNER_IN_HX;
+    /* rafter line taken from leanRoofX's own end points minus the roof slab's
+       half-thickness: the first numbers here (RANGE_HIGH-0.55) put the outer
+       end 0.4m ABOVE the roof underside, and the rafters showed through the
+       slate in every top-down render. leanRoofX runs from (|x|=RANGE_IN_X-0.7,
+       RANGE_LOW+0.25) to (|x|=INNER_IN_HX+2.0, RANGE_HIGH), i.e. slope 0.312. */
+    var yIn = RANGE_LOW - 0.20, yOut = RANGE_HIGH - 1.05;
+    var run = Math.abs(xOut-xIn), rise = yOut-yIn;
+    iProp(run-0.5, 0.2, 0.2, woodMat, (xIn+xOut)/2, RANGE_LOW-1.15, z);   // tie beam
+    var r = mkBox(Math.hypot(run, rise), 0.2, 0.2, woodMat);
+    r.position.set((xIn+xOut)/2, (yIn+yOut)/2, z);
+    r.rotation.z = side * Math.atan2(rise, run);
+    r.castShadow = true;
+    interiorGroup.add(r);
+    // queen post, from the tie beam up to the rafter a third of the way out
+    var t = 0.34, px = xIn + (xOut-xIn)*t, py = yIn + rise*t;
+    iProp(0.17, py - (RANGE_LOW-1.15), 0.17, woodMat, px, (py + RANGE_LOW-1.15)/2, z);
+  }
+  function trusses(side, z0, z1, n){
+    for (var i=0;i<n;i++) truss(side, z0 + (z1-z0)*((i+0.5)/n));
+  }
+  // wall-hung textile (tapestry / banner), a single thin board
+  function hanging(x, y, z, w, h, mat, ry, thin){
+    return iProp(w, h, thin||0.09, mat, x, y, z, ry);
+  }
+  // upright ladder leaning against a wall
+  function ladder(x, z, h, ry){
+    var co = Math.cos(ry||0), si = Math.sin(ry||0);
+    [-1,1].forEach(function(s){
+      var lx = s*0.28;
+      var r = mkBox(0.1, h, 0.1, woodMat);
+      place(r, x + lx*co, FY+h/2, z - lx*si, ry);
+      r.rotation.x = 0.16;
+      interiorGroup.add(r);
+    });
+    for (var i=1;i<Math.floor(h/0.45);i++) iProp(0.62, 0.07, 0.07, woodMat, x, FY+i*0.45, z + (i*0.45-h/2)*0.16, ry);
+  }
+
   // ---- west range, north block: stable + harness store
   buildRange(-1, RANGE_Z[0][0], RANGE_Z[0][1]);
   (function(){
-    for (var i=0;i<4;i++) rangeProp(WX_OUT+2.6, -19.0+i*2.6, 3.2, 1.5, 0.35, woodMat); // stall divisions
-    rangeProp(WX_IN+2.2, -9.6, 2.6, 0.9, 1.1, woodMat);   // feed bins
-    rangeProp(WX_IN+2.2, -12.4, 1.2, 1.6, 1.2, woodMat);
+    var xa = WX_OUT+0.4, xb = WX_IN-0.4;          // -24.2 .. -16.0
+    var zPart = (RANGE_Z[0][0]+RANGE_Z[0][1])/2;   // -13.25, the partition
+    floorSkin(xa, xb, RANGE_Z[0][0]+0.4, zPart-0.3, strawMat);   // straw over the stalls
+
+    // three loose-boxes divided by low timber partitions, mangers at the curtain
+    var stallZ = [-19.3, -17.0, -14.7];
+    [-18.15, -15.85].forEach(function(dz){
+      iProp(5.6, 1.45, 0.22, woodMat, xa+2.8, FY+0.72, dz);
+      iCyl(0.13, 0.13, 1.9, 6, woodMat, xa+5.6, FY+0.95, dz);   // head post
+    });
+    stallZ.forEach(function(sz){
+      iProp(1.0, 0.62, 1.7, woodMat, xa+0.6, FY+0.31, sz);       // manger
+      iProp(0.9, 0.16, 1.7, strawMat, xa+0.6, FY+0.7, sz);       // fodder in it
+      // hay rack directly over the manger, NOT over the middle of the stall:
+      // at xa+2.0 it sat exactly on top of the horse and hid it from above.
+      iProp(0.95, 0.68, 1.5, woodMat, xa+0.75, FY+1.85, sz);
+    });
+
+    // two horses, one stall left empty so the boxes read as boxes
+    function horse(cx, cz, ry, mat){
+      var g = new T.Group();
+      function b(w,h,d,x,y,z,rz){ var m = mkBox(w,h,d,mat); m.position.set(x,y,z); if (rz) m.rotation.z = rz; g.add(m); return m; }
+      b(2.25, 1.02, 0.92, 0, 1.32, 0);
+      b(0.72, 1.15, 0.68, -1.02, 1.72, 0, 0.34);
+      b(1.02, 0.48, 0.56, -1.56, 2.16, 0, 0.16);
+      [[-0.78,-0.3],[-0.78,0.3],[0.82,-0.3],[0.82,0.3]].forEach(function(p){
+        var l = mkCyl(0.12, 0.14, 0.92, 6, mat); l.position.set(p[0], 0.46, p[1]); g.add(l);
+      });
+      b(0.2, 0.85, 0.2, 1.16, 1.42, 0, 0.24);
+      g.position.set(cx, FY, cz); g.rotation.y = ry||0;
+      interiorGroup.add(g);
+    }
+    // stood back from the manger so the horse's head clears the hay rack
+    horse(xa+3.4, stallZ[0], 0, new T.MeshLambertMaterial({ color: HORSE_A_COL }));
+    horse(xa+3.3, stallZ[2], 0.1, new T.MeshLambertMaterial({ color: HORSE_B_COL }));
+
+    // ---- harness store, south of the partition
+    floorSkin(xa, xb, zPart+0.3, RANGE_Z[0][1]-0.4, flagMat);
+    iProp(0.5, 2.2, 0.5, woodMat, xa+1.4, FY+1.1, -11.2);            // saddle-tree posts
+    iProp(0.5, 2.2, 0.5, woodMat, xa+1.4, FY+1.1, -8.4);
+    iProp(0.36, 0.24, 3.4, woodMat, xa+1.4, FY+2.1, -9.8);           // rail between them
+    iProp(1.1, 0.7, 0.85, woodMat, xa+1.4, FY+2.55, -11.0);          // saddles on the rail
+    iProp(1.1, 0.7, 0.85, woodMat, xa+1.4, FY+2.55, -8.7);
+    for (var p=0;p<4;p++){                                            // harness pegs + hanging tack
+      iProp(0.5, 0.14, 0.14, woodMat, xa+0.35, FY+2.5, -12.4+p*1.5);
+      iProp(0.14, 0.9, 0.5, darkMat, xa+0.35, FY+2.0, -12.4+p*1.5);
+    }
+    barrel(xb-1.3, -11.6, 0.5, 1.05);
+    barrel(xb-1.3, -10.3, 0.5, 1.05);
+    iProp(2.4, 0.9, 1.1, woodMat, xb-1.6, FY+0.45, -8.2);            // feed bins (were floating
+    iProp(1.2, 1.5, 1.2, woodMat, xb-1.4, FY+0.75, -6.6);            //  out on the lawn: the old
+                                                                      //  code used WX_IN+2.2, which
+                                                                      //  is OUTSIDE a west range)
+    hayPile(xa+4.6, -6.9, 1.35, 1.9, FY);
+    trusses(-1, RANGE_Z[0][0], RANGE_Z[0][1], 4);
     pickRoom(WX_OUT, WX_IN, RANGE_Z[0][0], RANGE_Z[0][1], 2.6, 4.6,
       '厩舎・馬具庫 Stable & Harness Store (West Range)',
-      '西棟北ブロック。内郭西壁に背を預ける建物レンジ(基礎のみ現存)。厩舎としたのは推定で、史料に個別の用途記載はない。');
+      '西棟北ブロック。内郭西壁に背を預ける建物レンジ(基礎のみ現存)。厩舎としたのは推定で、史料に個別の用途記載はない。仕切り馬房・飼葉桶・鞍掛けなどの什器はすべて中世一般の造作にもとづく想定。');
   })();
 
   // ---- west range, south block: kitchen + bakehouse (the standalone
@@ -678,92 +907,479 @@ function buildBeaumaris(){
   // so there is exactly one kitchen in the model)
   buildRange(-1, RANGE_Z[1][0], RANGE_Z[1][1], [10.5, 17.0]);
   (function(){
-    rangeProp(WX_OUT+1.5, 10.5, 2.4, 1.6, 2.6, hearthMat);  // kitchen hearth against the curtain
-    rangeProp(WX_OUT+1.5, 17.0, 2.4, 1.5, 2.4, hearthMat);  // bakehouse oven
-    rangeProp(WX_IN+2.6, 9.0, 1.1, 0.85, 3.4, woodMat);     // dressing tables
-    rangeProp(WX_IN+2.6, 18.4, 1.1, 0.85, 3.4, woodMat);
-    rangeProp(WX_IN+3.0, 13.0, 1.0, 1.0, 1.0, woodMat);     // barrels / tubs
+    var xa = WX_OUT+0.4, xb = WX_IN-0.4;
+    floorSkin(xa, xb, RANGE_Z[1][0]+0.4, RANGE_Z[1][1]-0.4, flagMat);
+
+    // ---- great kitchen hearth, under the chimney the shell already carries
+    iProp(2.6, 0.55, 3.8, hearthMat, xa+1.0, FY+0.27, 10.5);          // raised hearth slab
+    iProp(0.5, 1.9, 3.8, darkMat, xa+0.1, FY+1.5, 10.5);              // fire-back
+    fire(xa+1.2, 10.5, 0.85, FY+0.55);
+    // smoke hood tapering up into the chimney
+    var hood = mkBox(2.6, 1.5, 4.2, darkMat);
+    place(hood, xa+1.1, FY+3.4, 10.5);
+    interiorGroup.add(hood);
+    iProp(1.4, 1.3, 2.2, darkMat, xa+1.1, FY+4.7, 10.5);
+    // cauldron on an iron trivet, plus a spit across the fire
+    iCyl(0.62, 0.5, 0.8, 10, potMat, xa+1.2, FY+1.35, 10.5);
+    iCyl(0.68, 0.68, 0.1, 10, ironMat, xa+1.2, FY+1.8, 10.5);
+    [-1,1].forEach(function(s){ iCyl(0.07, 0.07, 2.4, 6, ironMat, xa+2.4, FY+1.2, 10.5+s*1.5); });
+    var spit = mkCyl(0.06, 0.06, 3.0, 6, ironMat); spit.rotation.x = Math.PI/2;
+    place(spit, xa+2.4, FY+2.3, 10.5); interiorGroup.add(spit);
+
+    // dressers, chopping block, water butt, pot rack
+    table(xb-1.5, 8.2, 1.3, 3.6, 0.86, 0);
+    table(xb-1.5, 12.4, 1.3, 3.2, 0.86, 0);
+    iCyl(0.55, 0.5, 0.75, 8, woodMat, xa+4.4, FY+0.38, 7.2);          // chopping block
+    barrel(xa+4.2, 12.6, 0.62, 1.25);
+    barrel(xa+5.6, 12.4, 0.5, 1.0);
+    sack(xb-2.3, 6.6, 0.9); sack(xb-2.9, 7.4, 0.8);
+    var rack = mkBox(0.14, 0.14, 3.2, woodMat);
+    place(rack, xa+3.4, FY+2.9, 9.4); interiorGroup.add(rack);
+    for (var q=0;q<4;q++){
+      iCyl(0.05, 0.05, 0.5, 5, ironMat, xa+3.4, FY+2.6, 8.2+q*0.8);
+      iCyl(0.26, 0.2, 0.34, 8, potMat, xa+3.4, FY+2.2, 8.2+q*0.8);
+    }
+    woodStack(xa+3.0, 5.6, 2.2, 3, Math.PI/2);
+
+    // ---- bakehouse: beehive oven against the curtain, kneading trough, peel
+    iProp(3.2, 0.7, 3.2, hearthMat, xa+1.2, FY+0.35, 17.0);           // oven platform
+    iCyl(1.35, 1.5, 1.1, 10, hearthMat, xa+1.3, FY+1.25, 17.0);       // oven drum
+    iCone(1.5, 1.2, 10, hearthMat, xa+1.3, FY+2.3, 17.0);             // beehive dome
+    iProp(0.7, 0.85, 0.9, darkMat, xa+2.5, FY+1.15, 17.0);            // arched mouth
+    fire(xa+1.5, 17.0, 0.5, FY+0.7);
+    table(xb-1.6, 16.4, 1.4, 3.4, 0.86, 0);                            // kneading trough
+    iProp(1.1, 0.28, 3.0, woodMat, xb-1.6, FY+1.05, 16.4);
+    for (var lf=0;lf<5;lf++) iCyl(0.26, 0.3, 0.2, 8, sackMat, xb-1.5, FY+1.28, 15.2+lf*0.62);
+    var peel = mkBox(0.08, 0.1, 2.6, woodMat);
+    place(peel, xa+3.4, FY+1.4, 18.6); peel.rotation.x = 0.45;
+    interiorGroup.add(peel);
+    iProp(0.9, 0.55, 2.4, woodMat, xb-1.4, FY+0.28, 19.4);             // flour bin
+    sack(xa+4.6, 19.6, 1.0); sack(xa+5.6, 19.2, 0.85);
+    trusses(-1, RANGE_Z[1][0], RANGE_Z[1][1], 4);
+
     pickRoom(WX_OUT, WX_IN, RANGE_Z[1][0], 13.5, 2.6, 4.6, '厨房 Kitchen (West Range)',
-      '西棟南ブロック北半。内郭西壁沿いの調理場(位置・規模ともに推定、個別の実測記録なし)。');
+      '西棟南ブロック北半。内郭西壁沿いの調理場(位置・規模ともに推定、個別の実測記録なし)。大炉・大釜・焼き串・煙出しフードを備える。');
     pickRoom(WX_OUT, WX_IN, 13.5, RANGE_Z[1][1], 2.6, 4.6, 'パン焼き所 Bakehouse (West Range)',
-      '西棟南ブロック南半。パン窯を備えた区画(推定)。');
+      '西棟南ブロック南半。ドーム型のパン窯とこね台を備えた区画(構成はすべて推定)。');
   })();
 
   // ---- east range, north block: lodgings / retainers' chambers
   buildRange(1, RANGE_Z[0][0], RANGE_Z[0][1], [-17.5]);
   (function(){
-    rangeProp(EX_OUT-1.5, -17.5, 2.2, 1.4, 2.2, hearthMat);
-    rangeProp(EX_OUT-2.6, -12.0, 2.2, 0.55, 1.5, woodMat, 0.15);
-    rangeProp(EX_OUT-2.6, -9.5, 2.2, 0.55, 1.5, woodMat, -0.1);
-    rangeProp(EX_IN+2.4, -14.0, 1.0, 0.8, 2.6, woodMat);
+    var xa = EX_OUT-0.4, xb = EX_IN+0.4;          // 24.2 .. 16.0
+    floorSkin(xb, xa, RANGE_Z[0][0]+0.4, RANGE_Z[0][1]-0.4, woodMat);   // boarded floor
+
+    // ---- north half: the constable's retainers' chamber, with a fireplace
+    iProp(1.0, 1.6, 3.0, hearthMat, xa-0.5, FY+0.8, -17.5);           // fireplace recess
+    iProp(2.0, 0.45, 3.4, hearthMat, xa-1.3, FY+0.22, -17.5);         // hearthstone
+    fire(xa-1.2, -17.5, 0.75, FY+0.45);
+    var lhood = mkBox(1.6, 1.2, 3.6, darkMat);
+    place(lhood, xa-0.9, FY+2.4, -17.5); interiorGroup.add(lhood);
+    hanging(xa-0.12, FY+3.4, -14.6, 0.09, 2.4, clothRMat, 0, 2.6);     // tapestry on the curtain
+    hanging(xa-0.12, FY+3.3, -20.0, 0.09, 2.2, clothBMat, 0, 2.4);
+
+    // three beds with chests at their feet
+    [[-19.8, 0],[-16.6, 0],[-11.0, 0]].forEach(function(b, bi){
+      var bz = b[0];
+      iProp(2.3, 0.42, 1.35, woodMat, xa-1.9, FY+0.32, bz);            // frame
+      iProp(2.15, 0.3, 1.2, linenMat, xa-1.9, FY+0.66, bz);            // mattress + sheet
+      iProp(0.7, 0.24, 1.1, linenMat, xa-2.75, FY+0.9, bz);            // bolster
+      iProp(0.16, 1.1, 0.16, woodMat, xa-0.9, FY+0.75, bz-0.6);        // foot posts
+      iProp(0.16, 1.1, 0.16, woodMat, xa-0.9, FY+0.75, bz+0.6);
+      iProp(1.0, 0.62, 0.65, woodLMat, xa-3.5, FY+0.31, bz, bi*0.12);  // chest
+    });
+    // a screened cubicle, table and stools in the south half
+    iProp(0.24, 2.4, 4.2, woodMat, xa-4.6, FY+1.2, -14.0);             // timber screen
+    table(xb+2.2, -10.0, 1.3, 2.2, 0.82, 0);
+    iCyl(0.09, 0.09, 0.5, 6, potMat, xb+2.2, FY+1.1, -10.0);           // candle
+    iCyl(0.05, 0.05, 0.26, 5, fireMat, xb+2.2, FY+1.42, -10.0);
+    [[-9.0],[ -11.0]].forEach(function(s){ iCyl(0.26, 0.3, 0.5, 6, woodMat, xb+3.4, FY+0.25, s[0]); });
+    iProp(1.2, 1.1, 1.2, woodLMat, xb+1.4, FY+0.55, -7.2);             // clothes chest
+    for (var g=0;g<3;g++) iProp(0.4, 0.12, 0.12, woodMat, xa-0.3, FY+2.6, -8.6+g*1.1);  // wall pegs
+    hanging(xa-0.6, FY+2.0, -8.6, 0.5, 1.1, clothBMat, 0, 0.3);
+    hanging(xa-0.6, FY+2.05, -6.4, 0.5, 1.0, clothRMat, 0, 0.3);
+    // ladder to a boarded sleeping loft in the roof space
+    iProp(RANGE_D-2.6, 0.2, 4.4, woodMat, (xa+xb)/2, FY+3.6, -7.4);
+    ladder(xb+1.0, -5.2, 3.4, Math.PI);
+    trusses(1, RANGE_Z[0][0], RANGE_Z[0][1], 4);
     pickRoom(EX_IN, EX_OUT, RANGE_Z[0][0], RANGE_Z[0][1], 2.6, 4.6,
       '居室・従者宿舎 Lodgings (East Range)',
-      '東棟北ブロック。内郭東壁沿いの居住棟(基礎のみ現存、内部の間取りは推定)。');
+      '東棟北ブロック。内郭東壁沿いの居住棟(基礎のみ現存、間取り・什器はすべて推定)。暖炉、寝台、衣装櫃、屋根裏の寝床を置く。');
   })();
 
   // ---- east range, south block: granary / stores
   buildRange(1, RANGE_Z[1][0], RANGE_Z[1][1]);
   (function(){
-    for (var i=0;i<3;i++) rangeProp(EX_OUT-2.0, 8.6+i*3.2, 1.5, 1.5, 1.5, woodMat);
-    rangeProp(EX_IN+2.2, 12.0, 1.2, 1.1, 5.0, woodMat);
+    var xa = EX_OUT-0.4, xb = EX_IN+0.4;
+    floorSkin(xb, xa, RANGE_Z[1][0]+0.4, RANGE_Z[1][1]-0.4, flagMat);
+
+    // timber arcade down the middle of the store, carrying the loft
+    for (var c=0;c<4;c++){
+      var pz = 7.4 + c*4.0;
+      iCyl(0.26, 0.3, 3.3, 8, woodMat, (xa+xb)/2, FY+1.65, pz);
+      iProp(1.5, 0.28, 0.3, woodMat, (xa+xb)/2, FY+3.45, pz);          // bolster head
+    }
+    // loft boards over the CURTAIN half only: a full-width deck (RANGE_D-1.6
+    // by 15) covered nearly the whole block and blanked the store out from
+    // above, which defeats the point of the cutaway.
+    iProp(3.8, 0.2, 13.0, woodMat, xa-2.2, FY+3.68, 13.4);
+    ladder(xb+0.9, 6.6, 3.5, Math.PI);
+
+    // plank grain bins against the curtain
+    [7.2, 11.0].forEach(function(gz){
+      iProp(2.4, 1.7, 3.2, woodMat, xa-1.5, FY+0.85, gz);
+      iProp(2.2, 0.14, 3.0, sackMat, xa-1.5, FY+1.78, gz);             // grain heaped level
+    });
+    // barrels + crates + sacks
+    barrel(xa-1.6, 15.0, 0.6, 1.3); barrel(xa-1.6, 16.5, 0.6, 1.3);
+    barrel(xa-2.9, 15.7, 0.6, 1.3); barrel(xa-1.6, 15.75, 0.6, 1.3, FY+1.3);
+    for (var s2=0;s2<4;s2++) sack(xb+1.5, 8.0+s2*1.3, 0.95);
+    for (var s3=0;s3<3;s3++) sack(xb+2.6, 8.6+s3*1.3, 0.85);
+    iProp(1.5, 1.4, 1.5, woodLMat, xb+1.6, FY+0.7, 13.2);
+    iProp(1.5, 1.4, 1.5, woodLMat, xb+1.6, FY+0.7, 14.9);
+    iProp(1.4, 1.3, 1.4, woodLMat, xb+1.7, FY+2.05, 13.4);
+    // spear rack: the concentric plan was built for a siege, so arms live here
+    iProp(0.3, 0.3, 3.2, woodMat, xb+0.9, FY+1.9, 18.4);
+    for (var sp=0;sp<7;sp++){
+      iCyl(0.06, 0.06, 2.6, 5, woodMat, xb+0.9, FY+1.3, 17.0+sp*0.45);
+      iCone(0.1, 0.42, 5, ironMat, xb+0.9, FY+2.8, 17.0+sp*0.45);
+    }
+    hayPile(xa-2.2, 19.4, 1.2, 1.7, FY);
+    trusses(1, RANGE_Z[1][0], RANGE_Z[1][1], 4);
     pickRoom(EX_IN, EX_OUT, RANGE_Z[1][0], RANGE_Z[1][1], 2.6, 4.6,
       '倉庫・穀物庫 Storehouse & Granary (East Range)',
-      '東棟南ブロック。糧食・武具の保管棟(推定)。同心円式の内郭は籠城を前提とした構造で、貯蔵空間が重視された。');
+      '東棟南ブロック。糧食・武具の保管棟(推定)。同心円式の内郭は籠城を前提とした構造で、貯蔵空間が重視された。穀物櫃・樽・袋・槍架を置く。');
   })();
 
-  // Great Hall, first floor of the north gatehouse (the only floor it
-  // ever got -- see buildGateBlock's north tooltip).
+  /* -------------------------------------------------------------- *
+   * GREAT HALL -- first floor of the north gatehouse, the only floor it
+   * ever got (see buildGateBlock's north tooltip). MEASURED: 21 x 7.6m.
+   * Everything inside is ESTIMATED: no inventory survives, so the fit-out
+   * is the standard 13th/14th c. hall arrangement -- dais and high table at
+   * one end, trestles and benches down the body, wall fireplace, hangings.
+   * -------------------------------------------------------------- */
+  var HALL_Y = 4.6, HALL_Z = -INNER_HZ;
   (function(){
-    var hallY = 4.6;
-    var hallFloor = mkBox(GATE_W-2, 0.3, GATE_D-1, floorMat);
-    place(hallFloor, 0, hallY, -INNER_HZ);
-    interiorGroup.add(hallFloor);
-    var table = mkBox(GATE_W-8, 0.7, 1.5, woodMat);
-    place(table, 0, hallY+0.5, -INNER_HZ);
-    interiorGroup.add(table);
-    var hearth = mkBox(1.8, 1.0, 0.5, hearthMat);
-    place(hearth, GATE_W/2-2.5, hallY+0.5, -INNER_HZ-GATE_D/2+0.4);
-    interiorGroup.add(hearth);
-    pickRoom(-(GATE_W/2-1), GATE_W/2-1, -INNER_HZ-GATE_D/2+0.5, -INNER_HZ+GATE_D/2-0.5, hallY+0.9, 4.4,
-      '大広間 Great Hall (Gatehouse)', '北門楼1階の広間、約21×7.6m(実測)。本来は2階分の計画だったが1階のみで工事が止まった。');
+    var hw = GATE_W-2, hd = GATE_D-1;                 // 19 x 6.6
+    var z0 = HALL_Z - hd/2, z1 = HALL_Z + hd/2;
+    var topY = HALL_Y + 0.15;                          // walking surface
+    iProp(hw, 0.3, hd, floorMat, 0, HALL_Y, HALL_Z);
+    iProp(hw-0.6, 0.06, hd-0.6, strawMat, 0, topY+0.03, HALL_Z);   // rushes strewn on the boards
+
+    // dais at the west end, high table and two chairs on it
+    var daisX = -hw/2 + 2.6;
+    iProp(4.6, 0.34, hd-0.8, paleMat, -hw/2+2.3, topY+0.17, HALL_Z);
+    var dTop = topY + 0.34;
+    iProp(0.9, 0.16, 4.4, woodLMat, daisX-0.2, dTop+0.82, HALL_Z);
+    [-1,1].forEach(function(s){ iProp(0.7, 0.82, 0.7, woodLMat, daisX-0.2, dTop+0.41, HALL_Z+s*1.8); });
+    [-1,1].forEach(function(s){                        // high-backed chairs
+      iProp(0.6, 0.1, 0.7, woodLMat, daisX+0.9, dTop+0.48, HALL_Z+s*0.9);
+      iProp(0.16, 1.5, 0.7, woodLMat, daisX+1.25, dTop+0.75, HALL_Z+s*0.9);
+      [-1,1].forEach(function(k){ iProp(0.12, 0.48, 0.12, woodLMat, daisX+0.9, dTop+0.24, HALL_Z+s*0.9+k*0.28); });
+    });
+
+    // two trestle tables with a bench each side, running down the hall
+    [2.0, 8.0].forEach(function(tx){
+      iProp(1.4, 0.15, 4.6, woodLMat, tx, topY+0.78, HALL_Z);
+      [-1,1].forEach(function(s){
+        iProp(1.1, 0.78, 0.2, woodLMat, tx, topY+0.39, HALL_Z+s*1.8);   // trestle legs
+        iProp(0.55, 0.1, 4.2, woodMat, tx+s*1.35, topY+0.47, HALL_Z);   // bench
+        iProp(0.16, 0.47, 3.6, woodMat, tx+s*1.35, topY+0.23, HALL_Z);
+      });
+      // board: cups and a platter
+      for (var c=0;c<4;c++) iCyl(0.11, 0.09, 0.2, 6, potMat, tx-0.3, topY+0.95, HALL_Z-1.8+c*1.2);
+      iCyl(0.4, 0.36, 0.1, 8, paleMat, tx+0.3, topY+0.9, HALL_Z);
+    });
+
+    // wall fireplace on the outer (north) wall, with hood and firedogs
+    var fz = z0 + 0.55, fx = hw/2-4.6;
+    iProp(3.4, 0.3, 1.0, hearthMat, fx, topY+0.15, fz);
+    // Hood in dressed stone, only the fire-back in soot-black: built entirely
+    // out of hearthMat (0x2a1c14) the stack rendered as a black slab that
+    // blocked the whole near half of the hall in the cutaway view.
+    iProp(2.8, 2.0, 0.3, hearthMat, fx, topY+1.3, fz-0.34);          // fire-back
+    [-1,1].forEach(function(s){ iProp(0.55, 2.3, 0.9, paleMat, fx+s*1.7, topY+1.45, fz); });  // jambs
+    iProp(4.0, 0.4, 1.1, paleMat, fx, topY+2.8, fz);                 // mantel
+    iProp(2.8, 1.3, 0.8, paleMat, fx, topY+3.6, fz-0.12);            // tapering hood
+    iProp(1.6, 1.2, 0.62, paleMat, fx, topY+4.8, fz-0.12);
+    fire(fx, fz, 0.8, topY+0.3);
+    [-1,1].forEach(function(s){ iCyl(0.07,0.07,0.7,6, ironMat, fx+s*0.85, topY+0.65, fz); });
+
+    // arcade of wall shafts + tie beams overhead: gives the hall a ceiling
+    // without putting a solid lid over the cutaway
+    for (var a=0;a<5;a++){
+      var ax = -hw/2 + 2.2 + a*3.7;
+      [-1,1].forEach(function(s){ iCyl(0.26, 0.3, 4.2, 8, paleMat, ax, topY+2.1, HALL_Z + s*(hd/2-0.45)); });
+      iProp(0.26, 0.26, hd-0.9, woodMat, ax, topY+4.25, HALL_Z);
+    }
+    // hangings behind the dais and along the north wall
+    hanging(daisX-1.6, topY+2.6, HALL_Z, 0.1, 3.0, clothRMat, 0, 4.2);
+    // both wall hangings must stay inside |x| < GATE_W/2 (10.5) -- the first
+    // pass put the red one at x=11 w=4.4, so its outer half hung in mid-air
+    // outside the gatehouse block and was clearly visible from the ward.
+    // Both wall hangings go on the FAR (ward-side) wall. On the outer wall
+    // they hung between the camera and the hall in the north-facing cutaway
+    // and screened off the tables they were meant to sit behind.
+    hanging(-1.4, topY+2.4, z1-0.16, 4.6, 2.8, clothBMat);
+    hanging(6.6, topY+2.4, z1-0.16, 4.2, 2.8, clothRMat);
+
+    // screens passage at the east end, with a serving hatch
+    iProp(0.3, 3.4, hd-0.8, woodMat, hw/2-1.8, topY+1.7, HALL_Z);
+    iProp(0.42, 1.6, 1.4, hearthMat, hw/2-1.8, topY+0.9, HALL_Z-1.7);
+
+    pickRoom(-(GATE_W/2-1), GATE_W/2-1, z0+0.5, z1-0.5, HALL_Y+2.2, 5.6,
+      '大広間 Great Hall (Gatehouse)',
+      '北門楼1階の広間、約21×7.6m(実測)。本来は2階建ての計画だったが1階までで工事が止まった。段上の主席卓・架台式の食卓・壁付き暖炉・壁掛けは中世大広間の一般的な構成にもとづく想定。');
   })();
 
-  // Chapel, inside the east D-shaped mid tower.
+  /* -------------------------------------------------------------- *
+   * GATE PASSAGES -- both gatehouses. The passage void is the gap between
+   * buildGateBlock's two pillars: |x| < GATE_OPEN_W/2, running the whole
+   * depth of the block (d + projD). Residents walk this line (life.gates),
+   * so everything added here is either at floor level and flush, or lifted
+   * clear above head height.
+   * ESTIMATED: the portcullis, its windlass, the door leaves and the murder
+   * holes. Beaumaris' gate passages are recorded as having had portcullises
+   * and murder holes; no drawing of the actual ironwork survives.
+   * -------------------------------------------------------------- */
+  function buildGatePassage(cz, inward, d, projD, openW, openH, upperY, label, desc){
+    var zOut = cz - inward*d/2, zIn = cz + inward*(d/2 + projD);
+    var mid = (zOut+zIn)/2, len = Math.abs(zIn-zOut);
+    iProp(openW-0.1, 0.12, len, flagMat, 0, 0.06, mid);            // paved passage
+    // two door leaves, swung back flat against the passage walls
+    [-1,1].forEach(function(s){
+      iProp(0.22, 3.6, 2.0, woodMat, s*(openW/2-0.12), 1.8, zOut + inward*1.4);
+      for (var b=0;b<3;b++) iProp(0.3, 0.14, 1.8, ironMat, s*(openW/2-0.12), 0.8+b*1.2, zOut + inward*1.4);
+    });
+    // portcullis, hoisted so it hangs above head height in its groove
+    var pz = zOut + inward*0.9, pBase = 3.1;
+    for (var v=0;v<6;v++) iProp(0.12, openH-pBase+0.4, 0.12, ironMat, -openW/2+0.45+v*((openW-0.9)/5), pBase+(openH-pBase+0.4)/2, pz);
+    for (var h=0;h<3;h++) iProp(openW-0.5, 0.12, 0.14, ironMat, 0, pBase+0.25+h*((openH-pBase)/2.4), pz);
+    for (var t=0;t<6;t++){                                         // downward spikes
+      var sp = mkCone(0.1, 0.34, 4, ironMat);
+      sp.rotation.z = Math.PI;
+      place(sp, -openW/2+0.45+t*((openW-0.9)/5), pBase-0.17, pz);
+      interiorGroup.add(sp);
+    }
+    // murder holes in the passage vault
+    for (var m=0;m<3;m++) iProp(0.5, 0.16, 0.5, darkMat, -1.1+m*1.1, openH-0.12, mid + inward*1.2);
+    // windlass on the floor above, with its ropes running down to the grille
+    if (upperY != null){
+      var drum = mkCyl(0.34, 0.34, 2.6, 8, woodMat); drum.rotation.z = Math.PI/2;
+      place(drum, 0, upperY+0.62, pz + inward*0.7); interiorGroup.add(drum);
+      [-1,1].forEach(function(s){
+        iCyl(0.13, 0.13, 0.5, 6, woodMat, s*1.5, upperY+0.62, pz + inward*0.7);
+        var spoke = mkBox(0.1, 1.3, 0.1, woodMat);
+        place(spoke, s*1.5, upperY+0.62, pz + inward*0.7); spoke.rotation.z = 0.7;
+        interiorGroup.add(spoke);
+        iCyl(0.05, 0.05, upperY-openH+0.5, 6, darkMat, s*1.2, (upperY+openH)/2, pz);
+      });
+    }
+    registerPick(pickables, 'room', 0, 2.4, mid, openW+1.2, 4.4, len*0.9, label, desc);
+  }
+  buildGatePassage(-INNER_HZ, 1, GATE_D, NGATE_PROJ, GATE_OPEN_W, GATE_OPEN_H, HALL_Y,
+    '北門楼 門道と落とし格子 North Gate Passage & Portcullis',
+    '北門楼を貫く門道。落とし格子は上階の巻き上げ機で吊り上げられ、天井には熱湯や礫を落とすための「殺人孔」が開く。門道の存在は遺構で確認できるが、鉄具そのものは失われており、格子・巻き上げ機・扉はいずれも同時代の一般例にもとづく復元表現。');
+  buildGatePassage(INNER_HZ, -1, GATE2_D, SGATE_PROJ, GATE_OPEN_W, GATE_OPEN_H, null,
+    '南門楼 門道 South Gate Passage',
+    '南門楼の門道。この門楼は北門楼よりさらに未完成な段階で放棄されたため、上階の巻き上げ機構は設けられていない。');
+
+  // south gatehouse: the upper floor was never boarded over -- exposed joists
+  // spanning the two pillars are the clearest possible read of "unfinished".
   (function(){
-    var chapelTex = makeCheckerTexture('#75705f', '#c7c1ab', 5);
+    var jy = 6.2;
+    for (var i=0;i<7;i++){
+      var jz = INNER_HZ + 2.4 - i*1.5;
+      iProp(GATE2_W-1.5, 0.26, 0.24, woodMat, 0, jy, jz);
+    }
+    iProp(GATE2_W-1.5, 0.3, 0.6, paleMat, 0, jy-0.28, INNER_HZ+2.4);
+    registerPick(pickables, 'structure', 0, jy, INNER_HZ-1.6, GATE2_W, 1.6, 9.0,
+      '南門楼 未完成の床梁 South Gatehouse, Unfinished Floor',
+      '上階の床を張るはずだった梁だけが渡されたまま工事が止まった状態。1320年代に工事が停止したという記録にもとづく表現(梁の本数・寸法は推定)。');
+  })();
+
+  /* -------------------------------------------------------------- *
+   * CHAPEL -- inside the east D-shaped mid tower. Beaumaris' chapel in the
+   * eastern middle tower is the best-preserved interior on the site: a
+   * rib-vaulted rectangular room with tall pointed lancets and a stone
+   * bench (sedilia) round the walls.
+   * The half-disc floor here used to be drawn with CircleGeometry(r,20,0,PI),
+   * which -- once the disc is laid flat -- covers the z<0 half, i.e. 90 deg
+   * off the tower shaft it is supposed to sit in. CylinderGeometry and
+   * CircleGeometry run their theta the opposite way round, exactly the
+   * offset buildMidDTower already compensates for on its cap. Same -PI/2
+   * correction applied here.
+   * ESTIMATED: every dimension and the position of each fitting.
+   * -------------------------------------------------------------- */
+  (function(){
+    var cx = midEmbedE, r = MID_R-0.25;                 // 27.05, 4.35
+    var wIn = INNER_IN_HX;                              // 24.6, courtyard face of the curtain
+    var chapelTex = makeCheckerTexture('#4f4c42', '#6d685a', 5);
     var chapelFloorMat = new T.MeshLambertMaterial({ map: chapelTex });
-    var chapelFloor = new T.Mesh(new T.CircleGeometry(MID_R-0.2, 20, 0, Math.PI), chapelFloorMat);
-    chapelFloor.rotation.x = -Math.PI/2;
-    place(chapelFloor, midEmbedE, 0.06, 0);
-    interiorGroup.add(chapelFloor);
-    var altar = mkBox(1.5, 1.0, 0.6, new T.MeshLambertMaterial({color:0xd6cdb2}));
-    place(altar, midEmbedE-1.7, 0.5, 0);
-    interiorGroup.add(altar);
-    pickRoom(midEmbedE-MID_R*1.6, midEmbedE+0.6, -MID_R, MID_R, 1.2, 2.6,
-      '礼拝堂 Chapel (East Mid Tower)', '東の中間塔に置かれた礼拝堂(位置は推定)。宗教施設は優先的に整備されたと伝わる。');
+    var apse = new T.Mesh(new T.CircleGeometry(r, 20, -Math.PI/2, Math.PI), chapelFloorMat);
+    apse.rotation.x = -Math.PI/2;
+    apse.receiveShadow = true;
+    place(apse, cx, 0.07, 0);
+    interiorGroup.add(apse);
+    // nave: the part of the chamber inside the curtain's own thickness, so
+    // the chapel opens onto the ward instead of being a sealed half-drum
+    iProp(cx-wIn, 0.1, r*2, chapelFloorMat, (cx+wIn)/2, 0.06, 0);
+
+    // chancel step + altar at the EAST end (the liturgical east is the
+    // outward face of the tower here, which is genuinely east at Beaumaris)
+    iProp(0.9, 0.22, 3.4, paleMat, cx+2.2, 0.11, 0);
+    iProp(1.1, 1.0, 2.3, paleMat, cx+2.9, 0.62, 0);                 // altar block
+    iProp(1.35, 0.14, 2.7, paleMat, cx+2.9, 1.19, 0);               // mensa
+    iProp(0.16, 1.15, 0.5, paleMat, cx+3.35, 1.84, 0);              // standing cross
+    iProp(0.16, 0.42, 1.05, paleMat, cx+3.35, 2.18, 0);
+    [-1,1].forEach(function(s){                                      // candles
+      iCyl(0.09, 0.09, 0.55, 6, paleMat, cx+2.95, 1.53, s*0.75);
+      iCyl(0.05, 0.05, 0.22, 5, fireMat, cx+2.95, 1.9, s*0.75);
+    });
+    // sedilia: a low stone bench following the curved wall. Kept at 0.42 --
+    // at 0.46 with a 1.25 tread it read as a fence ringing the apse rather
+    // than a bench against it, and it hid the altar from a low camera.
+    for (var b=0;b<7;b++){
+      var a = -Math.PI/2 + 0.22 + b*(Math.PI-0.44)/6;
+      iProp(0.62, 0.42, 1.25, paleMat, cx+Math.cos(a)*(r-0.32), 0.21, -Math.sin(a)*(r-0.32), -a);
+    }
+    // two rows of benches in the nave
+    [-1.1, 1.1].forEach(function(bz){
+      iProp(2.6, 0.1, 0.42, woodMat, cx-1.4, 0.52, bz);
+      [-1,1].forEach(function(s){ iProp(0.14, 0.46, 0.36, woodMat, cx-1.4+s*1.1, 0.29, bz); });
+    });
+    iProp(0.6, 0.35, 0.55, woodLMat, cx-0.4, 1.35, 0);              // lectern desk
+    iCyl(0.13, 0.18, 1.2, 8, woodMat, cx-0.4, 0.6, 0);
+    iCyl(0.42, 0.5, 0.75, 10, paleMat, wIn+0.9, 0.44, -2.6);        // font
+
+    /* Three tall pointed lancets in the curved wall. These go into the TOWER's
+       own fade group, not interiorGroup: every other opening in this castle is
+       a windowMat decal inside the wall it pierces, so updateFade's
+       EXTRA_HIDE_AT rule takes them away with the masonry. Left in
+       interiorGroup they stood in the open as free-floating black slabs once
+       the tower dissolved. As a side benefit the D-tower's exterior gains the
+       chapel's lancets, which it did not have before. */
+    [-0.85, 0, 0.85].forEach(function(off, wi){
+      var a = off;
+      var wx = cx + Math.cos(a)*(r+0.3), wz = -Math.sin(a)*(r+0.3);
+      var jamb = mkBox(0.5, 3.0, 1.05, windowMat);
+      place(jamb, wx, 2.5, wz, -a); imE.group.add(jamb);
+      var glass = mkBox(0.28, 2.5, 0.72, wi===1 ? glassRMat : glassBMat);
+      place(glass, wx, 2.5, wz, -a); imE.group.add(glass);
+      var head = mkCone(0.55, 0.85, 4, windowMat);
+      place(head, wx, 4.2, wz, -a); imE.group.add(head);
+    });
+
+    /* Vault. First attempt was four diagonal ribs meeting on a central boss:
+       with the tower shell dissolved that reads as a derrick standing over an
+       open floor, not as a ceiling. Replaced with a bay of TRANSVERSE POINTED
+       ARCHES on wall shafts plus one longitudinal ridge rib -- the same shape
+       the surviving Beaumaris chapel vault springs from, and it stays legible
+       from directly overhead because it is a regular rhythm rather than an X.
+       Left open (no web panels): a solid vault in interiorGroup never fades
+       and would blank the chapel out in every top-down view. */
+    var springY = 2.7, apexY = 4.5, halfSpan = r - 0.45;
+    [cx-1.8, cx+0.4, cx+2.6].forEach(function(ax){
+      var len = Math.hypot(halfSpan, apexY-springY), ang = Math.atan2(apexY-springY, halfSpan);
+      [-1,1].forEach(function(s){
+        var m = mkBox(0.2, 0.2, len, paleMat);
+        m.position.set(ax, (springY+apexY)/2, s*halfSpan/2);
+        m.rotation.x = -s*ang;
+        m.castShadow = true;
+        interiorGroup.add(m);
+        iCyl(0.2, 0.24, springY, 8, paleMat, ax, springY/2, s*halfSpan);      // wall shaft
+        iProp(0.42, 0.2, 0.42, paleMat, ax, springY+0.1, s*halfSpan);         // capital
+      });
+    });
+    iProp(5.2, 0.18, 0.18, paleMat, cx+0.4, apexY+0.06, 0);          // ridge rib
+    iCyl(0.26, 0.26, 0.3, 8, paleMat, cx+0.4, apexY+0.06, 0);        // boss
+
+    pickRoom(wIn, cx+r, -r, r, 2.4, 5.6,
+      '礼拝堂 Chapel (East Mid Tower)',
+      '東の中間塔に置かれた礼拝堂。ボーマリスで最も保存の良い内部空間で、リブ・ヴォールトの天井と尖頭窓が残る。祭壇・信徒席・洗礼盤・壁沿いの石造ベンチ(セディリア)の配置は推定。');
   })();
 
   // (The kitchen used to be a free-standing slab in the middle of the lawn.
   //  It is now a room inside the west range -- see buildRange above -- so the
   //  model has exactly one kitchen and nothing floats in the open courtyard.)
 
-  // Constable's Chamber, inside the NW corner tower.
+  /* -------------------------------------------------------------- *
+   * CORNER-TOWER CHAMBERS. All four inner-ward drums get a floor and a
+   * newel stair so the cutaway shows rooms rather than empty tubes; the NW
+   * one is furnished as the constable's lodging. ESTIMATED throughout.
+   * -------------------------------------------------------------- */
+  function newelStair(cx, cz, r, turns, rise){
+    iCyl(0.28, 0.32, rise+0.4, 8, paleMat, cx, (rise+0.4)/2, cz);   // newel post
+    var n = Math.round(turns*10);
+    for (var i=0;i<n;i++){
+      var a = (i/10)*Math.PI*2, y = 0.22 + i*(rise/n);
+      var st = mkBox(r-0.35, 0.2, 0.55, paleMat);
+      place(st, cx + Math.cos(a)*(r*0.5), y, cz + Math.sin(a)*(r*0.5), -a);
+      interiorGroup.add(st);
+    }
+  }
+  function towerChamber(cx, cz, r, hearthAng){
+    var f = new T.Mesh(new T.CircleGeometry(r-0.35, 16), floorMat);
+    f.rotation.x = -Math.PI/2; f.receiveShadow = true;
+    place(f, cx, 0.1, cz);
+    interiorGroup.add(f);
+    if (hearthAng != null){
+      var hx = cx + Math.cos(hearthAng)*(r-0.7), hz = cz + Math.sin(hearthAng)*(r-0.7);
+      iProp(1.5, 0.28, 1.5, hearthMat, hx, 0.24, hz, -hearthAng);
+      iProp(1.7, 1.9, 0.4, darkMat, cx + Math.cos(hearthAng)*(r-0.15), 1.05, cz + Math.sin(hearthAng)*(r-0.15), -hearthAng);
+      fire(hx, hz, 0.6, 0.36);
+    }
+  }
+  towerChamber(-INNER_HX, -INNER_HZ, NORTH_CORNER_R, 0.5);          // NW, constable
   (function(){
     var nx = -INNER_HX, nz = -INNER_HZ;
-    var cFloor = new T.Mesh(new T.CircleGeometry(NORTH_CORNER_R-0.4, 16), floorMat);
-    cFloor.rotation.x = -Math.PI/2;
-    place(cFloor, nx, 0.1, nz);
-    interiorGroup.add(cFloor);
-    var bed = mkBox(1.5, 0.55, 2.1, woodMat);
-    place(bed, nx+1.0, 0.35, nz-0.6, 0.4);
-    interiorGroup.add(bed);
-    pickRoom(nx-NORTH_CORNER_R, nx+NORTH_CORNER_R, nz-NORTH_CORNER_R, nz+NORTH_CORNER_R, 1.2, 2.6,
-      "城代の間 Constable's Chamber (NW Tower)", '北西塔に想定される居室(位置は推定、史料に個別の記載なし)。');
+    iProp(1.6, 0.4, 2.2, woodLMat, nx+1.5, 0.32, nz-1.0, 0.4);      // bedstead
+    iProp(1.45, 0.3, 2.0, linenMat, nx+1.5, 0.65, nz-1.0, 0.4);
+    iProp(0.55, 0.22, 1.0, linenMat, nx+2.1, 0.88, nz-1.6, 0.4);
+    [[-0.75,-1.05],[0.9,0.75]].forEach(function(p){                  // bed posts + tester rail
+      iProp(0.14, 2.1, 0.14, woodLMat, nx+1.5+p[0], 1.15, nz-1.0+p[1], 0.4);
+    });
+    iProp(1.1, 0.62, 0.62, woodLMat, nx-1.9, 0.31, nz+1.3, -0.3);   // chest
+    table(nx-1.2, nz-1.9, 1.0, 1.7, 0.8, 0.5);
+    iCyl(0.09, 0.09, 0.45, 6, potMat, nx-1.2, 0.9+FY, nz-1.9);
+    hanging(nx+0.6, 2.1, nz+3.2, 2.2, 1.8, clothBMat);   // clear of the curtain's inner face
+    newelStair(nx-2.2, nz+2.2, 2.2, 1.4, 3.4);
+    pickRoom(nx-NORTH_CORNER_R, nx+NORTH_CORNER_R, nz-NORTH_CORNER_R, nz+NORTH_CORNER_R, 1.4, 3.2,
+      "城代の間 Constable's Chamber (NW Tower)",
+      '北西塔に想定される居室(位置は推定、史料に個別の記載なし)。天蓋つき寝台・衣装櫃・螺旋階段を置くが、いずれも同時代の一般的な塔内居室にもとづく想定。');
+  })();
+  towerChamber(INNER_HX, -INNER_HZ, NORTH_CORNER_R, Math.PI-0.5);   // NE, guard room
+  (function(){
+    var nx = INNER_HX, nz = -INNER_HZ;
+    for (var i=0;i<3;i++) iProp(0.6, 0.12, 1.9, woodMat, nx-1.2, 0.5, nz-2.2+i*1.5);  // pallet beds
+    barrel(nx+1.6, nz+1.8, 0.5, 1.0, 0.1);
+    iProp(0.28, 0.28, 2.4, woodMat, nx-2.4, 1.3, nz+1.4);                              // arms rack
+    for (var s=0;s<4;s++) iCyl(0.05, 0.05, 2.2, 5, woodMat, nx-2.4, 1.2, nz+0.5+s*0.5);
+    newelStair(nx+2.0, nz+2.0, 2.2, 1.4, 3.2);
+    pickRoom(nx-NORTH_CORNER_R, nx+NORTH_CORNER_R, nz-NORTH_CORNER_R, nz+NORTH_CORNER_R, 1.4, 3.2,
+      '北東塔 衛士詰所 Guard Room (NE Tower)', '北東塔の一階に想定される衛士の詰所(用途・什器はすべて推定)。');
+  })();
+  towerChamber(-INNER_HX, INNER_HZ, SOUTH_CORNER_R, null);          // SW, store
+  (function(){
+    var nx = -INNER_HX, nz = INNER_HZ;
+    barrel(nx+1.0, nz-0.8, 0.55, 1.15, 0.1);
+    barrel(nx-0.6, nz-1.0, 0.55, 1.15, 0.1);
+    barrel(nx+0.3, nz+0.9, 0.55, 1.15, 0.1);
+    sack(nx+1.6, nz+1.1, 0.9, 0.1);
+    newelStair(nx-1.4, nz+1.6, 1.9, 1.2, 3.0);
+  })();
+  towerChamber(INNER_HX, INNER_HZ, SOUTH_CORNER_R, null);           // SE, store
+  (function(){
+    var nx = INNER_HX, nz = INNER_HZ;
+    sack(nx-1.2, nz-0.9, 0.95, 0.1); sack(nx-0.2, nz-1.3, 0.85, 0.1);
+    barrel(nx+1.1, nz+0.6, 0.55, 1.15, 0.1);
+    newelStair(nx+1.3, nz+1.5, 1.9, 1.2, 3.0);
   })();
 
-  // Well, central in the inner ward courtyard.
+  // Well, in the inner ward courtyard, under a timber winch frame.
+  var WELL_X = 7, WELL_Z = 5;
   (function(){
-    var wx = 7, wz = 5;
+    var wx = WELL_X, wz = WELL_Z;
     var pad = mkCyl(1.5, 1.5, 0.1, 24, darkMat);
     place(pad, wx, 0.05, wz);
     interiorGroup.add(pad);
@@ -776,7 +1392,138 @@ function buildBeaumaris(){
     kerb.rotation.x = Math.PI/2;
     place(kerb, wx, 0.26, wz);
     interiorGroup.add(kerb);
-    pickRoom(wx-2.2, wx+2.2, wz-2.2, wz+2.2, 1.0, 2.0, '井戸 Well', '中庭に設けられた井戸(位置は推定)。');
+    // windlass frame over the shaft (ESTIMATED -- no wellhead survives)
+    [-1,1].forEach(function(s){
+      iProp(0.24, 2.3, 0.24, woodMat, wx + s*1.35, 1.15, wz);
+      var brace = mkBox(1.2, 0.16, 0.16, woodMat);
+      place(brace, wx + s*0.9, 1.9, wz); brace.rotation.z = s*0.55;
+      interiorGroup.add(brace);
+    });
+    var axle = mkCyl(0.2, 0.2, 2.7, 8, woodMat); axle.rotation.z = Math.PI/2;
+    place(axle, wx, 2.2, wz); interiorGroup.add(axle);
+    var crank = mkBox(0.1, 0.7, 0.1, woodMat);
+    place(crank, wx+1.5, 2.05, wz); crank.rotation.z = 0.8;
+    interiorGroup.add(crank);
+    iProp(2.9, 0.16, 0.5, woodMat, wx, 2.48, wz);           // little pent roof over it
+    iCyl(0.04, 0.04, 1.3, 5, darkMat, wx, 1.5, wz);         // rope
+    iCyl(0.3, 0.26, 0.42, 8, woodMat, wx, 0.75, wz);        // bucket
+    pickRoom(wx-2.2, wx+2.2, wz-2.2, wz+2.2, 1.4, 3.0, '井戸 Well',
+      '中庭に設けられた井戸(位置は推定)。籠城時の生命線で、同心円式の内郭には不可欠の設備。巻き上げ機は同時代の一般例にもとづく表現。');
+  })();
+
+  /* -------------------------------------------------------------- *
+   * COURTYARD PLANTING + SERVICE YARD
+   * -------------------------------------------------------------- *
+   * ENTIRELY ESTIMATED. No excavated garden plan exists for Beaumaris'
+   * inner ward -- what is general is that a castle of this size kept a
+   * kitchen garden and a herbary inside the walls, and that is what is
+   * modelled. Everything sits in the WEST half of the courtyard, between
+   * the west range's courtyard face (x = -15.6) and x = -6, plus a strip of
+   * orchard along the east; life.courtyard's inner-ward rectangle below is
+   * narrowed to match so residents never walk through a bed.
+   * -------------------------------------------------------------- */
+  var GARD_X0 = -14.9, GARD_X1 = -6.2;
+  (function(){
+    // ---- gravel path linking the two gate passages, with a spur to the well
+    iProp(3.4, 0.12, 33.0, pathMat, 0, 0.055, 2.2);
+    iProp(9.0, 0.12, 2.4, pathMat, 4.0, 0.055, WELL_Z);
+    iProp(2.6, 0.12, 14.0, pathMat, -5.0, 0.055, 3.0);            // service path down to the west range
+    iProp(9.6, 0.12, 2.4, pathMat, -10.2, 0.055, 13.25);          // to the kitchen door
+    iProp(9.6, 0.12, 2.4, pathMat, -10.2, 0.055, -13.25);         // to the stable door
+    iProp(9.6, 0.12, 2.4, pathMat, 10.4, 0.055, -13.25);          // to the lodgings door
+    iProp(9.6, 0.12, 2.4, pathMat, 10.4, 0.055, 13.25);           // to the store door
+
+    // ---- kitchen garden: four raised beds of soil, planted in rows
+    function bed(cx, cz, w, len, mat, rows){
+      iProp(w, 0.34, len, soilMat, cx, 0.17, cz);                  // board-edged bed
+      iProp(w+0.24, 0.16, len+0.24, woodMat, cx, 0.08, cz);
+      for (var i=0;i<rows;i++){
+        var pz = cz - len/2 + len*(i+0.5)/rows;
+        for (var k=-1;k<=1;k++){
+          iBlob(0.34, 5, mat, cx + k*(w*0.3), 0.44, pz, 0.68);
+        }
+      }
+    }
+    var bedMats = [leafAMat, leafBMat, leafAMat, hedgeMat];
+    for (var b=0;b<4;b++) bed(GARD_X0 + 1.1 + b*2.2, -5.0, 1.7, 13.0, bedMats[b], 7);
+    // a lean-to garden shed + tool row against the range wall
+    iProp(1.8, 1.7, 2.2, woodMat, -15.0, 0.85, -12.6);
+    iProp(2.2, 0.2, 2.6, new T.MeshLambertMaterial({ color: RANGE_ROOF_COL }), -15.0, 1.8, -12.6);
+    for (var tl=0;tl<3;tl++){
+      var tool = mkCyl(0.06, 0.06, 1.8, 5, woodMat);
+      place(tool, -14.6+tl*0.34, 0.9, -10.4); tool.rotation.x = 0.22;
+      interiorGroup.add(tool);
+    }
+
+    // ---- herb garden: a quadripartite plot inside a clipped hedge
+    var HB_X = -10.6, HB_Z = 8.6, HB_R = 4.1;
+    [[0,-1],[0,1],[-1,0],[1,0]].forEach(function(d){                // hedge frame
+      var w = d[0] ? 0.6 : HB_R*2, l = d[0] ? HB_R*2 : 0.6;
+      iProp(w, 0.7, l, hedgeMat, HB_X + d[0]*HB_R, 0.35, HB_Z + d[1]*HB_R);
+    });
+    iProp(HB_R*2-0.6, 0.1, 1.1, pathMat, HB_X, 0.055, HB_Z);        // cross paths
+    iProp(1.1, 0.1, HB_R*2-0.6, pathMat, HB_X, 0.055, HB_Z);
+    [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(function(q, qi){
+      var qx = HB_X + q[0]*HB_R*0.5, qz = HB_Z + q[1]*HB_R*0.5;
+      iProp(HB_R-1.0, 0.22, HB_R-1.0, soilMat, qx, 0.11, qz);
+      for (var i=0;i<3;i++) for (var j=0;j<3;j++){
+        iBlob(0.28, 5, qi%2 ? leafBMat : leafAMat, qx-1.0+i*1.0, 0.36, qz-1.0+j*1.0, 0.72);
+      }
+    });
+    iCyl(0.5, 0.6, 0.9, 8, paleMat, HB_X, 0.45, HB_Z);              // little basin at the crossing
+    iCyl(0.42, 0.42, 0.12, 10, wellMat, HB_X, 0.92, HB_Z);
+
+    // ---- service yard between the herb garden and the south gate
+    woodStack(-13.8, 15.2, 2.6, 4, 0);
+    hayPile(-8.4, 16.6, 1.6, 2.3, 0.05);
+    // hand cart, tipped on its shafts
+    iProp(2.4, 0.24, 1.6, woodMat, -12.4, 1.0, 19.2, 0.35);
+    [-1,1].forEach(function(s){
+      var wheel = new T.Mesh(new T.TorusGeometry(0.62, 0.13, 6, 12), woodMat);
+      wheel.rotation.y = 0.35 + Math.PI/2;
+      place(wheel, -12.4 - s*0.55, 0.66, 19.2 + s*0.75);
+      wheel.castShadow = true;
+      interiorGroup.add(wheel);
+      var shaft = mkBox(2.4, 0.12, 0.12, woodMat);
+      place(shaft, -10.9, 0.72, 19.2 + s*0.5, 0.35); shaft.rotation.z = -0.22;
+      interiorGroup.add(shaft);
+    });
+    iProp(1.6, 0.9, 0.7, paleMat, -14.4, 0.45, 5.2);                 // stone water trough
+    iProp(1.3, 0.5, 0.45, wellMat, -14.4, 0.72, 5.2);
+
+    // ---- small trees. Deliberately 4-5m, i.e. courtyard scale: the forest
+    // outside the moat (built by 15-nature.js) is far larger, and matching
+    // that size in here would swallow the ward.
+    function courtTree(x, z, h, r, mat){
+      iCyl(r*0.15, r*0.24, h*0.52, 6, trunkMat, x, h*0.26, z);
+      [-1,1].forEach(function(s){                                   // two low limbs
+        var lb = mkCyl(0.07, 0.09, r*1.0, 5, trunkMat);
+        place(lb, x + s*r*0.3, h*0.55, z); lb.rotation.z = s*0.7;
+        interiorGroup.add(lb);
+      });
+      iBlob(r, 6, mat, x, h*0.68, z, 0.82);                          // rounded orchard canopy
+      iBlob(r*0.66, 5, mat, x - r*0.5, h*0.82, z + r*0.28, 0.8);
+      iBlob(r*0.6, 5, mat, x + r*0.48, h*0.8, z - r*0.3, 0.8);
+    }
+    courtTree(-12.6, 19.6, 4.6, 1.6, leafAMat);
+    courtTree(-7.2, 19.9, 4.0, 1.4, leafBMat);
+    courtTree(13.0, -10.0, 4.4, 1.55, leafBMat);
+    courtTree(13.4, -3.0, 4.1, 1.45, leafAMat);
+    courtTree(13.0, 4.6, 4.5, 1.6, leafBMat);
+    courtTree(13.4, 11.8, 4.2, 1.5, leafAMat);
+    courtTree(-13.2, -19.6, 3.8, 1.35, leafAMat);
+
+    // ---- vine trellis against the west range wall, in the gap between blocks
+    for (var tp=0;tp<4;tp++) iProp(0.14, 3.2, 0.14, woodMat, -15.15, 1.6, -3.9+tp*1.6);
+    for (var tr=0;tr<4;tr++) iProp(0.1, 0.1, 5.0, woodMat, -15.15, 0.8+tr*0.8, -1.1);
+    for (var vn=0;vn<16;vn++){
+      iBlob(0.36, 5, vn%3 ? leafAMat : leafBMat, -15.0,
+        0.75 + (vn%4)*0.78, -3.7 + Math.floor(vn/4)*1.6 + (vn%4)*0.3, 0.85);
+    }
+    registerPick(pickables, 'room', (GARD_X0+GARD_X1)/2, 1.0, -5.0, GARD_X1-GARD_X0, 2.0, 14.0,
+      '菜園 Kitchen Garden', '内郭中庭に設けた菜園(推定)。中世の城は籠城と日常の両面から城内に菜園を持つのが普通だった。ボーマリスに菜園の発掘記録はなく、配置・規模はすべて想定。');
+    registerPick(pickables, 'room', HB_X, 1.0, HB_Z, HB_R*2.2, 2.0, HB_R*2.2,
+      '薬草園 Herb Garden', '四分割の区画に生垣をめぐらせた薬草園(推定)。薬草は治療と調理の双方に使われた。');
   })();
 
   /* -------------------------------------------------------------- *
@@ -1129,8 +1876,12 @@ function buildBeaumaris(){
       { name:'厩舎・馬具庫 (Stable)', desc:'西棟北ブロック。基礎のみ現存する西側レンジ(用途は推定)。' },
       { name:'居室・従者宿舎 (Lodgings)', desc:'東棟北ブロック。内郭東壁沿いの居住棟(間取りは推定)。' },
       { name:'倉庫・穀物庫 (Storehouse)', desc:'東棟南ブロック。糧食・武具の保管棟(推定)。' },
-      { name:"城代の間 (Constable's Chamber)", desc:'北西塔の居室(位置推定)。' },
-      { name:'井戸 (Well)', desc:'内郭中庭の井戸(位置推定)。' }
+      { name:"城代の間 (Constable's Chamber)", desc:'北西塔の居室(位置推定)。天蓋つき寝台と螺旋階段。' },
+      { name:'衛士詰所 (Guard Room)', desc:'北東塔一階。寝台と武具架を置く詰所(推定)。' },
+      { name:'門道・落とし格子 (Gate Passage)', desc:'北門楼を貫く門道。落とし格子、殺人孔、上階の巻き上げ機。' },
+      { name:'井戸 (Well)', desc:'内郭中庭の井戸(位置推定)。巻き上げ機つき。' },
+      { name:'菜園 (Kitchen Garden)', desc:'中庭西側の畝立て菜園(配置は推定)。' },
+      { name:'薬草園 (Herb Garden)', desc:'生垣で囲った四分割の薬草園(配置は推定)。' }
     ]
   };
   var labelGroup = buildLabelGroup(group, pickables);
@@ -1159,7 +1910,14 @@ function buildBeaumaris(){
       // 内側だけを歩かせ、建物の中に住人がめり込まないようにする。
       // north/south limits pulled in to clear the two gatehouse blocks that now
       // project into the ward (NGATE_FACE_Z / SGATE_FACE_Z are their courtyard faces)
-      { minX:-(RANGE_IN_X-1.5), maxX:RANGE_IN_X-1.5, minZ:NGATE_FACE_Z+2.0, maxZ:SGATE_FACE_Z-2.0 },
+      // WEST limit pulled in from -(RANGE_IN_X-1.5) to GARD_X1-1.2: everything
+      // west of that is now kitchen garden / herb garden / service yard, and the
+      // EAST limit clears the orchard row at x = 13. Residents therefore keep the
+      // whole central and eastern courtyard, including the gate-to-gate path.
+      // minX must stay EAST of GARD_X1 (-6.2), which is where the outermost
+      // kitchen-garden bed board and the herb garden's east hedge actually end
+      // -- at GARD_X1-1.2 residents walked straight through that hedge.
+      { minX:GARD_X1+0.8, maxX:11.2, minZ:NGATE_FACE_Z+2.0, maxZ:SGATE_FACE_Z-2.0 },
       { minX:-NS_HALF, maxX:NS_HALF, minZ:-OHZ+2, maxZ:-(INNER_HZ+2) },   // 外郭中庭・北帯
       { minX:-NS_HALF, maxX:NS_HALF, minZ:INNER_HZ+2, maxZ:OHZ-2 },      // 外郭中庭・南帯
       { minX:INNER_HX+2, maxX:OHX-2, minZ:-INNER_HZ+2, maxZ:INNER_HZ+2 }, // 外郭中庭・東帯
