@@ -106,6 +106,84 @@ function natPart(geo, x, y, z, sx, sy, sz, hex){
   geo.translate(x, y, z);
   return { geo: geo, color: new T.Color(hex) };
 }
+/* ==== 空気遠近(aerial perspective)==================================
+ * 【症状】中景〜遠景の木だけが手前と同じ鮮やかな緑のまま、背景の丘に
+ * 貼り付けたシールのように浮く。
+ *
+ * 【調べた結果 — フォグが効いていないのではない】
+ * 木のマテリアルは material.fog === true で、InstancedMesh + vertexColors
+ * でも fog は正しく合成される。効いていないのは **木がフォグの届く距離
+ * まで届いていないから**。城側の view.fogNear/fogFar は「城の全景が霞ま
+ * ない」ように相当遠くへ置かれている:
+ *
+ *   マルボルク 昼/晴 実測 -- fog.near 1182 / fog.far 7313
+ *     木の最遠(城中心から)   995m   -> フォグ寄与  0%
+ *     最も内側の山並みリング   884m   -> フォグ寄与  0%
+ *   ボディアム 昼/晴 実測 -- fog.near 187 / fog.far 1209
+ *     木の最遠                 446m   -> フォグ寄与 25%
+ *
+ * つまり昼晴のマルボルクでは scene.fog は画面のどこにも効いていない。
+ * それでも背景の丘が淡いのは、山並みリング(11-environment.js の
+ * MOUNTAIN_RINGS / updateMountains)が「mountainColor を距離ごとに
+ * fogColor へ mixToFog だけ混ぜた色」を焼き込んでいるため:
+ *   リング実色  #88aea1 / #9bbbb3 / #afc8c6  (彩度 0.18 前後)
+ *   木の描画色  #81b96a 前後                 (彩度 0.43)
+ * この彩度差 0.18 vs 0.43 が、ユーザの言う「霧のかかり具合が違う」の
+ * 正体。scene.fog を近づけると城本体まで霞むので触れない。
+ *
+ * 【対策】木にだけ、山並みが焼き込んでいるのと同じ淡さのランプを足す。
+ * onBeforeCompile でフォグ合成の直前に (1) 距離に応じた脱色 (2) 遠景色
+ * への寄せ を入れる。距離はフォグ用 varying(r128 は fogDepth、後の版は
+ * vFogDepth と名前が変わる)を使わず、MeshPhongMaterial が必ず持つ
+ * vViewPosition から取るのでバージョン差の影響を受けない。
+ * ランプの near/far は最も内側の山並みリング半径 340*ENV_SCALE を基準に
+ * するので、この層の方針どおり城ごとの定数は要らない。
+ * ==================================================================== */
+var NAT_HAZE_COLOR = new T.Color(0xcdddE3);
+// x=near, y=far, z=最大量。初期値は natUpdateHaze() が毎フレーム上書きする
+// (城が決まるまでのつなぎ。NAT.hazeNear/hazeFar/hazeMax の既定値と揃える)
+var NAT_HAZE_RANGE = new T.Vector3(200, 1400, 0.58);
+function natApplyAerialHaze(mat){
+  mat.onBeforeCompile = function(shader){
+    shader.uniforms.natHazeColor = { value: NAT_HAZE_COLOR };
+    shader.uniforms.natHazeRange = { value: NAT_HAZE_RANGE };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {',
+        'uniform vec3 natHazeColor;\nuniform vec3 natHazeRange;\nvoid main() {')
+      .replace('#include <fog_fragment>', [
+        '\tfloat natH = smoothstep( natHazeRange.x, natHazeRange.y, length( vViewPosition ) ) * natHazeRange.z;',
+        '\tfloat natLum = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
+        // 脱色を主、遠景色への寄せを従にする。寄せを強くしすぎると、木だけ
+        // が青灰色になって「まだ霞んでいない鮮やかな草地の上に立つ枯れ木」
+        // という逆の違和感が出る(地面プレーンには霧が届いていないため)。
+        '\tgl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( natLum ), natH * 0.90 );',
+        '\tgl_FragColor.rgb = mix( gl_FragColor.rgb, natHazeColor, natH * 0.40 );',
+        '#include <fog_fragment>'
+      ].join('\n'));
+  };
+  // onBeforeCompile を付けたマテリアルは、同じ定義の素の Phong と
+  // プログラムキャッシュを共有してしまわないよう別キーにしておく。
+  mat.customProgramCacheKey = function(){ return 'natAerialHaze'; };
+  return mat;
+}
+/* 遠景色とランプを毎フレーム時間帯/天候へ追従させる(uniform を差し替え
+ * るのではなく、共有している Color / Vector3 の中身を書き換える)。 */
+var _natHazeTmp = new T.Color();
+function natUpdateHaze(){
+  // 遠景色 = その時間帯の fogColor(空の霞)と mountainColor(遠い丘)の
+  // 中間。山並みリングと同じ desaturate(skySatMul) も通すので、曇や雨で
+  // 空が灰色へ寄れば遠景の木も同じだけ灰色へ寄る。
+  // mountainColor 寄りにするほど遠景の木が山並みリングと同じ色味になる。
+  _natHazeTmp.copy(CUR_TIME.fogColor).lerp(CUR_TIME.mountainColor, 0.55);
+  desaturate(_natHazeTmp, CUR_WEATHER.skySatMul);
+  NAT_HAZE_COLOR.copy(_natHazeTmp);
+  // 曇/雨/雪は霞み始めを手前へ寄せる(scene.fog の fogFarMul と同じ向き)
+  var wf = natLerp(1, CUR_WEATHER.fogFarMul, 0.55);
+  var near = NAT.hazeNear, far = Math.max(near + 1, NAT.hazeFar * wf);
+  NAT_HAZE_RANGE.set(near, far,
+    natClamp(NAT.hazeMax + (1 - CUR_WEATHER.skySatMul) * 0.16, 0, 0.86));
+}
+
 /* 樹種: すべて「高さ1・根元 y=0」の単位空間で作る。実際の背丈は
  * インスタンス行列のスケールで与えるので、1本ごとの新規ジオメトリは
  * 一切生成しない。針葉樹2種 + 広葉樹2種。 */
@@ -150,7 +228,8 @@ function natBuildTreeSpecies(){
   });
   // Lambert は r128 で flatShading を持たない(コンソール警告になる)ため、
   // ローポリらしい面の切り替わりを出すのに shininess 0 の Phong を使う。
-  var mat = new T.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 0 });
+  var mat = natApplyAerialHaze(
+    new T.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 0 }));
   sp.forEach(function(s){ s.mat = mat; });
   return sp;
 }
@@ -229,6 +308,7 @@ var NAT = {
   seed: 0, ready: false,
   terrain: [], terrainTopY: 0, terrainRayLen: 1, terrainMaxR: 0,
   ex: null, exPad: 0, spanMax: 1, rFar: 0, treeScale: 1,
+  hazeNear: 200, hazeFar: 1400, hazeMax: 0.62,
   waterBoxes: [], gateSegs: [], lakes: [], trees: [], instanced: [],
   buildMs: 0
 };
@@ -300,6 +380,15 @@ function natComputeFootprint(){
   NAT.rFar = Math.min(tMaxR * 0.9, castleFogFar * 1.1,
                       Math.max(exR * 1.9, ZMAX * 2.2));
   NAT.treeScale = natClamp(Math.pow(ZMAX / 150, 0.45), 0.8, 2.4);
+
+  // 空気遠近のランプ。「完全に霞んだ距離」の目安として、最も内側の
+  // 山並みリングの半径(11-environment.js: 340 * ENV_SCALE)を使う ---
+  // 遠景の木が溶け込むべき相手がまさにそのリングだから。木がリングより
+  // 外まで伸びる城では rFar 側で伸ばす。
+  var mtnR = 340 * ENV_SCALE;
+  NAT.hazeNear = mtnR * 0.42;
+  NAT.hazeFar  = Math.max(mtnR * 1.75, NAT.rFar * 1.40);
+  NAT.hazeMax  = 0.58;
 
   // 住人が場外へ歩き去る経路(門の外側口 -> 消失点)を帯状に確保する
   var segs = [];
@@ -454,12 +543,16 @@ function natBuildLake(cx, cz, R, rnd){
   var bed = new T.Mesh(bedGeo, NAT_SHARED.bedMat);
   bed.receiveShadow = true;
   var watGeo = fan(waterY, 0.998);
-  var water = new T.Mesh(watGeo, NAT_SHARED.lakeMat);
+  // 水面のマテリアルは湖ごとに複製する。堀と違って湖は中景〜遠景に置か
+  // れるので、木と同じ空気遠近を「その湖までの距離」で個別にかけたい。
+  var watMat = NAT_SHARED.lakeMat.clone();
+  watMat.color.copy(CUR_TIME.waterColor);   // 最初の updateNature までの1フレーム分
+  var water = new T.Mesh(watGeo, watMat);
 
   natureGroup.add(bank); natureGroup.add(bed); natureGroup.add(water);
   var rOutMax = 0;
   for (i=0;i<rOut.length;i++) rOutMax = Math.max(rOutMax, rOut[i]);
-  return { cx:cx, cz:cz, rOuter:rOutMax, meshes:[bank, bed, water] };
+  return { cx:cx, cz:cz, y:waterY, rOuter:rOutMax, mat:watMat, meshes:[bank, bed, water] };
 }
 
 /* ====================================================================
@@ -718,6 +811,7 @@ function disposeNature(){
       natureGroup.remove(m);
       m.geometry.dispose();                 // 湖は城ごとに地形へ合わせて作る
     });
+    if (L.mat) L.mat.dispose();             // 水面マテリアルも湖ごとの複製
   });
   NAT.lakes.length = 0;
   NAT.trees.length = 0;
@@ -764,12 +858,26 @@ function regenerateNature(){
   NAT.buildMs = ((window.performance && performance.now) ? performance.now() : 0) - t0;
   NAT.ready = true;
 }
+var _natLakeCol = new T.Color();
 function updateNature(dt){
   if (!natureOn || !NAT_SHARED) return;
+  natUpdateHaze();
   natUpdateClouds(dt);
   natUpdateBirds(dt);
-  // 湖の水面は水堀と同じ方針で時間帯の水色に追従させる
-  NAT_SHARED.lakeMat.color.copy(CUR_TIME.waterColor);
+  // 湖の水面は水堀と同じ方針で時間帯の水色に追従させる。ただし湖は中景
+  // 〜遠景にあるので、木と同じランプでカメラからの距離ぶんだけ脱色して
+  // 遠景色へ寄せる(青が周囲の淡い色調から浮くのを防ぐ)。
+  var i;
+  for (i=0;i<NAT.lakes.length;i++){
+    var L = NAT.lakes[i];
+    var d = Math.hypot(camera.position.x - L.cx, camera.position.y - L.y,
+                       camera.position.z - L.cz);
+    var h = smoothstep01(NAT_HAZE_RANGE.x, NAT_HAZE_RANGE.y, d) * NAT_HAZE_RANGE.z;
+    _natLakeCol.copy(CUR_TIME.waterColor);
+    desaturate(_natLakeCol, 1 - h*0.60);
+    _natLakeCol.lerp(NAT_HAZE_COLOR, h*0.25);
+    L.mat.color.copy(_natLakeCol);
+  }
 }
 
 /* ---- デバッグ用フック(本番UIには影響しない) --------------------- */
@@ -795,27 +903,8 @@ window.__natureStats = function(){
     natureGroupChildren: natureGroup.children.length
   };
 };
-
-/* TEMP-PROBE */
-setTimeout(function(){
-  var m = NAT_SHARED && NAT_SHARED.species[0].mat;
-  var dists = NAT.trees.map(function(p){ return Math.hypot(p.x,p.z); }).sort(function(a,b){return a-b;});
-  var prog = renderer.info.programs || [];
-  var fogUniform = null;
-  prog.forEach(function(pr){ if (pr.cacheKey && pr.cacheKey.indexOf('MeshPhongMaterial')>=0) fogUniform = 1; });
-  document.title = 'PROBE ' + JSON.stringify({
-    matFog: m ? m.fog : null,
-    matNeedsUpdate: m ? m.version : null,
-    fogNear: scene.fog.near, fogFar: scene.fog.far,
-    ZMAX: (typeof ZMAX!=='undefined'?ZMAX:null), ENV_SCALE: ENV_SCALE, FOG_FAR_SCALE: FOG_FAR_SCALE,
-    rFar: Math.round(NAT.rFar), treeN: dists.length,
-    dMin: Math.round(dists[0]||0), dMed: Math.round(dists[dists.length>>1]||0), dMax: Math.round(dists[dists.length-1]||0),
-    camDist: Math.round(camera.position.length()),
-    mtnR: MOUNTAIN_RINGS.map(function(r){ return Math.round(r.mesh.geometry.boundingSphere ? 0 : 0) + Math.round(340*r.mesh.scale.x); }),
-    mtnCol: MOUNTAIN_RINGS.map(function(r){ return '#'+r.mesh.material.color.getHexString(); }),
-    fogCol: '#'+scene.fog.color.getHexString(),
-    lakeCol: '#'+NAT_SHARED.lakeMat.color.getHexString(),
-    fogAtTreeMax: Math.round(100*natClamp((dists[dists.length-1]-scene.fog.near)/(scene.fog.far-scene.fog.near),0,1)),
-    fogAtMtn0: Math.round(100*natClamp((340*ENV_SCALE-scene.fog.near)/(scene.fog.far-scene.fog.near),0,1))
-  });
-}, 4000);
+window.__natureHaze = function(){
+  return { near: Math.round(NAT_HAZE_RANGE.x), far: Math.round(NAT_HAZE_RANGE.y),
+    max: Math.round(NAT_HAZE_RANGE.z*100)/100, color: '#'+NAT_HAZE_COLOR.getHexString(),
+    sceneFogNear: Math.round(scene.fog.near), sceneFogFar: Math.round(scene.fog.far) };
+};

@@ -15,6 +15,22 @@
  * ==================================================================== */
 function col(hex){ return new T.Color(hex); }
 
+/* ---- waterColor の決め方(重要)---------------------------------------
+ * waterColor は「素の色」ではなく **照明で乗算されたあとの見え方** で
+ * 決めること。水面(01-moat.js の waterMat / 15-nature.js の湖)は
+ * MeshPhongMaterial + shininess 90 + specular 0x9fd4e0 の上向き面なので、
+ * 昼(sun 1.55 + hemi 0.65 + ambient 0.22)では素の値が約 1.9〜2.3 倍まで
+ * 持ち上がり、しかも specular が青白を足す。
+ *   旧 day 0x2e5b66 (46,91,102) -> 実測 #6bb6c3 (107,182,195) 彩度 0.45
+ * これがボディアムの水堀が「プールのような明るいシアン」に見えていた
+ * 原因で、色指定が間違っていたのではなく乗算で飛んでいた。ボーマリスの
+ * 塔頂部が白飛びしたときと同じ現象。
+ * 現在値は乗算後に落ち着くところまで下げてある(実測):
+ *   day     0x203a3c -> 水堀 #5c888a 彩度 0.34 明度 0.54(草地は明度 0.84)
+ *   morning 0x2c4854 -> 朝の青白さは残しつつ明度を下げる
+ *   dusk    0x363340 -> 夕日の specular が主役なので素の色は暗く
+ *   night   0x111a26 -> 周囲の地面(ほぼ黒)から水面だけが光らない濃さ
+ * 変更するときは必ず 朝/昼/夕/夜 の4つを撮って乗算後で確認すること。 */
 var TIME_STATES = {
   morning: {
     sunPos: new T.Vector3(-95, 32, 24), sunColor: col(0xffd9a0), sunIntensity: 1.15,
@@ -22,7 +38,7 @@ var TIME_STATES = {
     ambientColor: col(0xfff2df), ambientIntensity: 0.20,
     fogColor: col(0xd9c9b0), fogNear: 90, fogFar: 650,
     sky: [col(0x3f6a92), col(0x7d9dc0), col(0xb9c8c9), col(0xe3c9a0), col(0xf2d9ae), col(0xfbe6c2)],
-    waterColor: col(0x3d6472), windowGlow: 0.0, mountainColor: col(0x93a2a0)
+    waterColor: col(0x2c4854), windowGlow: 0.0, mountainColor: col(0x93a2a0)
   },
   day: {
     sunPos: new T.Vector3(60, 85, 40), sunColor: col(0xfff2d8), sunIntensity: 1.55,
@@ -30,7 +46,7 @@ var TIME_STATES = {
     ambientColor: col(0xffffff), ambientIntensity: 0.22,
     fogColor: col(0xcdddE3), fogNear: 140, fogFar: 900,
     sky: [col(0x4f8dc7), col(0x7fb1de), col(0xa7c7e2), col(0xbcd7ea), col(0xd3d8c5), col(0xe7e2c9)],
-    waterColor: col(0x2e5b66), windowGlow: 0.0, mountainColor: col(0x7fa898)
+    waterColor: col(0x203a3c), windowGlow: 0.0, mountainColor: col(0x7fa898)
   },
   dusk: {
     sunPos: new T.Vector3(-78, 20, -52), sunColor: col(0xff9a56), sunIntensity: 1.05,
@@ -38,7 +54,7 @@ var TIME_STATES = {
     ambientColor: col(0xffb37a), ambientIntensity: 0.18,
     fogColor: col(0xaa6f66), fogNear: 90, fogFar: 760,
     sky: [col(0x1c2350), col(0x3a3468), col(0x7a4f74), col(0xc96a52), col(0xe8935a), col(0xf0b378)],
-    waterColor: col(0x4a4a5c), windowGlow: 0.4, mountainColor: col(0x4a3c52)
+    waterColor: col(0x363340), windowGlow: 0.4, mountainColor: col(0x4a3c52)
   },
   night: {
     sunPos: new T.Vector3(40, 60, -70), sunColor: col(0xaebfe6), sunIntensity: 0.62,
@@ -46,7 +62,7 @@ var TIME_STATES = {
     ambientColor: col(0x8fa0cf), ambientIntensity: 0.15,
     fogColor: col(0x0b1220), fogNear: 80, fogFar: 560,
     sky: [col(0x02040c), col(0x050a18), col(0x0a1428), col(0x0d1a34), col(0x111f3c), col(0x182742)],
-    waterColor: col(0x16222e), windowGlow: 1.0, mountainColor: col(0x0a1220)
+    waterColor: col(0x111a26), windowGlow: 1.0, mountainColor: col(0x0a1220)
   }
 };
 var WEATHER_STATES = {
