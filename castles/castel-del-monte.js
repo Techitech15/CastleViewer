@@ -44,7 +44,17 @@
  *   - 採用値まとめ: 一辺16.5m(実測値40mから逆算=確定)/ 塔直径7.90m
  *     (実測値、複数ソースで一致)/ 中庭直径17.86m(実測値)/ 中庭側主壁
  *     高20.50m・塔高23m(実測値)/ 標高539m(実測値)/ 壁厚2.2m・中庭壁厚
- *     0.8m・門幅3.2m(いずれも未記載のため推定値)。
+ *     0.8m・門幅4.2m(いずれも未記載のため推定値)。
+ *
+ * ---- 塔の取り付け位置について(見た目優先の判断)--------------------
+ * 上記の「56m=塔を含む全幅」を採ると、塔の中心を八角形の頂点より約2m
+ * 外へ出すことになる。しかしそれだと塔の張り出しが塔幅(7.9m)と同じに
+ * なり、レンダリングでは「壁の外側に8本の独立した円柱が立っている」
+ * 状態にしか見えなかった(実際そうなっていた)。実物の写真が示すのは
+ * 「壁と一体化した隅の膨らみ」であり、塔の中心を頂点(OCT_R_VERT)に
+ * 置くと張り出しが塔の半幅(3.95m)になってその印象に一致する。この
+ * とき全幅は約51.7mで、40m(塔を除く対辺間)と56m(諸説)の間に収まる。
+ * 数値の一致より外観の一致を優先した箇所であることを明記しておく。
  * ==================================================================== */
 function buildCastelDelMonte(){
   var group = new T.Group();
@@ -68,7 +78,9 @@ function buildCastelDelMonte(){
    * 特徴を色でも表現する。既存3城(ボディアム=サセックス砂岩の暖赤褐色、
    * 他)とはっきり違う、より淡く乾いた色調でまとめる。 ------------- */
   var STONE_MAIN   = 0xd9c493; // 主郭の壁
-  var STONE_MAIN_V = 0xceb87e; // 塔(わずかに色を変えて陰影のバリエーション)
+  var STONE_MAIN_V = 0xd5bf8b; // 塔。実物は壁も塔も同一の石灰岩で、色差を
+                               // つけすぎると塔が「別の建物」に見えるため
+                               // 主壁とほぼ同色にとどめる
   var STONE_DARK   = 0xab9564; // 基壇・幅木
   var MARBLE_COL   = 0xece4cf; // 主玄関ポータルの大理石装飾
   var ROOF_COL     = 0xc9b78e; // 平屋根(石畳のテラス屋根、切妻なし)
@@ -106,9 +118,18 @@ function buildCastelDelMonte(){
   var OCT_R_VERT = OCT_APOTH_OUT / Math.cos(Math.PI/8);     // 中心から隅(頂点)までの距離 ≒21.56m
 
   var TOWER_DIA = 7.90;                                     // 実測値(伊語Wikipedia)
-  var TOWER_R = TOWER_DIA/2;
-  var TOWER_CENTER_R = OCT_R_VERT + TOWER_R*0.5;             // 塔は隅から外側へ張り出す(検算: 全幅≒55m、説Aの56mと近似)
-  var TOWER_H = 23.0;                                        // 実測値
+  var TOWER_R = TOWER_DIA/2;                                 // = 対辺間半径(アポテム)
+  // CylinderGeometry の radius は外接円半径なので、対辺間 7.90m を出すに
+  // は TOWER_R/cos(22.5°) を渡す必要がある。以前は TOWER_R をそのまま
+  // 渡していたため塔が実測より細い(対辺間7.3m)状態だった。
+  var TOWER_CIRC_R = TOWER_R / Math.cos(Math.PI/8);          // ≒4.28m
+  // 塔の中心は八角形の頂点(OCT_R_VERT)の真上に置く。こうすると塔の外面は
+  // 主壁面から TOWER_R(=3.95m)だけ張り出し、内側は隅の壁体に完全に食い
+  // 込む -- つまり「壁と一体化した隅の膨らみ」に見える。以前は
+  // OCT_R_VERT + TOWER_R*0.5 に置いており、張り出しが塔の全幅(7.9m)分
+  // にもなって、8本の独立した円柱が壁の外に立っているように見えていた。
+  var TOWER_CENTER_R = OCT_R_VERT;                           // 全幅 ≒ 2*(21.56+4.28) ≒ 51.7m
+  var TOWER_H = 23.0;                                        // 実測値(主壁20.5mをわずか2.5m上回るだけ)
   var TOWER_ROOF_T = 0.4;
 
   var COURT_DIA = 17.86;                                     // 実測値
@@ -123,10 +144,32 @@ function buildCastelDelMonte(){
   var GF_ROOM_H = 6.0;
   var FF_ROOM_H = 8.0;
 
-  var DOOR_GAP = 3.2;                                         // 主玄関ポータルの開口幅(推定値)
+  var DOOR_GAP = 4.2;                                         // 主玄関ポータルの開口幅(推定値)
 
   function dirAt(theta){ return { x: Math.sin(theta), z: -Math.cos(theta) }; }
-  function tanAt(theta){ return { x: Math.cos(theta), z: -Math.sin(theta) }; }
+  // 接線ベクトル。dirAt との内積が 0 になる必要がある。
+  //   dirAt(θ)·(cosθ, -sinθ) = sinθcosθ + cosθsinθ = sin2θ  -> 0 にならない
+  //   dirAt(θ)·(cosθ,  sinθ) = sinθcosθ - cosθsinθ = 0        -> 正しい
+  // 旧実装は z の符号が逆で、θ=45/135/225/315°(斜めの4面)では接線が
+  // 法線と真逆を向いていた。その結果:
+  //   - 斜め4面の窓が壁の左右ではなく半径方向(壁の内外)へずれる
+  //   - mkTrapFloor の台形室が風車状にねじれ、中庭から見て星形に突き出す
+  //   - furnitureBox も同様にずれる
+  // 「中央から棒状のものが突き出て見える」現象の実体はこのねじれた床・
+  // 仕切り壁だった。
+  function tanAt(theta){ return { x: Math.cos(theta), z: Math.sin(theta) }; }
+  // 壁面に沿わせて箱を置くときの Y 回転。three.js の rotation.y = r は
+  // ローカル +X 軸を (cos r, 0, -sin r) に写すので、接線 (cosθ, sinθ) に
+  // 合わせるには r = -θ が必要。旧実装は +θ を渡していたため、
+  // θ=45/135/225/315°(斜めの4面)で箱がちょうど90°ずれ、長辺16.5mの
+  // 壁が接線方向ではなく半径方向を向いていた。すなわち4枚の主壁が
+  // 「中庭に突き刺さり外へ突き出す板」になっており、これが
+  //   - 中央から棒状の物体が突き出て見える
+  //   - 主壁が八角形の環に見えず、柱の集合に見える
+  // という2つの症状の直接の原因だった。θ=0/90/180/270°では
+  // +θ でも箱が180°ずれるだけで見た目が変わらないため、北面だけを
+  // 見て検証していると気付けない類のバグ。
+  function wallRy(theta){ return -theta; }
   function radialRy(theta){ return Math.PI/2 - theta; }
   function wTheta(k){ return k*Math.PI/4; }        // 壁 k の中心角(k=0..7, 0=北)
   function vPhi(v){ return v*Math.PI/4 + Math.PI/8; } // 隅(塔) v の中心角(壁v・壁v+1の間)
@@ -143,6 +186,13 @@ function buildCastelDelMonte(){
   }
   var roofMain = makeFadeGroup('roofMain', null, true, ROOF_COL);   // 主郭の平屋根(方位に依らずフェード)
   var roofCaps = makeFadeGroup('roofCaps', null, true, ROOF_COL);   // 各塔の平屋根
+  // 塔は円柱ではなく八角柱。CylinderGeometry(seg=8) は円周方向に法線を
+  // 平滑化してしまい丸く見えるため、flatShading で稜線を立てる。これが
+  // ないと「8本の円柱」に見え、実物の角張った印象と乖離する。
+  towerFG.forEach(function(f){ f.mat.flatShading = true; });
+  roofCaps.mat.flatShading = true;
+  // 主屋根はテラス状の平屋根。中庭側から見上げる場面があるので両面描画。
+  roofMain.mat.side = T.DoubleSide;
 
   /* -------------------------------------------------------------- *
    * 主郭 8壁(南側=k4のみ主玄関の開口を挟んで2分割)
@@ -152,7 +202,7 @@ function buildCastelDelMonte(){
     var wx = d.x*OCT_APOTH_CENTER + tg.x*tangentOff;
     var wz = d.z*OCT_APOTH_CENTER + tg.z*tangentOff;
     var win = mkBox(w, h, WT*1.05, windowMat);
-    place(win, wx, y, wz, theta);
+    place(win, wx, y, wz, wallRy(theta));
     fg.group.add(win);
   }
   for (k=0;k<8;k++){
@@ -168,26 +218,50 @@ function buildCastelDelMonte(){
         var cx = d.x*OCT_APOTH_CENTER + tg.x*offset*sign;
         var cz = d.z*OCT_APOTH_CENTER + tg.z*offset*sign;
         var seg = mkBox(segLen, WALL_H, WT, fg.mat);
-        place(seg, cx, WALL_H/2, cz, theta);
+        place(seg, cx, WALL_H/2, cz, wallRy(theta));
         fg.group.add(seg);
       });
-      wallWindow(fg, theta, DOOR_GAP/2+segLen*0.55, WALL_H*0.72, 1.6, 2.6);
-      wallWindow(fg, theta, -(DOOR_GAP/2+segLen*0.55), WALL_H*0.72, 1.6, 2.6);
+      // 開口の上は壁で塞ぐ。以前は開口が壁の天端まで貫通しており、正面
+      // から見ると門の上に高さ20mのスリットが開いて内部が丸見えだった。
+      var lintelY = 10.8;
+      var above = mkBox(DOOR_GAP, WALL_H - lintelY, WT, fg.mat);
+      place(above, d.x*OCT_APOTH_CENTER, lintelY + (WALL_H-lintelY)/2, d.z*OCT_APOTH_CENTER, wallRy(theta));
+      fg.group.add(above);
+      wallWindow(fg, theta, DOOR_GAP/2+segLen*0.55, WALL_H*0.72, 0.85, 3.1);
+      wallWindow(fg, theta, -(DOOR_GAP/2+segLen*0.55), WALL_H*0.72, 0.85, 3.1);
     } else {
       var wall = mkBox(OCT_SIDE, WALL_H, WT, fg.mat);
-      place(wall, d.x*OCT_APOTH_CENTER, WALL_H/2, d.z*OCT_APOTH_CENTER, theta);
+      place(wall, d.x*OCT_APOTH_CENTER, WALL_H/2, d.z*OCT_APOTH_CENTER, wallRy(theta));
       fg.group.add(wall);
       // 1階: 小さな単窓、2階: やや大きな双子窓(ビフォラ風) -- 実際の
       // カステル・デル・モンテは中庭側に多くの開口を持つが外壁側は
       // 控えめ、という記録に合わせ数を絞る
-      wallWindow(fg, theta, 0, GF_FLOOR_Y+2.6, 1.1, 2.0);
-      wallWindow(fg, theta, -1.3, FF_FLOOR_Y+3.4, 1.0, 2.4);
-      wallWindow(fg, theta,  1.3, FF_FLOOR_Y+3.4, 1.0, 2.4);
+      wallWindow(fg, theta, 0, GF_FLOOR_Y+2.4, 0.75, 2.2);
+      wallWindow(fg, theta, -1.0, FF_FLOOR_Y+3.2, 0.85, 3.1);
+      wallWindow(fg, theta,  1.0, FF_FLOOR_Y+3.2, 0.85, 3.1);
     }
     // 幅木(基壇): 各壁の足元に低い張り出し
     var plinth = mkBox(OCT_SIDE+0.6, 1.0, WT+0.5, darkMat);
-    place(plinth, d.x*OCT_APOTH_CENTER, 0.5, d.z*OCT_APOTH_CENTER, theta);
+    place(plinth, d.x*OCT_APOTH_CENTER, 0.5, d.z*OCT_APOTH_CENTER, wallRy(theta));
     fg.group.add(plinth);
+  }
+  /* -------------------------------------------------------------- *
+   * 水平コーニス(軒蛇腹)-- 実物で最も目を引く意匠。1階と2階を分ける
+   * 主コーニスと、壁頂のコーニスの2本が八角形をぐるりと巡り、建物が
+   * 「上下2層に分かれた1個の塊」に見える最大の要因になっている。
+   * -------------------------------------------------------------- */
+  var CORNICE_Y1 = 10.4;              // 1階/2階の境(2階床レベルのすぐ上)
+  var CORNICE_Y2 = WALL_H - 0.85;     // 壁頂(平屋根の直下)
+  var CORNICE_BANDS = [ {y:CORNICE_Y1, h:0.55, out:0.45}, {y:CORNICE_Y2, h:0.75, out:0.6} ];
+  for (k=0;k<8;k++){
+    (function(kk){
+      var ct = wTheta(kk), cd = dirAt(ct), cfg = wallFG[kk];
+      CORNICE_BANDS.forEach(function(c){
+        var band = mkBox(OCT_SIDE+0.55, c.h, WT + c.out*2, cfg.mat);
+        place(band, cd.x*OCT_APOTH_CENTER, c.y, cd.z*OCT_APOTH_CENTER, wallRy(ct));
+        cfg.group.add(band);
+      });
+    })(k);
   }
   // 主郭本体には胸壁(クレネレーション)を設けない -- 実際のカステル・
   // デル・モンテは典型的な城郭とは異なり、はっきりした狭間胸壁を持たず
@@ -197,35 +271,39 @@ function buildCastelDelMonte(){
   /* -------------------------------------------------------------- *
    * 主玄関ポータル(古典的な凱旋門風。大理石調)
    * -------------------------------------------------------------- */
+  // 実物のポータルは1階分をまるごと占める記念碑的な大きさで、遠景でも
+  // 「南面だけ表情が違う」とわかる。以前は高さ5m程度しかなく、20.5mの
+  // 壁面に対して小さすぎて存在感が消えていた。
   (function buildPortal(){
     var theta = wTheta(4), d = dirAt(theta);
     var cz = d.z*(OCT_APOTH_OUT+0.05);
     var fg = wallFG[4];
-    var lintel = mkBox(DOOR_GAP+1.0, 0.6, 0.5, marbleMat);
-    place(lintel, 0, 4.2, cz, theta);
+    var COL_H = 7.4;
+    var lintel = mkBox(DOOR_GAP+1.6, 0.9, 0.6, marbleMat);
+    place(lintel, 0, COL_H+0.75, cz, wallRy(theta));
     fg.group.add(lintel);
     [-1,1].forEach(function(side){
-      var col = mkCyl(0.34, 0.4, 4.6, 10, marbleMat);
-      place(col, side*(DOOR_GAP/2+0.5), 2.3, cz);
+      var col = mkCyl(0.46, 0.54, COL_H, 12, marbleMat);
+      place(col, side*(DOOR_GAP/2+0.62), COL_H/2, cz);
       fg.group.add(col);
-      var cap = mkBox(0.9, 0.3, 0.7, marbleMat);
-      place(cap, side*(DOOR_GAP/2+0.5), 4.55, cz);
+      var cap = mkBox(1.25, 0.42, 0.95, marbleMat);
+      place(cap, side*(DOOR_GAP/2+0.62), COL_H+0.21, cz);
       fg.group.add(cap);
     });
-    var cornice = mkBox(DOOR_GAP+2.2, 0.3, 0.6, marbleMat);
-    place(cornice, 0, 5.05, cz, theta);
+    var cornice = mkBox(DOOR_GAP+3.0, 0.42, 0.75, marbleMat);
+    place(cornice, 0, COL_H+1.42, cz, wallRy(theta));
     fg.group.add(cornice);
-    var pediment = mkCone((DOOR_GAP+2.2)*0.42, 1.5, 3, marbleMat);
+    var pediment = mkCone((DOOR_GAP+3.0)*0.42, 2.1, 3, marbleMat);
     pediment.rotation.y = Math.PI/2;
-    place(pediment, 0, 5.2+0.75, cz);
+    place(pediment, 0, COL_H+1.63+1.05, cz);
     fg.group.add(pediment);
-    var doorSlab = mkBox(DOOR_GAP-0.5, 3.6, 0.15, windowMat);
-    place(doorSlab, 0, 1.8, cz-0.1, theta);
+    var doorSlab = mkBox(DOOR_GAP-0.5, COL_H-0.4, 0.15, windowMat);
+    place(doorSlab, 0, (COL_H-0.4)/2, cz-0.1, wallRy(theta));
     interiorGroup.add(doorSlab);
-    var steps = mkBox(DOOR_GAP+1.6, 0.5, 1.6, darkMat);
-    place(steps, 0, 0.25, cz+1.1, theta);
+    var steps = mkBox(DOOR_GAP+2.2, 0.5, 1.8, darkMat);
+    place(steps, 0, 0.25, cz+1.2, wallRy(theta));
     group.add(steps);
-    registerPick(pickables, 'structure', 0, 3.0, cz, DOOR_GAP+3, 6.5, 4,
+    registerPick(pickables, 'structure', 0, 5.2, cz, DOOR_GAP+3, 10.5, 4,
       '主玄関ポータル Main Portal',
       '古典的な凱旋門を思わせる大理石装飾のポータル。堀も跳ね橋もないこの城で、唯一"威容"を演出する要素。フリードリヒ2世が愛したギリシア・ローマ古典への傾倒がうかがえる。');
   })();
@@ -243,25 +321,34 @@ function buildCastelDelMonte(){
     var phi = vPhi(v), dv = dirAt(phi);
     var tfg = towerFG[v];
     var tcx = dv.x*TOWER_CENTER_R, tcz = dv.z*TOWER_CENTER_R;
-    var shaft = mkCyl(TOWER_R, TOWER_R*1.03, TOWER_H, 8, tfg.mat);
+    // rotation.y = π/8 で八角柱の面(法線)を主郭八角形の8方位に揃える
+    // -> 塔の2面が隣接する主壁と平行になり、壁と塔が同じ稜線で噛み合う
+    var shaft = mkCyl(TOWER_CIRC_R, TOWER_CIRC_R*1.03, TOWER_H, 8, tfg.mat);
     shaft.rotation.y = Math.PI/8;
     place(shaft, tcx, TOWER_H/2, tcz);
     tfg.group.add(shaft);
-    var tPlinth = mkCyl(TOWER_R*1.12, TOWER_R*1.25, 1.1, 8, tfg.mat);
+    var tPlinth = mkCyl(TOWER_CIRC_R*1.06, TOWER_CIRC_R*1.16, 1.1, 8, tfg.mat);
     tPlinth.rotation.y = Math.PI/8;
     place(tPlinth, tcx, 0.55, tcz);
     tfg.group.add(tPlinth);
-    // 開口(小窓)を各階に数個
-    for (var s=0;s<3;s++){
-      for (var kk=0;kk<2;kk++){
-        var ang = phi + kk*Math.PI + Math.PI/6;
-        var wm = mkBox(0.42, 1.5, 0.4, windowMat);
-        place(wm, tcx+Math.cos(ang)*TOWER_R*0.97, 3.0+s*6.2, tcz+Math.sin(ang)*TOWER_R*0.97, -ang);
-        tfg.group.add(wm);
-      }
+    // 塔を巡る水平コーニス(主壁のコーニスと同じ高さで連続させ、建物
+    // 全体が一本の水平線で締まって見えるようにする)
+    CORNICE_BANDS.forEach(function(c){
+      var ring = mkCyl(TOWER_CIRC_R*1.055, TOWER_CIRC_R*1.055, c.h, 8, tfg.mat);
+      ring.rotation.y = Math.PI/8;
+      place(ring, tcx, c.y, tcz);
+      tfg.group.add(ring);
+    });
+    // 開口は控えめ。実物の塔はほぼ無開口で、外側正面に細いスリットが
+    // 各階に1つ見える程度。以前は塔の内外に6つも窓を並べていたため、
+    // 塔が「窓の並んだ独立した建物」に見えていた。
+    for (var s=0;s<2;s++){
+      var wm = mkBox(0.5, 1.6, 0.6, windowMat);
+      place(wm, tcx + dv.x*TOWER_R*0.95, GF_FLOOR_Y+2.8 + s*6.4, tcz + dv.z*TOWER_R*0.95, wallRy(phi));
+      tfg.group.add(wm);
     }
-    // 平屋根キャップ
-    var cap = mkCyl(TOWER_R*1.06, TOWER_R*1.06, TOWER_ROOF_T, 8, roofCaps.mat);
+    // 平屋根キャップ(尖塔・切妻を一切持たない、平らな頂部)
+    var cap = mkCyl(TOWER_CIRC_R*1.035, TOWER_CIRC_R*1.035, TOWER_ROOF_T, 8, roofCaps.mat);
     cap.rotation.y = Math.PI/8;
     place(cap, tcx, TOWER_H+TOWER_ROOF_T/2, tcz);
     roofCaps.group.add(cap);
@@ -306,7 +393,12 @@ function buildCastelDelMonte(){
     var oa=P(a,rOuter), ob=P(b,rOuter), ia=P(a,rInner), ib=P(b,rInner);
     var geo = new T.BufferGeometry();
     var arr = new Float32Array(18);
-    [oa,ob,ib, oa,ib,ia].forEach(function(pnt,i){ arr[i*3]=pnt.x; arr[i*3+1]=pnt.y; arr[i*3+2]=pnt.z; });
+    // 巻き方向に注意: dirAt(θ)=(sinθ,-cosθ) はθ増加でXZ平面上を「上から見て
+    // 時計回り」に進むため、[oa,ob,ib] の順だと computeVertexNormals が
+    // 法線を -Y(下向き)にしてしまう。単面マテリアルの屋根が上から完全に
+    // 消え、中庭どころか各室の床・仕切り壁まで丸見えになる原因だった。
+    // 順序を反転して法線を +Y に向ける。
+    [oa,ib,ob, oa,ia,ib].forEach(function(pnt,i){ arr[i*3]=pnt.x; arr[i*3+1]=pnt.y; arr[i*3+2]=pnt.z; });
     geo.setAttribute('position', new T.Float32BufferAttribute(arr,3));
     geo.computeVertexNormals();
     var mesh = new T.Mesh(geo, mat);
@@ -335,10 +427,12 @@ function buildCastelDelMonte(){
   }
   // 屋根の縁を少し立ち上げたパラペット(胸壁ではない、低い縁石)
   for (k=0;k<8;k++){
+    // 屋根が正しく描画されるようになったので8面すべてに回す。1面だけ
+    // 欠けていると、水平に一周する縁石のラインが途切れて「王冠」の
+    // シルエットが崩れる(高さ0.5mなので視界は妨げない)。
     var pTheta = wTheta(k), pd = dirAt(pTheta);
-    if (k===4) continue; // 玄関側は見通しを妨げないよう省略
     var lip = mkBox(OCT_SIDE*0.94, 0.5, 0.3, roofMain.mat);
-    place(lip, pd.x*(OCT_APOTH_OUT-0.05), WALL_H+0.65, pd.z*(OCT_APOTH_OUT-0.05), pTheta);
+    place(lip, pd.x*(OCT_APOTH_OUT-0.05), WALL_H+0.65, pd.z*(OCT_APOTH_OUT-0.05), wallRy(pTheta));
     roofMain.group.add(lip);
   }
 
@@ -350,7 +444,7 @@ function buildCastelDelMonte(){
   for (k=0;k<8;k++){
     var cTheta = wTheta(k), cd = dirAt(cTheta);
     var courtWall = mkBox(OCT_SIDE*COURT_APOTH/OCT_APOTH_OUT + 0.3, 1.3, CWT, partitionMat);
-    place(courtWall, cd.x*(COURT_APOTH+CWT/2), 0.65, cd.z*(COURT_APOTH+CWT/2), cTheta);
+    place(courtWall, cd.x*(COURT_APOTH+CWT/2), 0.65, cd.z*(COURT_APOTH+CWT/2), wallRy(cTheta));
     interiorGroup.add(courtWall);
   }
   registerPick(pickables, 'room', 0, 1.2, 0, COURT_DIA*0.92, 2.4, COURT_DIA*0.92,
@@ -390,7 +484,7 @@ function buildCastelDelMonte(){
   function furnitureBox(theta, r, tangentOff, y, w, h, dd, mat){
     var d0=dirAt(theta), t0=tanAt(theta);
     var m = mkBox(w,h,dd,mat);
-    place(m, d0.x*r+t0.x*tangentOff, y+h/2, d0.z*r+t0.z*tangentOff, theta);
+    place(m, d0.x*r+t0.x*tangentOff, y+h/2, d0.z*r+t0.z*tangentOff, wallRy(theta));
     interiorGroup.add(m);
     return m;
   }
@@ -446,15 +540,25 @@ function buildCastelDelMonte(){
    * (y=-HILL_DROP)まで下る一枚の傾斜面を作る。堀がないぶん、そこに
    * 水面は張らない。
    * -------------------------------------------------------------- */
-  var R_PLATEAU = 34, R_HILLBASE = 88, HILL_DROP = 12;
-  var plateau = new T.Mesh(new T.CircleGeometry(R_PLATEAU, 24), hillTopMat);
+  var R_PLATEAU = 31, R_HILLBASE = 112, HILL_DROP = 17;
+  var plateau = new T.Mesh(new T.CircleGeometry(R_PLATEAU, 32), hillTopMat);
   plateau.rotation.x = -Math.PI/2;
   plateau.position.y = 0.0;
   plateau.receiveShadow = true;
   group.add(plateau);
-  var hillSlope = buildCircularSkirt(0, 0, R_PLATEAU, R_HILLBASE, 0, -HILL_DROP,
-    new T.Color(HILL_TOP), new T.Color(HILL_MID), new T.Color(HILL_EDGE));
-  group.add(hillSlope);
+  // 単一の直線スロープ(旧: 34m -> 88m を一様に -12m)では、城が平らな
+  // 円盤に載っているようにしか見えなかった。頂上付近はゆるく、中腹で
+  // 最も急に、裾でまた緩く -- という凸型の断面を3段のスカートで作る
+  // ことで、丘そのもののシルエットが出るようにする。
+  var HILL_TIERS = [
+    { r0:R_PLATEAU, r1:50,          y0:0.0,   y1:-4.2,       cTop:HILL_TOP, cEdge:HILL_TOP },
+    { r0:50,        r1:80,          y0:-4.2,  y1:-11.6,      cTop:HILL_TOP, cEdge:HILL_MID },
+    { r0:80,        r1:R_HILLBASE,  y0:-11.6, y1:-HILL_DROP, cTop:HILL_MID, cEdge:HILL_EDGE }
+  ];
+  HILL_TIERS.forEach(function(t){
+    group.add(buildCircularSkirt(0, 0, t.r0, t.r1, t.y0, t.y1,
+      new T.Color(t.cTop), new T.Color(t.cTop), new T.Color(t.cEdge)));
+  });
   var field = buildUndulatingGround(R_HILLBASE, 1200, 64, hillFieldMat, null);
   field.position.y = -HILL_DROP;
   group.add(field);
