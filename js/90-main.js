@@ -89,6 +89,10 @@ function applyCastle(idx){
   // 占有範囲とスケールは 15-nature.js が pickables / group から自動導出
   // するので、城ファイル側の設定追加は不要。
   regenerateNature();
+  // 城切替のたびに国別BGMを差し替える(16-audio.js がクロスフェードを担当)。
+  // 音源ファイル名はレジストリの country / id から導出されるので、城ファイル
+  // 側に音声設定を書き足す必要はない。BGM が OFF のあいだは鳴らない。
+  setCastleAudio(def);
 }
 var currentIdx = 0;
 
@@ -211,6 +215,7 @@ function frame(now){
   applyEnvironment();
   updateMountains();
   updateWeatherParticles(dt, camera.position.x, camera.position.z);
+  updateAudio(dt); // BGMのクロスフェード/フェードイン・アウトを進める
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
