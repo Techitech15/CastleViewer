@@ -112,9 +112,80 @@ wireSeg('weatherSeg', setWeather);
 /* ====================================================================
  * 7. main loop
  * ==================================================================== */
-applyCastle(0);
+/* Opening state can be driven from the query string so a screenshot can
+ * be reproduced by URL alone -- e.g.
+ *   index.html?castle=beaumaris&time=dusk&weather=rain&az=2.4&el=0.35&zoom=0.3
+ * This exists for headless capture (each run gets its own browser process
+ * instead of several agents fighting over one shared tab). Every key is
+ * optional; unknown or malformed values are ignored and the normal
+ * defaults apply, so a plain index.html open is completely unaffected.
+ *   castle : registry id (falls back to index 0)
+ *   time   : morning | day | dusk | night
+ *   weather: clear | cloudy | rain | snow
+ *   az, el : camera azimuth / elevation in radians
+ *   zoom   : 0 (far) .. 1 (near), same scale as __setZoom
+ *   panx,panz : pan target in metres
+ *   labels, residents : 1 to switch on */
+function bootParams(){
+  var q = {};
+  (location.search || '').replace(/^\?/, '').split('&').forEach(function(kv){
+    if (!kv) return;
+    var i = kv.indexOf('=');
+    if (i < 0) return;
+    q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+  });
+  return q;
+}
+var BOOT = bootParams();
+function bootNum(key){
+  var v = parseFloat(BOOT[key]);
+  return isFinite(v) ? v : null;
+}
+
+var bootIdx = 0;
+if (BOOT.castle){
+  for (var bi = 0; bi < CASTLES.length; bi++){
+    if (CASTLES[bi].id === BOOT.castle){ bootIdx = bi; break; }
+  }
+}
+applyCastle(bootIdx);
+document.getElementById('castleSelect').value = String(bootIdx);
+if (BOOT.time) setTimeOfDay(BOOT.time);
+if (BOOT.weather) setWeather(BOOT.weather);
+if (BOOT.time || BOOT.weather){
+  // land on the requested state immediately -- a boot-time cross-fade
+  // would leave a headless capture showing whatever the default was
+  timeTrans.t = 1; CUR_TIME = cloneTimeState(timeTrans.to);
+  weatherTrans.t = 1; CUR_WEATHER = cloneWeatherState(weatherTrans.to);
+}
+if (BOOT.labels === '1'){
+  labelsOn = true;
+  document.getElementById('labelToggle').checked = true;
+}
+if (BOOT.residents === '1'){
+  residentsOn = true;
+  document.getElementById('residentToggle').checked = true;
+  regenerateResidents();
+}
+if (bootNum('az') !== null) orbAz = bootNum('az');
+if (bootNum('el') !== null) orbEl = Math.max(EL_MIN, Math.min(EL_MAX, bootNum('el')));
+if (bootNum('zoom') !== null){
+  var bz = Math.max(0, Math.min(1, bootNum('zoom')));
+  orbDist = ZMAX - bz * (ZMAX - ZMIN);
+}
+if (bootNum('panx') !== null) orbTgtX = bootNum('panx');
+if (bootNum('panz') !== null) orbTgtZ = bootNum('panz');
+clampPan();
+curAz = orbAz; curEl = orbEl; curDist = orbDist;
+curTgtX = orbTgtX; curTgtZ = orbTgtZ;
+
 layout();
 placeCamera(1);
+updateCamDir();
+lastReveal = computeReveal();
+updateFade(lastReveal, 1);
+updateRevealUI(lastReveal);
+updateLabelVisibility();
 
 stepTransitions(0); applyEnvironment(); updateMountains(); // paint the correct sky before the first frame
 
