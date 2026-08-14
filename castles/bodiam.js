@@ -1484,6 +1484,331 @@ function buildBodiam(){
     bridgePier(-0.9, z, -0.02); bridgePier(0.9, z, -0.02);
   })();
 
+  /* ================================================================ *
+   * LIVESTOCK: 厩舎の馬、中庭の家禽、鳩小屋、堀の水鳥、犬と猫
+   * ================================================================ *
+   * 中世の城は防御施設であると同時に自給的な「屋敷農場」でもあった。
+   * 北棟の厩舎には領主と従者の乗馬が繋がれ、中庭の隅では鶏が飼われ、
+   * 鳩小屋(dovecote)は冬場の生肉・卵と、畑の肥料になる糞を供給した
+   * (鳩の飼育権は領主の特権)。犬は猟犬兼番犬、猫は穀倉の鼠捕りとして
+   * 家政記録に現れる。堀の白鳥は身分の標識でもある -- 中世イングランド
+   * では白鳥は「国王の鳥」で、飼育には特許が必要だった。
+   *
+   * 実装方針:
+   *  - 種ごとにジオメトリとマテリアルを共有する。鶏1羽は7メッシュだが
+   *    そのバッファは全羽で1組しかない(下の GEO / MATS プール)。
+   *    mkBox/mkCyl はメッシュごとに新しい BufferGeometry を作るので、
+   *    量産する動物にはあえて使わず、共有ジオメトリ + new T.Mesh にする。
+   *  - 姿勢・向きのばらつきは決定論的に置く(Math.random は使わない)。
+   *    リロードごとに配置が変わると比較スクリーンショットが撮れない。
+   *  - 屋内の動物は interiorGroup(フェードしない)に入れる。カット
+   *    アウェイで厩舎の壁が消えたとき、中の馬がそのまま見えるため。
+   *    堀の水鳥は城外なので group 直下に置き、常時表示する。
+   *  - 色はパレット冒頭の露出予算に従う(どのチャンネルも 0x77 以下)。
+   *    白鳥・葦毛馬の「白」も 0x76 止まりで、乗算後に約230になる。
+   *  - 住人の歩行線(中庭 ±COURT_INNER の徘徊矩形、衛兵の巡回ループ、
+   *    farmers が門 (0,-OW) へ向かう直線)と、菜園・薬草園・果樹の
+   *    外側にだけ置く。動物は静止でよく、毎フレームの更新はしない。
+   * ================================================================ */
+  (function livestock(){
+    // ---- shared geometry / material pools ----------------------------
+    var GEO = {}, MATS = {};
+    function gBox(w,h,d){ var k='B'+w+':'+h+':'+d; return GEO[k] || (GEO[k] = new T.BoxGeometry(w,h,d)); }
+    function gCyl(rt,rb,h,s){ var k='C'+rt+':'+rb+':'+h+':'+s; return GEO[k] || (GEO[k] = new T.CylinderGeometry(rt,rb,h,s)); }
+    function gSph(r,ws,hs){ var k='S'+r+':'+ws+':'+hs; return GEO[k] || (GEO[k] = new T.SphereGeometry(r,ws,hs)); }
+    function gCone(r,h,s){ var k='N'+r+':'+h+':'+s; return GEO[k] || (GEO[k] = new T.ConeGeometry(r,h,s)); }
+    function aMat(hex){ return MATS[hex] || (MATS[hex] = new T.MeshLambertMaterial({ color: hex })); }
+    function pt(parent, geo, mat, x, y, z, rz, sx, sy, sz){
+      var m = new T.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      if (rz) m.rotation.z = rz;
+      if (sx != null) m.scale.set(sx, sy, sz);
+      m.castShadow = true; m.receiveShadow = true;
+      parent.add(m);
+      return m;
+    }
+    // one animal = one Group at (x,y,z); every part is positioned in the
+    // animal's own local frame with local -X = "forward / head end"
+    function spawn(host, x, y, z, ry, scl){
+      var g = new T.Group();
+      g.position.set(x, y, z);
+      if (ry) g.rotation.y = ry;
+      if (scl && scl !== 1) g.scale.setScalar(scl);
+      host.add(g);
+      return g;
+    }
+    // deterministic 0..1 from a coordinate pair -- the flock loops below use
+    // it for per-head jitter so the yard never looks like a grid, while a
+    // reload reproduces exactly the same animals in the same attitudes
+    function h01(x, z, s){
+      var v = Math.sin(x*127.1 + z*311.7 + (s||0)*74.7) * 43758.5453;
+      return v - Math.floor(v);
+    }
+
+    var WFY = WING_FLOOR_Y;   // wing stone floor top (stable, hall, chambers)
+
+    /* ---- horse ------------------------------------------------------
+     * 11 meshes: barrel, shoulder, haunch, neck, mane, head, 4 legs, tail.
+     * Neck + head hang off a nested Group, so ONE rotation switches the
+     * whole animal between head-up, nose-in-the-manger and grazing without
+     * any per-pose coordinate maths (and the mane/head stay attached).
+     * pose: 0 alert, 1 head at the manger, 2 grazing, 3 lying down. */
+    var HIDE = [aMat(0x5b4029), aMat(0x66645b), aMat(0x6b4b2d), aMat(0x322b22)]; // 鹿毛/葦毛/栗毛/青毛
+    var MANE = [aMat(0x33261a), aMat(0x53514a), aMat(0x4a3320), aMat(0x24201a)];
+    function horse(host, x, y, z, ry, idx, pose, scl){
+      var g = spawn(host, x, y, z, ry, scl);
+      var mat = HIDE[idx], mane = MANE[idx], lying = pose === 3;
+      var bY = lying ? 0.52 : 1.18;
+      pt(g, gBox(2.00, lying ? 0.84 : 0.96, 0.88), mat, 0, bY, 0);
+      pt(g, gBox(0.62, 0.34, 0.76), mat, -0.84, bY + 0.10, 0);
+      pt(g, gBox(0.56, 0.30, 0.72), mat,  0.82, bY + 0.05, 0);
+      var neck = new T.Group();
+      neck.position.set(-0.92, bY + (lying ? 0.16 : 0.28), 0);
+      // +z rotation tips the neck's top toward -X (forward): 0.30 = head up
+      // at ~2.2m, 1.55 = muzzle level with a manger, 2.28 = nose on the floor
+      neck.rotation.z = lying ? 0.66 : (pose === 1 ? 1.55 : (pose === 2 ? 2.28 : 0.30));
+      g.add(neck);
+      pt(neck, gBox(0.52, 1.00, 0.50), mat, 0, 0.34, 0);
+      pt(neck, gBox(0.18, 0.90, 0.14), mane, 0.20, 0.40, 0);
+      pt(neck, gBox(0.82, 0.38, 0.42), mat, -0.28, 0.90, 0, 0.26);
+      if (lying){
+        [[-0.64,0.30],[-0.64,-0.30],[0.70,0.30],[0.70,-0.30]].forEach(function(p){
+          pt(g, gBox(0.70, 0.30, 0.26), mat, p[0], 0.16, p[1]);
+        });
+      } else {
+        [[-0.68,0.30],[-0.68,-0.30],[0.76,0.30],[0.76,-0.30]].forEach(function(p){
+          pt(g, gCyl(0.11, 0.13, 0.92, 6), mat, p[0], 0.46, p[1]);
+        });
+      }
+      pt(g, gBox(0.15, 0.66, 0.15), mane, 1.02, bY - 0.06, 0, -0.55);
+      return g;
+    }
+
+    /* ---- domestic fowl (hen / cockerel) -----------------------------
+     * 7 meshes. `peck` drops the head to the ground; `cock` makes it a
+     * bigger bird with a sickle tail and a full comb.
+     * The base bird is drawn at ~0.35m (life size) and then scaled 1.35:
+     * at the courtyard's default framing a true-to-scale hen is about six
+     * pixels of mud-brown and simply disappears, so the flock is drawn a
+     * third over size -- the same latitude the courtyard fruit trees and
+     * the moat's render width already take for legibility. */
+    var FOWL = [aMat(0x6a5334), aMat(0x6c6a5e), aMat(0x4b4038)];  // 赤鶏 / 白鶏 / 黒鶏
+    var COMB = aMat(0x76291f), BEAK = aMat(0x6e5a24);
+    function fowl(host, x, y, z, ry, idx, peck, cock){
+      var g = spawn(host, x, y, z, ry, cock ? 1.70 : 1.35);
+      var b = FOWL[idx];
+      pt(g, gSph(0.16, 6, 4), b, 0, 0.30, 0, 0, 1.20, 0.98, 0.94);
+      var hx = peck ? -0.25 : -0.16, hy = peck ? 0.15 : 0.47;
+      pt(g, gSph(0.078, 5, 4), b, hx, hy, 0);
+      pt(g, gBox(0.05, cock ? 0.10 : 0.06, 0.03), COMB, hx, hy + (cock ? 0.10 : 0.08), 0);
+      pt(g, gCone(0.035, 0.10, 4), BEAK, hx - 0.10, hy - 0.01, 0, Math.PI/2);
+      pt(g, gBox(cock ? 0.20 : 0.13, cock ? 0.28 : 0.17, 0.07), b, 0.20, cock ? 0.46 : 0.40, 0, -0.55);
+      [0.055, -0.055].forEach(function(lz){
+        pt(g, gCyl(0.02, 0.02, 0.20, 4), BEAK, 0.01, 0.10, lz);
+      });
+      return g;
+    }
+
+    /* ---- waterfowl: 0 mallard drake, 1 duck, 2 mute swan, 3 goose ----
+     * 5 meshes. Sits with the group origin ON the water plane, so the
+     * flattened body sphere is half submerged exactly like a real bird. */
+    function waterBird(host, x, y, z, ry, kind){
+      var g = spawn(host, x, y, z, ry);
+      var B  = [aMat(0x5a5348), aMat(0x584a38), aMat(0x767470), aMat(0x6a6658)][kind];
+      var H  = [aMat(0x27452e), aMat(0x584a38), aMat(0x767470), aMat(0x3a352c)][kind];
+      var BK = [aMat(0x6a6a2c), aMat(0x585030), aMat(0x763a18), aMat(0x6a6a2c)][kind];
+      var s = kind === 2 ? 1.65 : (kind === 3 ? 1.35 : 1.15);
+      var neckH = (kind === 2 ? 0.62 : (kind === 3 ? 0.34 : 0.19)) * s;
+      var nx = -0.24*s, ny = 0.12*s, tilt = 0.22;
+      var hx = nx - Math.sin(tilt)*neckH, hy = ny + Math.cos(tilt)*neckH;
+      pt(g, gSph(0.20, 6, 4), B, 0, 0.10*s, 0, 0, 1.50*s, 0.80*s, 0.95*s);
+      pt(g, gCyl(0.05*s, 0.07*s, neckH, 5), H, (nx+hx)/2, (ny+hy)/2, 0, tilt);
+      pt(g, gSph(0.085*s, 5, 4), H, hx, hy, 0);
+      pt(g, gCone(0.05*s, 0.16*s, 4), BK, hx - 0.10*s, hy - 0.01, 0, Math.PI/2);
+      pt(g, gBox(0.26*s, 0.10*s, 0.14*s), B, 0.30*s, 0.16*s, 0, -0.35);
+      return g;
+    }
+
+    /* ---- hound / watchdog (11 meshes) ------------------------------- */
+    var DOGM = [aMat(0x5c4a33), aMat(0x3b332a), aMat(0x6a6153)];
+    function dog(host, x, y, z, ry, idx, lying){
+      var g = spawn(host, x, y, z, ry);
+      var m = DOGM[idx], bY = lying ? 0.20 : 0.46;
+      pt(g, gBox(0.66, 0.26, 0.24), m, 0, bY, 0);
+      pt(g, gBox(0.26, 0.30, 0.26), m, -0.32, bY + 0.05, 0);
+      pt(g, gBox(0.22, 0.20, 0.20), m, -0.52, bY + 0.22, 0);
+      pt(g, gBox(0.17, 0.10, 0.11), m, -0.68, bY + 0.16, 0);
+      [0.09, -0.09].forEach(function(ez){ pt(g, gBox(0.06, 0.13, 0.09), m, -0.50, bY + 0.36, ez); });
+      if (lying){
+        [[-0.22,0.14],[-0.22,-0.14],[0.22,0.14],[0.22,-0.14]].forEach(function(p){
+          pt(g, gBox(0.34, 0.12, 0.11), m, p[0], 0.06, p[1]);
+        });
+      } else {
+        [[-0.22,0.11],[-0.22,-0.11],[0.24,0.11],[0.24,-0.11]].forEach(function(p){
+          pt(g, gCyl(0.045, 0.05, 0.34, 5), m, p[0], 0.17, p[1]);
+        });
+      }
+      pt(g, gBox(0.10, 0.34, 0.08), m, 0.36, bY + 0.10, 0, -0.9);
+      return g;
+    }
+
+    /* ---- cat, curled up asleep (5 meshes) --------------------------- */
+    var CATM = [aMat(0x554736), aMat(0x2e2a24), aMat(0x666055)];
+    function cat(host, x, y, z, ry, idx){
+      var g = spawn(host, x, y, z, ry);
+      var m = CATM[idx];
+      pt(g, gSph(0.17, 6, 4), m, 0, 0.13, 0, 0, 1.25, 0.72, 1.05);
+      pt(g, gSph(0.085, 5, 4), m, -0.16, 0.17, 0.06);
+      pt(g, gCone(0.04, 0.07, 3), m, -0.20, 0.26, 0.11);
+      pt(g, gCone(0.04, 0.07, 3), m, -0.13, 0.26, 0.02);
+      pt(g, gCyl(0.035, 0.03, 0.44, 5), m, 0.10, 0.07, -0.15, Math.PI/2);
+      return g;
+    }
+
+    /* ---- pigeon (3 meshes) ------------------------------------------ */
+    var DOVEM = [aMat(0x565b64), aMat(0x6a6862), aMat(0x3f4149)];
+    function pigeon(host, x, y, z, ry, idx){
+      var g = spawn(host, x, y, z, ry, 1.25);
+      var m = DOVEM[idx];
+      pt(g, gSph(0.095, 5, 4), m, 0, 0.10, 0, 0, 1.50, 1.00, 1.00);
+      pt(g, gSph(0.055, 5, 4), m, -0.12, 0.17, 0);
+      pt(g, gBox(0.14, 0.05, 0.08), m, 0.16, 0.10, 0, -0.25);
+      return g;
+    }
+
+    /* ---- hen house: a boarded coop on staddle legs, with a pop-hole
+     * and a ramp. Kept small (1.7m) -- it is a courtyard fitting, not a
+     * building, and Bodiam's ward is only 22.8m across. */
+    var COOP = aMat(0x6b5236), COOP_DK = aMat(0x4a3a26), HOLE = aMat(0x1d1811);
+    function henHouse(host, x, y, z, ry){
+      var g = spawn(host, x, y, z, ry);
+      pt(g, gBox(1.70, 0.85, 1.20), COOP, 0, 0.62, 0);
+      pt(g, gBox(1.86, 0.14, 1.36), COOP_DK, 0, 1.11, 0);
+      pt(g, gBox(1.10, 0.10, 1.44), COOP_DK, -0.42, 1.36, 0,  0.62);
+      pt(g, gBox(1.10, 0.10, 1.44), COOP_DK,  0.42, 1.36, 0, -0.62);
+      [-0.62, 0.62].forEach(function(lx){ [-0.44, 0.44].forEach(function(lz){
+        pt(g, gBox(0.12, 0.42, 0.12), COOP_DK, lx, 0.21, lz);
+      });});
+      pt(g, gBox(0.10, 0.34, 0.30), HOLE, -0.86, 0.60, 0.26);
+      pt(g, gBox(1.15, 0.07, 0.42), COOP_DK, -1.40, 0.26, 0.26, 0.42);
+      return g;
+    }
+
+    /* ---- dovecote: a post-mounted timber cote with a landing board,
+     * six nest holes and a pyramid cap. A free-standing stone columbarium
+     * would swallow this courtyard, so the smaller post type is used.
+     * Ground footprint is one 0.16m post, which is why it can stand in
+     * the south planting strip without touching a bed or a walking line. */
+    var COTE = aMat(0x6d6553), COTE_DK = aMat(0x494335);
+    function dovecote(host, x, y, z){
+      var g = spawn(host, x, y, z, 0);
+      pt(g, gCyl(0.13, 0.16, 2.30, 8), COOP_DK, 0, 1.15, 0);
+      [-1, 1].forEach(function(s){ pt(g, gBox(0.72, 0.11, 0.11), COOP_DK, s*0.28, 2.02, 0, s*0.72); });
+      pt(g, gBox(1.60, 0.10, 1.40), COTE_DK, 0, 2.32, 0);
+      pt(g, gBox(1.20, 1.00, 1.06), COTE, 0, 2.87, 0);
+      [-1, 1].forEach(function(s){
+        [-0.34, 0, 0.34].forEach(function(oz){
+          pt(g, gBox(0.10, 0.20, 0.16), HOLE, s*0.62, 3.02, oz);
+        });
+      });
+      pt(g, gBox(1.44, 0.10, 1.30), COTE_DK, 0, 3.42, 0);
+      var cap = pt(g, gCone(0.98, 0.62, 4), COTE_DK, 0, 3.78, 0);
+      cap.rotation.y = Math.PI/4;
+      pt(g, gCyl(0.05, 0.05, 0.26, 6), COTE_DK, 0, 4.20, 0);
+      return g;
+    }
+
+    /* ================= NORTH RANGE: the stable ======================= *
+     * Four loose boxes were already boarded out between the stall posts
+     * at x = -5.4 / -9.2 / -12.6 / -16.4 (z -19.7..-16.7), with mangers
+     * on the courtyard side at z = -15.7. Each horse therefore stands
+     * ALONG Z (ry = pi/2 puts its head end at +Z, i.e. facing the manger)
+     * and sits between two posts, never on one. */
+    var STALL = [
+      [ -7.60, -18.10,  0.00, 0, 1 ],  // 鹿毛、飼葉桶に首を伸ばす
+      [-10.90, -18.20, -0.07, 1, 0 ],  // 葦毛、頭を上げて立つ
+      [-14.30, -18.10,  0.05, 2, 2 ],  // 栗毛、藁をついばむ
+      [-18.00, -18.20,  0.00, 3, 3 ]   // 青毛、伏せて休む
+    ];
+    STALL.forEach(function(s){ horse(interiorGroup, s[0], WFY, s[1], Math.PI/2 + s[2], s[3], s[4]); });
+    // the stable cat, asleep on top of the corner hay pile (top = WFY+1.425)
+    cat(interiorGroup, -18.40, WFY + 1.43, -12.80, 0.85, 0);
+    // the yard dog, standing by the water trough at the stable door
+    dog(interiorGroup, -5.55, WFY, -13.45, 2.25, 0, false);
+
+    /* ================= COURTYARD: the poultry yard =================== *
+     * Everything here is in the SOUTH planting strip (z 8.85..11.4),
+     * which no resident ever enters: the wander rect is capped at
+     * |z| <= COURT_INNER (7.5) and the farmers' line to the gate runs
+     * NORTH. The strip's own occupants are the two long beds at x = +/-6.6
+     * and the woodpile at x 0.3..1.5, so the coop, the cote and the birds
+     * all sit in the two gaps between them. */
+    henHouse(interiorGroup, 3.00, 0, 10.20, -0.12);
+    dovecote(interiorGroup, -2.60, 0, 10.25);
+    // hens and one cockerel, scratching round the coop. `peck` alternates
+    // off the coordinate hash so no two neighbours share an attitude.
+    [[ 1.90, 9.55, 0], [ 4.25, 9.45, 1], [ 2.10, 11.00, 0],
+     [-1.15, 9.60, 1], [-3.70, 10.85, 2], [ 5.20, 10.10, 1]].forEach(function(p){
+      var r = h01(p[0], p[1], 3);
+      fowl(interiorGroup, p[0], 0, p[1], r*6.283, p[2], r > 0.42, false);
+    });
+    fowl(interiorGroup, 4.60, 0, 10.80, -2.05, 0, false, true);
+    // the cote's own flock: three on the landing board / eaves, two down
+    // on the grass under it
+    pigeon(interiorGroup, -3.20, 2.37, 10.55,  1.05, 0);
+    pigeon(interiorGroup, -2.05, 2.37,  9.75, -1.80, 1);
+    pigeon(interiorGroup, -2.00, 3.47, 10.60,  0.40, 0);
+    pigeon(interiorGroup, -1.85, 0.00,  9.30,  0.40, 2);
+    pigeon(interiorGroup, -3.45, 0.00,  9.90, -1.10, 0);
+
+    /* ================= INDOORS ======================================= */
+    // a hound asleep at the Great Hall hearth (the hall floor is rushes,
+    // and the hearth is at z = wingZ1-0.35, so this is clear of both the
+    // trestles at z = sZmid+/-1.1 and the fire itself)
+    dog(interiorGroup, 5.00, WFY, 18.50, 1.90, 0, true);
+    // ...and the lord's cat, curled by the chamber hearth in the east range.
+    // NOT on the bed: the canopy tester over it (y 2.35) is opaque, and this
+    // viewer is looked at from above more often than not, so a cat up there
+    // would simply never be seen.
+    cat(interiorGroup, 18.55, WFY, -5.55, -0.70, 1);
+
+    /* ================= THE MOAT ====================================== *
+     * Open water runs from ISLAND_HALF+bankWidthIn (24.2) out to
+     * MOAT_OUTER-bankWidthOut (56.3) on every side. The birds keep to the
+     * inner half of that band so they read at the default zoom, and clear
+     * the two north bridge spans (|x| < 1.7), the octagon (r 5 at z =
+     * octZ) and the south bridge. They go in `group`, not interiorGroup:
+     * they are outside the castle, so no cutaway tier should touch them. */
+    [[-10.50, -28.50,  0.50], [-13.20, -30.20, 2.30], [-8.20, -31.00, -1.10]]
+      .forEach(function(p){ waterBird(group, p[0], WATER_Y, p[1], p[2], 2); });   // 白鳥
+    [[  8.50, -27.50,  1.60, 0], [ 10.40, -29.00, -0.40, 1], [ 12.20, -26.60, 2.60, 0],
+     [-27.50,   7.00,  1.20, 1], [ 28.00,  -6.50, -2.00, 0], [  6.00,  28.00, 0.90, 1],
+     [ -5.50,  29.40, -1.50, 0]]
+      .forEach(function(p){ waterBird(group, p[0], WATER_Y, p[1], p[2], p[3]); }); // 鴨
+    // a pair of geese on the west arm. (They are on the WATER, not on the
+    // island: ISLAND_HALF is only OW+0.8, i.e. the curtain rises almost
+    // straight out of the moat and there is no dry apron to stand on.)
+    waterBird(group, -26.40, WATER_Y, -14.20,  0.80, 3);
+    waterBird(group, -27.30, WATER_Y, -12.60, -0.60, 3);
+
+    /* ---- tooltips (see registerPick, section 0). Animal volumes are
+     * smaller than the room volumes they sit inside, and the raycast takes
+     * the NEAREST hit, so hovering a horse gives the horse and hovering
+     * the boards either side still gives 厩舎. */
+    registerPick(pickables, 'room', -11.00, WFY + 1.30, -18.10, 12.6, 2.6, 2.6,
+      '馬 Horses', '厩舎の馬房につながれた乗馬。馬は城で最も高価な資産のひとつで、軍馬(デストリア)・旅用の乗馬(パルフリー)・荷馬が別々に飼われた。');
+    registerPick(pickables, 'room', 3.00, 0.95, 10.20, 2.4, 1.9, 2.0,
+      '鶏小屋 Hen House', '中庭南辺の鶏小屋。卵と鶏肉は城の日常食で、家禽の世話は下働きの女性たちの仕事だった。');
+    registerPick(pickables, 'room', -2.60, 3.00, 10.25, 1.9, 1.9, 1.8,
+      '鳩小屋 Dovecote', '柱上の鳩小屋。中世の鳩小屋は冬場の生肉と卵、そして畑の肥料になる糞を生んだ。飼育は領主の特権で、荘園の格を示す設備でもあった。');
+    registerPick(pickables, 'room', 18.55, WFY + 0.55, -5.55, 1.6, 1.4, 1.6,
+      '猫 Cat', '領主居室の猫。城では穀物を食い荒らす鼠を捕るため、厩舎・穀倉・厨房に猫が飼われた。');
+    registerPick(pickables, 'room', 5.00, WFY + 0.60, 18.50, 1.7, 1.6, 1.7,
+      '猟犬 Hound', '大広間の炉端で眠る猟犬。狩猟は領主の身分の証で、猟犬は屋内で人と同じ広間に寝起きした。');
+    registerPick(pickables, 'structure', -10.60, WATER_Y + 0.80, -29.80, 8.0, 2.0, 6.0,
+      '白鳥 Swans', '堀に浮かぶ白鳥。中世イングランドでは白鳥は国王の鳥とされ、飼育には特許が必要な身分の標識だった。');
+  })();
+
   /* -------------------------------------------------------------- *
    * info payload (room list metadata; not rendered as a standalone
    * legend panel -- room names now surface via the always-on label

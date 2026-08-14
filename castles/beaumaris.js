@@ -1864,6 +1864,404 @@ function buildBeaumaris(){
       'メナイ海峡へ通じる潮汐水路。ボーマリスが海に開いた補給拠点として機能したことを示す(経路の詳細は推定)。');
   })(dockG);
 
+  /* ================================================================ *
+   * LIVESTOCK & FOWL  (家畜・家禽)
+   * ================================================================ *
+   * ESTIMATED throughout. No excavated stock record exists for Beaumaris'
+   * wards -- what IS general is that a garrisoned royal castle kept its
+   * own horses, poultry, a few beasts on the hoof and a dovecote, and that
+   * the constable's household ate from them daily. The west range already
+   * carries the stable and harness store (also estimated), so the horses
+   * simply fill the loose-boxes that were built empty; everything else
+   * lives in the EAST strip of the inner ward, between the orchard row at
+   * x = 13 and the east range's courtyard face at x = 15.6.
+   *
+   * Why that strip: life.courtyard's inner-ward rectangle stops at
+   * maxX = 11.2 (it was already pulled in to clear the orchard), so it is
+   * the one piece of the ward no resident ever walks through -- the same
+   * reason the kitchen garden and the herb garden could be put west of
+   * GARD_X1. Nothing here moves a bed, a tree, a path or a pick volume.
+   *
+   * Implementation notes:
+   *  - one geometry + one material per species part, shared by every head
+   *    (the GEO / MATS pools below). mkBox/mkCyl allocate a fresh
+   *    BufferGeometry per mesh, so they are deliberately NOT used here.
+   *  - poses and headings vary deterministically (coordinate hash h01);
+   *    Math.random is avoided so two renders of the same URL match.
+   *  - indoor animals go in interiorGroup, which never fades, so the
+   *    horses stay visible the moment the cutaway opens the west range.
+   *    Moat and dock birds go in `group` / `dockG` -- they are outside the
+   *    shell and no fade tier should touch them.
+   *  - every base colour obeys the interior palette's clipping ceiling
+   *    (brightest channel <= ~0x77), so even the "white" swan and the
+   *    fleece stay under the ~2.0x day multiplier instead of blowing out.
+   * ================================================================ */
+  (function livestock(){
+    // ---- shared geometry / material pools ----------------------------
+    var GEO = {}, MATS = {};
+    function gBox(w,h,d){ var k='B'+w+':'+h+':'+d; return GEO[k] || (GEO[k] = new T.BoxGeometry(w,h,d)); }
+    function gCyl(rt,rb,h,s){ var k='C'+rt+':'+rb+':'+h+':'+s; return GEO[k] || (GEO[k] = new T.CylinderGeometry(rt,rb,h,s)); }
+    function gSph(r,ws,hs){ var k='S'+r+':'+ws+':'+hs; return GEO[k] || (GEO[k] = new T.SphereGeometry(r,ws,hs)); }
+    function gCone(r,h,s){ var k='N'+r+':'+h+':'+s; return GEO[k] || (GEO[k] = new T.ConeGeometry(r,h,s)); }
+    function aMat(hex){ return MATS[hex] || (MATS[hex] = new T.MeshLambertMaterial({ color: hex })); }
+    function pt(parent, geo, mat, x, y, z, rz, sx, sy, sz){
+      var m = new T.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      if (rz) m.rotation.z = rz;
+      if (sx != null) m.scale.set(sx, sy, sz);
+      m.castShadow = true; m.receiveShadow = true;
+      parent.add(m);
+      return m;
+    }
+    // one animal = one Group; every part is laid out in the animal's own
+    // frame with local -X = "forward / head end"
+    function spawn(host, x, y, z, ry, scl){
+      var g = new T.Group();
+      g.position.set(x, y, z);
+      if (ry) g.rotation.y = ry;
+      if (scl && scl !== 1) g.scale.setScalar(scl);
+      host.add(g);
+      return g;
+    }
+    function h01(x, z, s){
+      var v = Math.sin(x*127.1 + z*311.7 + (s||0)*74.7) * 43758.5453;
+      return v - Math.floor(v);
+    }
+
+    /* ---- horse (11 meshes) ------------------------------------------
+     * Neck + head hang off a nested Group so ONE rotation switches the
+     * animal between head-up, muzzle-at-the-manger and grazing.
+     * pose: 0 alert, 1 head at the manger, 2 grazing, 3 lying down. */
+    var HIDE = [aMat(0x4a3a2a), aMat(0x5e523f), aMat(0x66645b), aMat(0x32291f)];
+    var MANE = [aMat(0x2a2118), aMat(0x3b3226), aMat(0x53514a), aMat(0x231d16)];
+    function horse(host, x, y, z, ry, idx, pose, scl){
+      var g = spawn(host, x, y, z, ry, scl);
+      var mat = HIDE[idx], mane = MANE[idx], lying = pose === 3;
+      var bY = lying ? 0.52 : 1.18;
+      pt(g, gBox(2.00, lying ? 0.84 : 0.96, 0.88), mat, 0, bY, 0);
+      pt(g, gBox(0.62, 0.34, 0.76), mat, -0.84, bY + 0.10, 0);
+      pt(g, gBox(0.56, 0.30, 0.72), mat,  0.82, bY + 0.05, 0);
+      var neck = new T.Group();
+      neck.position.set(-0.92, bY + (lying ? 0.16 : 0.28), 0);
+      neck.rotation.z = lying ? 0.66 : (pose === 1 ? 1.55 : (pose === 2 ? 2.28 : 0.30));
+      g.add(neck);
+      pt(neck, gBox(0.52, 1.00, 0.50), mat, 0, 0.34, 0);
+      pt(neck, gBox(0.18, 0.90, 0.14), mane, 0.20, 0.40, 0);
+      pt(neck, gBox(0.82, 0.38, 0.42), mat, -0.28, 0.90, 0, 0.26);
+      if (lying){
+        [[-0.64,0.30],[-0.64,-0.30],[0.70,0.30],[0.70,-0.30]].forEach(function(p){
+          pt(g, gBox(0.70, 0.30, 0.26), mat, p[0], 0.16, p[1]);
+        });
+      } else {
+        [[-0.68,0.30],[-0.68,-0.30],[0.76,0.30],[0.76,-0.30]].forEach(function(p){
+          pt(g, gCyl(0.11, 0.13, 0.92, 6), mat, p[0], 0.46, p[1]);
+        });
+      }
+      pt(g, gBox(0.15, 0.66, 0.15), mane, 1.02, bY - 0.06, 0, -0.55);
+      return g;
+    }
+
+    /* ---- domestic fowl (7 meshes) ------------------------------------
+     * Drawn life size (~0.35m) then scaled 1.35: a true-to-scale hen is a
+     * six-pixel smudge at the ward's default framing, so the flock takes
+     * the same legibility latitude the courtyard trees and the moat's
+     * render width already do. `cock` = bigger bird, sickle tail, comb. */
+    var FOWL = [aMat(0x6a5334), aMat(0x6c6a5e), aMat(0x4b4038)];
+    var COMB = aMat(0x76291f), BEAK = aMat(0x6e5a24);
+    function fowl(host, x, y, z, ry, idx, peck, cock){
+      var g = spawn(host, x, y, z, ry, cock ? 1.70 : 1.35);
+      var b = FOWL[idx];
+      pt(g, gSph(0.16, 6, 4), b, 0, 0.30, 0, 0, 1.20, 0.98, 0.94);
+      var hx = peck ? -0.25 : -0.16, hy = peck ? 0.15 : 0.47;
+      pt(g, gSph(0.078, 5, 4), b, hx, hy, 0);
+      pt(g, gBox(0.05, cock ? 0.10 : 0.06, 0.03), COMB, hx, hy + (cock ? 0.10 : 0.08), 0);
+      pt(g, gCone(0.035, 0.10, 4), BEAK, hx - 0.10, hy - 0.01, 0, Math.PI/2);
+      pt(g, gBox(cock ? 0.20 : 0.13, cock ? 0.28 : 0.17, 0.07), b, 0.20, cock ? 0.46 : 0.40, 0, -0.55);
+      [0.055, -0.055].forEach(function(lz){
+        pt(g, gCyl(0.02, 0.02, 0.20, 4), BEAK, 0.01, 0.10, lz);
+      });
+      return g;
+    }
+
+    /* ---- waterfowl: 0 mallard drake, 1 duck, 2 mute swan, 3 goose ----
+     * 5 meshes. The group origin sits ON the water plane, so the flattened
+     * body sphere is half submerged the way a real bird floats. */
+    function waterBird(host, x, y, z, ry, kind){
+      var g = spawn(host, x, y, z, ry);
+      var B  = [aMat(0x5a5348), aMat(0x584a38), aMat(0x767470), aMat(0x6a6658)][kind];
+      var H  = [aMat(0x27452e), aMat(0x584a38), aMat(0x767470), aMat(0x3a352c)][kind];
+      var BK = [aMat(0x6a6a2c), aMat(0x585030), aMat(0x763a18), aMat(0x6a6a2c)][kind];
+      var s = kind === 2 ? 1.65 : (kind === 3 ? 1.35 : 1.15);
+      var neckH = (kind === 2 ? 0.62 : (kind === 3 ? 0.34 : 0.19)) * s;
+      var nx = -0.24*s, ny = 0.12*s, tilt = 0.22;
+      var hx = nx - Math.sin(tilt)*neckH, hy = ny + Math.cos(tilt)*neckH;
+      pt(g, gSph(0.20, 6, 4), B, 0, 0.10*s, 0, 0, 1.50*s, 0.80*s, 0.95*s);
+      pt(g, gCyl(0.05*s, 0.07*s, neckH, 5), H, (nx+hx)/2, (ny+hy)/2, 0, tilt);
+      pt(g, gSph(0.085*s, 5, 4), H, hx, hy, 0);
+      pt(g, gCone(0.05*s, 0.16*s, 4), BK, hx - 0.10*s, hy - 0.01, 0, Math.PI/2);
+      pt(g, gBox(0.26*s, 0.10*s, 0.14*s), B, 0.30*s, 0.16*s, 0, -0.35);
+      return g;
+    }
+
+    /* ---- sheep / goat (10 meshes). `graze` drops the head to the turf;
+     * `goat` swaps the woolly barrel for a leaner one and adds horns. */
+    var FLEECE = [aMat(0x6b675c), aMat(0x74705f), aMat(0x5d584c)];
+    var FACE = aMat(0x33302a), HORN = aMat(0x6a6252);
+    function sheep(host, x, y, z, ry, idx, graze, goat){
+      var g = spawn(host, x, y, z, ry);
+      var f = goat ? aMat(0x6a5c46) : FLEECE[idx];
+      pt(g, gSph(0.34, 6, 4), f, 0, 0.54, 0, 0, 1.35, goat ? 0.82 : 0.98, goat ? 0.86 : 1.0);
+      var hx = graze ? -0.52 : -0.46, hy = graze ? 0.22 : 0.66;
+      pt(g, gSph(0.13, 5, 4), FACE, hx, hy, 0, 0, 1.35, 1.0, 0.90);
+      pt(g, gBox(0.10, 0.09, 0.06), FACE, hx - 0.06, hy + 0.07,  0.11);
+      pt(g, gBox(0.10, 0.09, 0.06), FACE, hx - 0.06, hy + 0.07, -0.11);
+      if (goat){
+        pt(g, gCone(0.035, 0.26, 4), HORN, hx + 0.04, hy + 0.20,  0.07, -0.5);
+        pt(g, gCone(0.035, 0.26, 4), HORN, hx + 0.04, hy + 0.20, -0.07, -0.5);
+        pt(g, gCone(0.05, 0.16, 4), FACE, hx - 0.02, hy - 0.14, 0, Math.PI);   // beard
+      } else {
+        pt(g, gSph(0.20, 5, 4), f, 0.30, 0.68, 0, 0, 1.0, 0.85, 0.95);          // shoulder wool
+        pt(g, gBox(0.10, 0.16, 0.09), f, 0.44, 0.52, 0, -0.7);                  // short tail
+        pt(g, gBox(0.10, 0.10, 0.09), f, -0.30, 0.70, 0);                       // poll
+      }
+      [[-0.24,0.16],[-0.24,-0.16],[0.24,0.16],[0.24,-0.16]].forEach(function(p){
+        pt(g, gCyl(0.05, 0.055, 0.38, 5), FACE, p[0], 0.19, p[1]);
+      });
+      return g;
+    }
+
+    /* ---- pig (10 meshes). `scl` < 1 makes a piglet. ------------------- */
+    var PIGM = [aMat(0x6f5a50), aMat(0x59473e), aMat(0x746054)];
+    function pig(host, x, y, z, ry, idx, scl){
+      var g = spawn(host, x, y, z, ry, scl);
+      var m = PIGM[idx];
+      pt(g, gSph(0.30, 6, 4), m, 0, 0.46, 0, 0, 1.62, 0.95, 1.02);
+      pt(g, gBox(0.34, 0.32, 0.34), m, -0.56, 0.40, 0);
+      pt(g, gCyl(0.09, 0.10, 0.13, 6), m, -0.78, 0.34, 0, Math.PI/2);
+      pt(g, gBox(0.05, 0.13, 0.11), m, -0.50, 0.58,  0.12, -0.4);
+      pt(g, gBox(0.05, 0.13, 0.11), m, -0.50, 0.58, -0.12, -0.4);
+      [[-0.26,0.16],[-0.26,-0.16],[0.28,0.16],[0.28,-0.16]].forEach(function(p){
+        pt(g, gCyl(0.06, 0.07, 0.30, 5), m, p[0], 0.15, p[1]);
+      });
+      return g;
+    }
+
+    /* ---- hound / watchdog (11 meshes) ------------------------------- */
+    var DOGM = [aMat(0x5c4a33), aMat(0x3b332a), aMat(0x6a6153)];
+    function dog(host, x, y, z, ry, idx, lying){
+      var g = spawn(host, x, y, z, ry);
+      var m = DOGM[idx], bY = lying ? 0.20 : 0.46;
+      pt(g, gBox(0.66, 0.26, 0.24), m, 0, bY, 0);
+      pt(g, gBox(0.26, 0.30, 0.26), m, -0.32, bY + 0.05, 0);
+      pt(g, gBox(0.22, 0.20, 0.20), m, -0.52, bY + 0.22, 0);
+      pt(g, gBox(0.17, 0.10, 0.11), m, -0.68, bY + 0.16, 0);
+      [0.09, -0.09].forEach(function(ez){ pt(g, gBox(0.06, 0.13, 0.09), m, -0.50, bY + 0.36, ez); });
+      if (lying){
+        [[-0.22,0.14],[-0.22,-0.14],[0.22,0.14],[0.22,-0.14]].forEach(function(p){
+          pt(g, gBox(0.34, 0.12, 0.11), m, p[0], 0.06, p[1]);
+        });
+      } else {
+        [[-0.22,0.11],[-0.22,-0.11],[0.24,0.11],[0.24,-0.11]].forEach(function(p){
+          pt(g, gCyl(0.045, 0.05, 0.34, 5), m, p[0], 0.17, p[1]);
+        });
+      }
+      pt(g, gBox(0.10, 0.34, 0.08), m, 0.36, bY + 0.10, 0, -0.9);
+      return g;
+    }
+
+    /* ---- cat, curled up asleep (5 meshes) --------------------------- */
+    var CATM = [aMat(0x554736), aMat(0x2e2a24), aMat(0x666055)];
+    function cat(host, x, y, z, ry, idx){
+      var g = spawn(host, x, y, z, ry);
+      var m = CATM[idx];
+      pt(g, gSph(0.17, 6, 4), m, 0, 0.13, 0, 0, 1.25, 0.72, 1.05);
+      pt(g, gSph(0.085, 5, 4), m, -0.16, 0.17, 0.06);
+      pt(g, gCone(0.04, 0.07, 3), m, -0.20, 0.26, 0.11);
+      pt(g, gCone(0.04, 0.07, 3), m, -0.13, 0.26, 0.02);
+      pt(g, gCyl(0.035, 0.03, 0.44, 5), m, 0.10, 0.07, -0.15, Math.PI/2);
+      return g;
+    }
+
+    /* ---- pigeon (3 meshes) ------------------------------------------ */
+    var DOVEM = [aMat(0x565b64), aMat(0x6a6862), aMat(0x3f4149)];
+    function pigeon(host, x, y, z, ry, idx){
+      var g = spawn(host, x, y, z, ry, 1.25);
+      var m = DOVEM[idx];
+      pt(g, gSph(0.095, 5, 4), m, 0, 0.10, 0, 0, 1.50, 1.00, 1.00);
+      pt(g, gSph(0.055, 5, 4), m, -0.12, 0.17, 0);
+      pt(g, gBox(0.14, 0.05, 0.08), m, 0.16, 0.10, 0, -0.25);
+      return g;
+    }
+
+    /* ---- fittings: hen house, round dovecote, post-and-rail pen ------ */
+    var COOP = aMat(0x5c4a34), COOP_DK = aMat(0x43371f), HOLE = aMat(0x191712);
+    function henHouse(host, x, y, z, ry){
+      var g = spawn(host, x, y, z, ry);
+      pt(g, gBox(1.80, 0.90, 1.30), COOP, 0, 0.65, 0);
+      pt(g, gBox(1.98, 0.14, 1.46), COOP_DK, 0, 1.17, 0);
+      pt(g, gBox(1.16, 0.10, 1.54), COOP_DK, -0.44, 1.42, 0,  0.62);
+      pt(g, gBox(1.16, 0.10, 1.54), COOP_DK,  0.44, 1.42, 0, -0.62);
+      [-0.66, 0.66].forEach(function(lx){ [-0.48, 0.48].forEach(function(lz){
+        pt(g, gBox(0.12, 0.44, 0.12), COOP_DK, lx, 0.22, lz);
+      });});
+      pt(g, gBox(0.10, 0.36, 0.32), HOLE, -0.91, 0.62, 0.28);
+      pt(g, gBox(1.20, 0.07, 0.44), COOP_DK, -1.46, 0.27, 0.28, 0.42);
+      return g;
+    }
+    /* A round rubble-built dovecote with a conical slate cap and a lantern
+     * -- the standard free-standing form in Wales and the Marches, and the
+     * shape that reads instantly from directly above (the courtyard is
+     * usually seen from the air in this viewer). */
+    function dovecote(host, x, y, z){
+      var g = spawn(host, x, y, z, 0);
+      pt(g, gCyl(1.05, 1.20, 3.10, 12), paleMat, 0, 1.55, 0);
+      pt(g, gCyl(1.24, 1.24, 0.16, 12), aMat(0x53504a), 0, 1.30, 0);   // string course
+      pt(g, gBox(0.55, 0.90, 0.10), HOLE, 0, 0.65, 1.16);              // doorway
+      // three tiers of nest holes on the sunny (south / +Z) half
+      for (var t = 0; t < 3; t++){
+        for (var k = -2; k <= 2; k++){
+          var a = k * 0.42;
+          pt(g, gBox(0.16, 0.16, 0.10), HOLE,
+             Math.sin(a) * 1.10, 1.85 + t * 0.52, Math.cos(a) * 1.10);
+        }
+      }
+      var cap = pt(g, gCone(1.42, 1.15, 12), aMat(RANGE_ROOF_COL), 0, 3.68, 0);
+      cap.receiveShadow = true;
+      pt(g, gCyl(0.34, 0.34, 0.46, 8), paleMat, 0, 4.45, 0);           // lantern (birds' entry)
+      pt(g, gCone(0.48, 0.36, 8), aMat(RANGE_ROOF_COL), 0, 4.86, 0);
+      return g;
+    }
+    // post-and-rail enclosure, `open` = index of the side left as a gate
+    function pen(host, cx, cz, w, d, open){
+      var g = spawn(host, cx, 0, cz, 0);
+      var RAIL = aMat(0x51422e);
+      function run(len, px, pz, along){        // along: 0 = x, 1 = z
+        var n = Math.max(2, Math.round(len / 1.2));
+        for (var i = 0; i <= n; i++){
+          var t = -len/2 + len*i/n;
+          pt(g, gCyl(0.07, 0.08, 0.98, 5), RAIL, px + (along ? 0 : t), 0.49, pz + (along ? t : 0));
+        }
+        [0.38, 0.76].forEach(function(railY){
+          pt(g, along ? gBox(0.07, 0.07, len) : gBox(len, 0.07, 0.07), RAIL, px, railY, pz);
+        });
+      }
+      if (open !== 0) run(w, 0, -d/2, 0);
+      if (open !== 1) run(w, 0,  d/2, 0);
+      if (open !== 2) run(d, -w/2, 0, 1);
+      if (open !== 3) run(d,  w/2, 0, 1);
+      return g;
+    }
+
+    /* =============== WEST RANGE: the stable ========================== *
+     * The three loose-boxes at stallZ = -19.3 / -17.0 / -14.7 already had
+     * two horses in them (built above); the middle box was left empty so
+     * the boxes would read AS boxes. It is filled here, a fourth horse
+     * stands in the aisle east of the head posts (x -18.6..-16.0, so the
+     * animal runs along Z and clears both the posts and the range wall),
+     * and a foal stands beside the mare in the north box. */
+    horse(interiorGroup, -21.40, FY, -17.00, 0, 2, 1);            // 葦毛、飼葉桶に首を伸ばす
+    horse(interiorGroup, -17.30, FY, -18.00, Math.PI/2, 3, 0);    // 青毛、通路に立つ
+    horse(interiorGroup, -19.50, FY, -19.90, 0.28, 1, 2, 0.62);   // 仔馬、母馬のかたわらで草を食む
+    cat(interiorGroup, -17.60, FY + 0.90, -8.20, 0.9, 0);         // 馬具庫の飼葉箱の上、鼠捕りの猫
+    dog(interiorGroup, -11.20, 0, -13.60, 1.20, 0, false);        // 厩舎の戸口の番犬
+    cat(interiorGroup, -21.40, FY, 9.40, -0.6, 1);                // 厨房の炉端の猫
+
+    /* =============== INNER WARD, EAST STRIP: the farmyard ============ */
+    dovecote(interiorGroup, 13.60, 0, -17.60);
+    // the cote's own flock -- two on the string course, three on the turf
+    pigeon(interiorGroup, 12.55, 1.38, -16.95,  1.60, 0);
+    pigeon(interiorGroup, 14.55, 1.38, -18.30, -1.30, 1);
+    pigeon(interiorGroup, 12.10, 0.00, -19.40,  0.60, 0);
+    pigeon(interiorGroup, 14.80, 0.00, -19.90, -0.90, 2);
+    pigeon(interiorGroup, 13.20, 0.00, -15.40,  2.40, 1);
+
+    // holding pen: three sheep and a nanny goat, between the two orchard
+    // trees at z = -10.0 and z = -3.0 (their canopies stop at -8.45 / -4.45)
+    pen(interiorGroup, 13.50, -6.40, 3.30, 3.55, 2);
+    var crib = spawn(interiorGroup, 12.75, 0, -7.55, 0.3);                          // hay crib
+    pt(crib, gBox(1.30, 0.55, 0.70), aMat(0x51422e), 0, 0.30, 0);
+    pt(crib, gBox(1.16, 0.22, 0.58), strawMat, 0, 0.66, 0);
+    sheep(interiorGroup, 13.05, 0, -5.55,  1.90, 0, true,  false);
+    sheep(interiorGroup, 14.25, 0, -6.40, -1.20, 1, false, false);
+    sheep(interiorGroup, 13.30, 0, -7.10,  2.70, 2, true,  false);
+    sheep(interiorGroup, 14.35, 0, -5.10, -2.40, 0, false, true);   // 山羊
+
+    // pig sty: a boarded shelter and a sow with piglets
+    pen(interiorGroup, 13.50, 0.70, 3.10, 3.45, 2);
+    var styRoof = spawn(interiorGroup, 14.20, 0, 1.55, 0);                          // boarded shelter
+    pt(styRoof, gBox(1.55, 0.95, 1.70), COOP, 0, 0.48, 0);
+    pt(styRoof, gBox(1.75, 0.16, 1.90), COOP_DK, 0, 1.02, 0);
+    pig(interiorGroup, 13.00, 0,  0.10,  1.70, 0, 1.0);
+    pig(interiorGroup, 13.60, 0,  1.80, -1.40, 2, 0.92);
+    pig(interiorGroup, 12.65, 0,  1.35,  2.30, 1, 0.52);
+    pig(interiorGroup, 13.15, 0,  1.95, -2.60, 0, 0.48);
+    pig(interiorGroup, 12.80, 0, -0.60,  0.70, 1, 0.50);
+
+    // hen house at the south end of the strip, clear of the last orchard
+    // tree (canopy stops at z = 13.3)
+    henHouse(interiorGroup, 13.40, 0, 17.00, 0.10);
+    [[12.20, 15.60, 0], [14.55, 16.10, 1], [12.40, 19.20, 2], [14.20, 20.10, 0]].forEach(function(p){
+      var r = h01(p[0], p[1], 5);
+      fowl(interiorGroup, p[0], 0, p[1], r*6.283, p[2], r > 0.44, false);
+    });
+    fowl(interiorGroup, 14.45, 0, 18.70, -2.10, 0, false, true);      // 雄鶏
+    dog(interiorGroup, 12.60, 0, -12.90, 0.40, 1, true);              // 中庭の犬
+
+    /* =============== KITCHEN / HERB GARDEN: loose hens =============== *
+     * The clear strip between the kitchen-garden beds (which end at
+     * z = 1.5) and the herb garden's north hedge (which starts at 4.2),
+     * plus the service yard by the south gate. Both are west of
+     * life.courtyard's minX (GARD_X1+0.8 = -5.4), so no resident path
+     * crosses them. */
+    [[ -8.80, 2.90, 0], [-11.20, 3.40, 1], [-13.20, 2.70, 2],
+     [ -9.60, 15.40, 1], [-6.60, 17.20, 0], [-11.90, 17.60, 0]].forEach(function(p){
+      var r = h01(p[0], p[1], 9);
+      fowl(interiorGroup, p[0], 0, p[1], r*6.283, p[2], r > 0.40, false);
+    });
+
+    /* =============== THE MOAT ======================================== *
+     * The graded banks eat bankWidthIn (2.2) inside and bankWidthOut (2.6)
+     * outside, so the open water on the north face runs z = -51.9..-61.1.
+     * Birds keep to the middle of that band and clear the north causeway
+     * (|x| < 2.5). */
+    [[14.00, -55.50, 0.50], [17.50, -57.00, 2.30], [11.50, -57.60, -1.10]]
+      .forEach(function(p){ waterBird(group, p[0], WATER_Y, p[1], p[2], 2); });   // 白鳥
+    [[-15.00, -55.00,  1.20, 1], [-18.50, -56.80, -0.40, 0], [-12.00, -57.60, 2.60, 1],
+     [ 57.00,   8.00,  0.90, 0], [ 58.50,  -5.00, -1.60, 1]]
+      .forEach(function(p){ waterBird(group, p[0], WATER_Y, p[1], p[2], p[3]); }); // 鴨
+
+    /* =============== THE TIDAL DOCK ================================== *
+     * dockG is the whole dock, shifted DOCK_X west, so these are LOCAL
+     * coordinates like every other mesh inside it. The basin water sits at
+     * GROUND_Y+0.11 (see the dock note above -- it is drawn above the
+     * ground collar, not at the moat's level). Kept clear of the jetty
+     * (local x -11.5..-0.5, z 74.5..77.9) and the moored vessel. */
+    var DOCK_SURF = GROUND_Y + 0.11;
+    [[5.50, 70.50,  0.60, 3], [7.00, 72.20, -1.40, 3], [4.20, 73.60, 2.10, 3]]
+      .forEach(function(p){ waterBird(dockG, p[0], DOCK_SURF, p[1], p[2], p[3]); });  // 鵞鳥
+    [[3.00, 85.60,  1.10, 0], [5.20, 86.60, -0.70, 1], [7.20, 84.40, 2.40, 0],
+     [-5.00, 86.20, 0.30, 1], [-7.60, 85.00, -2.20, 0], [8.20, 68.60, 1.70, 1]]
+      .forEach(function(p){ waterBird(dockG, p[0], DOCK_SURF, p[1], p[2], p[3]); });  // 鴨
+
+    /* ---- tooltips. Animal volumes are smaller than the room volumes
+     * they sit inside and the raycast takes the nearest hit, so hovering a
+     * horse gives the horse while the boards either side still give 厩舎. */
+    registerPick(pickables, 'room', -20.20, FY + 1.30, -17.20, 6.4, 2.6, 6.6,
+      '馬 Horses', '西棟の馬房につながれた乗馬と仔馬。ボーマリスの守備隊は馬を常備し、馬は城で最も高価な資産のひとつだった(頭数・品種は推定)。');
+    registerPick(pickables, 'room', 13.60, 2.20, -17.60, 2.8, 4.4, 2.8,
+      '鳩小屋 Dovecote', '円形の石造鳩小屋(推定)。中世の鳩小屋は冬場の生肉と卵、そして畑の肥料になる糞を供給し、その保有は領主・王権の特権だった。');
+    registerPick(pickables, 'room', 13.50, 0.90, -6.40, 3.6, 1.8, 3.8,
+      '家畜囲い Livestock Pen', '羊と山羊を入れた柵囲い(推定)。羊毛・乳・肉に加え、羊皮紙の材料も城内でまかなえた。');
+    registerPick(pickables, 'room', 13.50, 0.85, 0.70, 3.4, 1.7, 3.7,
+      '豚小屋 Pig Sty', '豚小屋(推定)。豚は残飯で育ち、秋に屠って塩漬け・燻製にすることで冬の蛋白源になった。');
+    registerPick(pickables, 'room', 13.40, 0.95, 17.00, 2.6, 2.0, 2.2,
+      '鶏小屋 Hen House', '中庭東辺の鶏小屋(推定)。卵と鶏肉は城の日常食で、家禽の世話は下働きの女性たちの仕事だった。');
+    registerPick(pickables, 'structure', 14.30, WATER_Y + 0.80, -56.70, 9.0, 2.0, 5.0,
+      '白鳥 Swans', '堀に浮かぶ白鳥。中世イングランド・ウェールズでは白鳥は国王の鳥とされ、飼育には特許が必要な身分の標識だった。');
+    registerPick(pickables, 'structure', DOCK_X + 5.5, GROUND_Y + 0.80, 71.60, 7.0, 1.8, 5.0,
+      '水鳥 Waterfowl', '潮汐ドックの水面に集まる鵞鳥と鴨。城の家禽は堀やドックの水辺に放たれ、番犬がわりに人の出入りを騒いで知らせもした。');
+  })();
+
   /* -------------------------------------------------------------- *
    * info payload + always-on labels
    * -------------------------------------------------------------- */
