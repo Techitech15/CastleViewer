@@ -54,7 +54,12 @@ function buildBodiam(){
   var BANK_MID_COL = 0x4d5c33; // bank ramp, mid-slope
   var BANK_EDGE_COL= 0x2b2c1c; // bank ramp, wet silt right at the waterline
   var TILE_COL     = 0x7a5240;
-  var COURT_GRASS_COL = 0x6a8d4f; // central lawn, kept distinct from the wing stone floors
+  // central lawn. Pulled down from 0x6a8d4f: at day/clear the green
+  // channel is multiplied by ~1.94, so 0x8d (141) clipped to 255 and the
+  // whole courtyard rendered as one flat, shadeless poster green -- which
+  // the new courtyard planting sits on top of. 0x74 (116) x 1.94 = 225,
+  // so the lawn keeps its shading gradient.
+  var COURT_GRASS_COL = 0x5a7442;
 
   var windowMat = new T.MeshLambertMaterial({ color: WINDOW_COL });
   var floorMat  = new T.MeshLambertMaterial({ color: FLOOR_COL }); // stone slab under each wing (grey-sand, one step above the lawn)
@@ -66,8 +71,40 @@ function buildBodiam(){
   var grassMat  = new T.MeshLambertMaterial({ color: GRASS_COL });
   var grassMat2 = new T.MeshLambertMaterial({ color: GRASS_COL2 });
   var courtGrassMat = new T.MeshLambertMaterial({ color: COURT_GRASS_COL });
-  var bankMat   = new T.MeshLambertMaterial({ color: BANK_COL });
   var wellMat   = new T.MeshBasicMaterial({ color: 0x2e6a7a });
+
+  /* ---- interior fittings / planting palette ------------------------
+   * EXPOSURE BUDGET. A horizontal, upward-facing Lambert surface at
+   * time=day / weather=clear receives roughly
+   *   R x1.98,  G x1.94,  B x1.84
+   * (sun 1.55 @ colour 0xfff2d8 with the day sun vector 66% overhead,
+   * plus hemi 0.65 @ sky 0xdfe9f2, plus fill 0.22 @ 0xffffff -- see
+   * TIME_PRESETS.day in js/11-environment.js). Any base channel above
+   * ~120 therefore clips to 255 on a flat top face and the material
+   * turns into a flat, over-saturated poster colour. Every base colour
+   * below is kept at or under 0x77 per channel so that base x 1.98
+   * lands under 235 and the shading gradient survives. */
+  var oakMat     = new T.MeshLambertMaterial({ color: 0x5a4128 }); // 家具の樫材(既存 woodMat より濃い)
+  var oakLtMat   = new T.MeshLambertMaterial({ color: 0x6f5334 }); // 板材・棚・柵
+  var ashlarMat  = new T.MeshLambertMaterial({ color: 0x6f6858 }); // 屋内の切石(柱・ヴォールト)
+  var ashlarDkMat= new T.MeshLambertMaterial({ color: 0x554f42 }); // 柱頭・礎盤
+  var strawMat   = new T.MeshLambertMaterial({ color: 0x6e6234 }); // 藁・干し草・床の藺草
+  var soilMat    = new T.MeshLambertMaterial({ color: 0x463527 }); // 菜園の畝の土
+  var cropMat    = new T.MeshLambertMaterial({ color: 0x4e6b38 }); // 野菜の葉
+  var herbMat    = new T.MeshLambertMaterial({ color: 0x5a6b46 }); // 薬草(灰緑)
+  var leafDkMat  = new T.MeshLambertMaterial({ color: 0x3d5a2e }); // 樹冠(下層)
+  var leafMdMat  = new T.MeshLambertMaterial({ color: 0x4c6b38 }); // 樹冠(上層)
+  var barkMat    = new T.MeshLambertMaterial({ color: 0x4a3a2a }); // 幹・薪
+  var clothRedMat= new T.MeshLambertMaterial({ color: 0x6a2b26 }); // タペストリー(赤)
+  var clothBluMat= new T.MeshLambertMaterial({ color: 0x2f3f60 }); // タペストリー(青)
+  var clothCrmMat= new T.MeshLambertMaterial({ color: 0x6f6a4c }); // 麻布・穀物袋
+  var potMat     = new T.MeshLambertMaterial({ color: 0x6a4331 }); // 素焼きの甕・鉢
+  var hearthMat  = new T.MeshLambertMaterial({ color: 0x2a1c14 }); // 炉の火床(既存の炉と同色)
+  var emberMat   = new T.MeshBasicMaterial({ color: 0xb4471a });   // 熾火(ライティング非依存)
+  var flameMat   = new T.MeshBasicMaterial({ color: 0xffb95e });   // 蝋燭の炎
+  var glassPurMat= new T.MeshBasicMaterial({ color: 0x7a5f9c });   // ステンドグラス
+  var glassRedMat= new T.MeshBasicMaterial({ color: 0xa84a3c });
+  var glassBluMat= new T.MeshBasicMaterial({ color: 0x3f6ea8 });
 
   /* ---- footprint constants (metres) --------------------------------
    * Measured off the published ground plan (scale bar) and the classic
@@ -742,6 +779,522 @@ function buildBodiam(){
   registerPick(pickables, 'room', WELL_X, WING_FLOOR_Y+1.0, WELL_Z, 3.4, 2.0, 3.4, '井戸 Well',
     '南西塔の地下に実在した井戸。館全体の生活用水をここから汲み上げた。');
 
+  /* ================================================================ *
+   * FITTING-OUT PASS: furniture, fixtures and the courtyard garden
+   * ================================================================ *
+   * Bodiam survives as an empty shell -- only the curtain, the towers
+   * and the footings of the four ranges are standing. What is modelled
+   * below is the castle AS BUILT in the 1380s, following the published
+   * ground plan's room names (already used by the pickRoom volumes
+   * above) and the standard fit-out of a late-14th-century English
+   * courtyard house: rush-strewn hall with a high table on a dais,
+   * kitchen with wall hearths and a bread oven, buttery and pantry
+   * flanking the screens passage, a vaulted undercroft, a tiled chapel
+   * with a great window over the altar, canopied lord's bed, a loom in
+   * the lady's bower, straw pallets in the retainers' hall, stalls and
+   * mangers in the stable, and barrel/sack stores.
+   *
+   * Everything here goes into `interiorGroup` -- it never fades, so it
+   * stays readable the instant the cutaway opens a range up, and it can
+   * never affect the reveal tiers. Nothing here moves a wall, a floor,
+   * a partition, a pick volume or a measured dimension; it only adds
+   * meshes inside the room footprints those already define.
+   * Colours obey the exposure budget documented in the palette block. */
+
+  // ---- local geometry helpers (closure-scoped: no top-level names) ----
+  function fCyl(x,y,z,rt,rb,h,seg,mat,ry){
+    var m = mkCyl(rt,rb,h,seg,mat);
+    place(m, x, WING_FLOOR_Y + y + h/2, z, ry);
+    interiorGroup.add(m);
+    return m;
+  }
+  function fCone(x,y,z,r,h,seg,mat,ry){
+    var m = mkCone(r,h,seg,mat);
+    place(m, x, WING_FLOOR_Y + y + h/2, z, ry);
+    interiorGroup.add(m);
+    return m;
+  }
+  // offset along a rotated box's own long (local X) axis -- `place` maps
+  // local +X to (cos ry, -sin ry), so this matches every furnitureBox ry
+  function offX(x,z,d,ry){ ry = ry||0; return { x: x + d*Math.cos(ry), z: z - d*Math.sin(ry) }; }
+  function offZ(x,z,d,ry){ ry = ry||0; return { x: x + d*Math.sin(ry), z: z + d*Math.cos(ry) }; }
+
+  function barrel(x,z,s){
+    s = s || 1;
+    fCyl(x,0,z, 0.30*s, 0.25*s, 0.82*s, 10, oakMat);
+    fCyl(x,0.16*s,z, 0.32*s, 0.32*s, 0.06*s, 10, metalMat);
+    fCyl(x,0.60*s,z, 0.32*s, 0.32*s, 0.06*s, 10, metalMat);
+  }
+  function barrelLying(x,y0,z,s,alongZ){
+    s = s || 1;
+    var m = mkCyl(0.30*s, 0.30*s, 0.86*s, 10, oakMat);
+    if (alongZ) m.rotation.x = Math.PI/2; else m.rotation.z = Math.PI/2;
+    m.position.set(x, WING_FLOOR_Y + y0 + 0.30*s, z);
+    interiorGroup.add(m);
+  }
+  function sack(x,z,s){ s = s||1; fCyl(x,0,z, 0.15*s, 0.28*s, 0.58*s, 7, clothCrmMat); }
+  function crate(x,y,z,s,ry){ s = s||1; furnitureBox(x,y,z, 0.78*s, 0.66*s, 0.68*s, oakLtMat, ry); }
+  function chest(x,z,w,ry){
+    w = w || 1.3;
+    furnitureBox(x,0,z, w, 0.50, 0.62, oakMat, ry);
+    furnitureBox(x,0.50,z, w*1.04, 0.13, 0.66, oakLtMat, ry);
+    furnitureBox(x,0,z, w*0.10, 0.63, 0.67, metalMat, ry);
+  }
+  function bench(x,z,len,ry){
+    ry = ry||0;
+    furnitureBox(x,0.34,z, len, 0.09, 0.34, oakLtMat, ry);
+    [-1,1].forEach(function(s){
+      var p = offX(x,z, s*(len/2-0.30), ry);
+      furnitureBox(p.x,0,p.z, 0.13, 0.34, 0.30, oakMat, ry);
+    });
+  }
+  function stool(x,z){ fCyl(x,0,z, 0.19, 0.21, 0.44, 8, oakMat); }
+  // stone pier with a moulded base and capital (hall / undercroft arcades)
+  function pier(x,z,h,r){
+    r = r || 0.30;
+    fCyl(x,0.14,z, r, r*1.08, h-0.28, 8, ashlarMat);
+    furnitureBox(x,0,z, r*2.5, 0.16, r*2.5, ashlarDkMat);
+    furnitureBox(x,h-0.20, z, r*2.8, 0.22, r*2.8, ashlarDkMat);
+  }
+  // stepped low-poly arch spanning two piers (crown + two haunch blocks)
+  function archSpan(xa, xb, z, h, d){
+    var span = Math.abs(xb-xa), mid = (xa+xb)/2;
+    d = d || 0.5;
+    furnitureBox(mid, h+0.16, z, span*0.46, 0.30, d, ashlarMat);
+    [-1,1].forEach(function(s){
+      furnitureBox(mid + s*span*0.30, h-0.05, z, span*0.30, 0.30, d, ashlarMat);
+    });
+  }
+  function hayPile(x,z,w,d,h){
+    furnitureBox(x,0,z, w, h, d, strawMat);
+    furnitureBox(x,h,z, w*0.62, h*0.5, d*0.62, strawMat);
+  }
+  // stacked firewood: `rows` courses tapering upward, logs lying flat
+  function logPile(x,y0,z,rows,perRow,alongZ){
+    for (var r=0;r<rows;r++){
+      var n = Math.max(1, perRow - r);
+      for (var c=0;c<n;c++){
+        var m = mkCyl(0.10,0.11,1.10,6, barkMat);
+        if (alongZ) m.rotation.x = Math.PI/2; else m.rotation.z = Math.PI/2;
+        var off = (c-(n-1)/2)*0.23;
+        m.position.set(alongZ ? x+off : x, WING_FLOOR_Y + y0 + 0.11 + r*0.20, alongZ ? z : z+off);
+        interiorGroup.add(m);
+      }
+    }
+  }
+  // iron cauldron on a trammel over a hearth, with embers under it
+  function cauldron(x,z,s,alongZ){
+    s = s || 1;
+    fCyl(x,0.26,z, 0.44*s, 0.28*s, 0.46*s, 12, metalMat);
+    fCyl(x,0.72*s,z, 0.44*s, 0.44*s, 0.05*s, 12, metalMat);
+    [-1,1].forEach(function(sg){
+      var p = alongZ ? {x:x, z:z+sg*0.62*s} : {x:x+sg*0.62*s, z:z};
+      fCyl(p.x,0,p.z, 0.05,0.05, 1.55*s, 6, metalMat);
+    });
+    var bar = mkBox(alongZ?0.06:1.30*s, 0.06, alongZ?1.30*s:0.06, metalMat);
+    place(bar, x, WING_FLOOR_Y + 1.52*s, z);
+    interiorGroup.add(bar);
+    var e = mkBox(0.9*s, 0.05, 0.9*s, emberMat);
+    place(e, x, WING_FLOOR_Y + 0.03, z);
+    interiorGroup.add(e);
+  }
+  function embers(x,z,w,d){
+    var e = mkBox(w, 0.05, d, emberMat);
+    place(e, x, WING_FLOOR_Y + 0.04, z);
+    interiorGroup.add(e);
+  }
+  function candle(x,y,z){
+    fCyl(x,y,z, 0.035,0.045, 0.30, 6, clothCrmMat);
+    var f = mkBox(0.07,0.13,0.07, flameMat);
+    place(f, x, WING_FLOOR_Y + y + 0.36, z);
+    interiorGroup.add(f);
+  }
+  // wall hanging. Always hung from a rod at HANG_HEAD, which is just under
+  // PARTITION_H -- every tapestry below hangs on an interiorGroup partition
+  // (never on a curtain wall), so it can neither poke over the top of its
+  // wall nor be left floating in mid-air when the cutaway fades a wall.
+  var HANG_HEAD = PARTITION_H - 0.24;
+  function tapestry(x,z,w,h,ry,mat){
+    h = Math.min(h, HANG_HEAD - 0.35);
+    furnitureBox(x, HANG_HEAD - h, z, w, h, 0.07, mat, ry);
+    furnitureBox(x, HANG_HEAD, z, w*1.05, 0.10, 0.13, oakMat, ry);
+  }
+  function shelf(x,y,z,len,ry){
+    furnitureBox(x,y,z, len, 0.07, 0.42, oakLtMat, ry);
+    [-1,1].forEach(function(s){
+      var p = offX(x,z, s*(len/2-0.12), ry);
+      furnitureBox(p.x,y-0.28,p.z, 0.08, 0.28, 0.40, oakLtMat, ry);
+    });
+  }
+  function crock(x,y,z,s){ s=s||1; fCyl(x,y,z, 0.13*s,0.16*s, 0.28*s, 8, potMat); }
+  function ladder(x,z,h,ry){
+    ry = ry||0;
+    [-1,1].forEach(function(s){
+      var p = offZ(x,z, s*0.21, ry);
+      furnitureBox(p.x,0,p.z, 0.07, h, 0.07, oakLtMat, ry);
+    });
+    var rungs = Math.max(2, Math.floor(h/0.36));
+    for (var i=1;i<rungs;i++) furnitureBox(x, i*0.36, z, 0.07, 0.05, 0.46, oakLtMat, ry);
+  }
+  // two-wheeled hand cart. Restricted to axis-aligned orientations so the
+  // wheel axle only ever needs a single-axis Euler rotation.
+  function handcart(x,z,alongZ){
+    var ry = alongZ ? Math.PI/2 : 0;
+    furnitureBox(x,0.50,z, 1.85, 0.14, 0.95, oakLtMat, ry);
+    [-1,1].forEach(function(s){
+      var p = offZ(x,z, s*0.50, ry);
+      furnitureBox(p.x,0.62,p.z, 1.85, 0.30, 0.07, oakLtMat, ry);
+    });
+    [-1,1].forEach(function(s){
+      var p = offZ(x,z, s*0.58, ry);
+      var w = mkCyl(0.44,0.44,0.10,10, oakMat);
+      if (alongZ) w.rotation.z = Math.PI/2; else w.rotation.x = Math.PI/2;
+      w.position.set(p.x, WING_FLOOR_Y + 0.44, p.z);
+      interiorGroup.add(w);
+    });
+    [-1,1].forEach(function(s){
+      var p = offZ(x,z, s*0.34, ry), q = offX(p.x,p.z, 1.30, ry);
+      furnitureBox(q.x,0.52,q.z, 1.00, 0.09, 0.09, oakLtMat, ry);
+    });
+  }
+  function spiralStair(x,z,r,steps,rise,startA){
+    for (var i=0;i<steps;i++){
+      var a = (startA||0) + i*0.44;
+      var st = mkBox(r, 0.15, 0.52, ashlarMat);
+      place(st, x + Math.cos(a)*r*0.52, WING_FLOOR_Y + 0.08 + i*rise, z + Math.sin(a)*r*0.52, -a);
+      interiorGroup.add(st);
+    }
+    fCyl(x,0,z, 0.17,0.17, steps*rise + 0.25, 8, ashlarDkMat);
+  }
+  function straightSteps(x,z,n,ry,w){
+    ry = ry||0; w = w||1.4;
+    for (var i=0;i<n;i++){
+      var p = offX(x,z, i*0.34, ry);
+      furnitureBox(p.x, i*0.20, p.z, 0.34, 0.20, w, ashlarMat, ry);
+    }
+  }
+  // roof truss over a range: tie beam + king post + two sloping rafters
+  function truss(cx, cz, spanZ, y, ry){
+    ry = ry||0;
+    furnitureBox(cx, y, cz, 0.26, 0.26, spanZ, oakMat, ry);
+    furnitureBox(cx, y+0.26, cz, 0.22, 1.10, 0.22, oakMat, ry);
+    [-1,1].forEach(function(s){
+      var p = offZ(cx, cz, s*spanZ*0.26, ry);
+      furnitureBox(p.x, y+0.26, p.z, 0.18, 0.75, 0.18, oakMat, ry);
+    });
+  }
+
+  /* ---- SOUTH RANGE ------------------------------------------------ */
+  // Great Hall: rushes on the floor, high table on the dais, benches to
+  // the trestles, roof trusses, hangings, a livery cupboard.
+  furnitureBox(7.6, 0, sZmid, 12.6, 0.04, 8.0, strawMat);              // 藺草(rushes)
+  furnitureBox(12.3, 0.40, sZmid, 1.05, 0.78, 4.6, oakMat);            // high table on the dais
+  furnitureBox(13.25, 0.40, sZmid, 0.50, 1.35, 0.75, oakMat);          // lord's chair
+  furnitureBox(13.25, 0.40, sZmid-1.5, 0.45, 1.00, 0.65, oakMat);
+  furnitureBox(13.25, 0.40, sZmid+1.5, 0.45, 1.00, 0.65, oakMat);
+  bench(5.0, sZmid-2.05, 6.0, 0); bench(5.0, sZmid+2.05, 6.0, 0);
+  bench(9.6, sZmid-2.05, 4.2, 0); bench(9.6, sZmid+2.05, 4.2, 0);
+  bench(7.3, sZmid, 8.4, 0);                                           // shared bench between the trestles
+  // tie-beam trusses. The south range roof is a mono-pitch running from
+  // ridgeInH (5.8) at the courtyard edge up to eaveH (10.45) at the
+  // curtain, so the tie beam has to clear 5.8 at its lowest point: at
+  // y = 4.6 above WING_FLOOR_Y its top sits at 5.02, safely under the
+  // roof plane even where the roof is at its lowest.
+  [3.4, 8.0, 12.2].forEach(function(tx){ truss(tx, sZmid, 8.2, 4.6, 0); });
+  tapestry(1.35, sZmid+0.4, 3.6, 2.6, Math.PI/2, clothRedMat);
+  tapestry(1.35, sZmid-3.2, 2.4, 2.2, Math.PI/2, clothBluMat);
+  furnitureBox(2.6, 0, wingZ0+0.8, 1.7, 1.55, 0.62, oakMat);           // livery cupboard
+  crock(2.4, 1.55, wingZ0+0.8, 1.1); crock(2.9, 1.55, wingZ0+0.8, 0.9);
+  embers(7.5, wingZ1-0.85, 2.2, 0.7);
+  logPile(9.6, 0, wingZ1-0.75, 3, 4, false);
+  candle(12.3, 0.40+0.78, sZmid-1.2); candle(12.3, 0.40+0.78, sZmid+1.2);
+
+  // Screens passage: the service door line between hall and kitchen
+  furnitureBox(-0.75, 0, wingZ0+0.55, 1.5, 0.9, 0.5, oakLtMat);
+  fCyl(-1.9, 0, wingZ1-1.0, 0.30,0.34, 0.95, 10, potMat);              // water butt
+  candle(-1.9, 0.95, wingZ1-1.0);
+
+  // Pantry & buttery: ale casks one side, bread and crocks the other
+  barrel(-7.2, wingZ0+1.0); barrel(-7.2, wingZ0+2.0); barrel(-6.3, wingZ0+1.0);
+  barrelLying(-6.6, 0.30, wingZ0+2.1, 1, false);
+  shelf(-5.4, 1.15, wingZ1-0.5, 4.2, 0);
+  crock(-6.6, 1.22, wingZ1-0.5); crock(-5.8, 1.22, wingZ1-0.5, 0.85);
+  crock(-4.8, 1.22, wingZ1-0.5, 1.1); crock(-4.0, 1.22, wingZ1-0.5, 0.9);
+  sack(-3.4, wingZ0+0.9); sack(-3.9, wingZ0+1.5, 0.9);
+
+  // Kitchen: a cauldron on each wall hearth, bread oven, block, stores
+  cauldron(-14.0, wingZ0+1.55, 1.0, false);
+  embers(-14.0, wingZ1-0.85, 2.2, 0.7);
+  fCyl(-14.0, 0, wingZ1-1.6, 0.40,0.34, 0.70, 10, metalMat);           // skillet stand
+  (function breadOven(){
+    fCyl(-18.5, 0, wingZ1-1.5, 1.05, 1.25, 0.95, 10, ashlarMat);
+    fCone(-18.5, 0.95, wingZ1-1.5, 1.10, 0.85, 10, ashlarMat);
+    furnitureBox(-17.6, 0.15, wingZ1-1.5, 0.35, 0.62, 0.75, hearthMat);
+    embers(-17.75, wingZ1-1.5, 0.35, 0.7);
+  })();
+  fCyl(-12.2, 0, wingZ1-1.4, 0.40,0.44, 0.78, 10, oakMat);             // chopping block
+  shelf(-19.3, 1.30, 15.6, 3.2, Math.PI/2);
+  crock(-19.3, 1.37, 14.5); crock(-19.3, 1.37, 15.4, 0.85); crock(-19.3, 1.37, 16.4, 1.1);
+  sack(-19.0, wingZ0+0.9); sack(-18.4, wingZ0+1.4, 0.9); sack(-19.2, wingZ0+1.7, 0.8);
+  barrel(-9.3, wingZ0+0.95, 0.9); barrel(-9.4, wingZ0+2.0, 0.85);
+  logPile(-16.6, 0, wingZ0+0.75, 3, 4, false);
+  (function potRack(){
+    var bar = mkBox(2.4, 0.06, 0.06, metalMat);
+    place(bar, -15.6, WING_FLOOR_Y + 2.05, wingZ0+0.55);
+    interiorGroup.add(bar);
+    [-0.8, 0, 0.8].forEach(function(dx){
+      fCyl(-15.6+dx, 1.55, wingZ0+0.55, 0.20,0.16, 0.34, 8, metalMat);
+    });
+  })();
+
+  // SE stair block: newel stair up to the wall-walk, vaulted undercroft
+  spiralStair(15.8, wingZ0+1.7, 1.55, 11, 0.42, 0.4);
+  pier(17.6, 15.2, 2.55); pier(17.6, 18.6, 2.55);
+  archSpan(17.6, 19.6, 15.2, 2.55, 0.5);
+  archSpan(17.6, 19.6, 18.6, 2.55, 0.5);
+  barrelLying(19.0, 0.10, 14.0, 1.05, true); barrelLying(19.0, 0.10, 15.4, 1.05, true);
+  barrelLying(19.0, 0.72, 14.7, 1.05, true);
+  barrelLying(19.0, 0.10, 17.6, 1.05, true); barrelLying(19.0, 0.10, 19.0, 1.05, true);
+  crate(15.6, 0, 19.0, 1.0); crate(16.5, 0, 19.0, 0.9); crate(16.0, 0.66, 19.0, 0.85);
+  sack(14.9, 12.6); sack(15.5, 13.1, 0.9);
+
+  /* ---- EAST RANGE ------------------------------------------------- */
+  // Chapel: raised chancel step, altar with a great window over it, rood
+  // screen, pews (already placed), a lectern and side piers.
+  (function chapel(){
+    // taller gable at the ritual-east end, carrying a three-light window
+    furnitureBox(eXmid, 0, -19.55, 7.9, 5.0, 0.42, partitionMat);
+    var glass = [glassRedMat, glassPurMat, glassBluMat];
+    [-1.35, 0, 1.35].forEach(function(dx, i){
+      furnitureBox(eXmid+dx, 1.35, -19.30, 0.72, 2.85, 0.14, glass[i]);
+      furnitureBox(eXmid+dx-0.50, 1.35, -19.28, 0.16, 2.95, 0.18, ashlarMat);
+      furnitureBox(eXmid+dx+0.50, 1.35, -19.28, 0.16, 2.95, 0.18, ashlarMat);
+    });
+    furnitureBox(eXmid, 4.35, -19.28, 3.4, 0.24, 0.20, ashlarMat);
+    furnitureBox(eXmid, 0, -18.55, 7.0, 0.16, 1.5, ashlarMat);          // chancel step
+    // reredos + cross behind the altar (the altar box itself is above)
+    furnitureBox(eWingX1-0.32, 0.16, -18.2, 0.22, 2.0, 2.1, ashlarDkMat);
+    candle(eWingX1-0.95, 1.10, -17.5); candle(eWingX1-0.95, 1.10, -18.9);
+    // lectern
+    fCyl(16.6, 0, -16.3, 0.17,0.24, 1.02, 8, oakMat);
+    furnitureBox(16.6, 1.02, -16.3, 0.52, 0.10, 0.66, oakLtMat);
+    // rood screen across the nave, with a central opening
+    [-1,1].forEach(function(s){
+      furnitureBox(eXmid + s*2.35, 0, -10.6, 2.6, 1.65, 0.20, oakMat);
+    });
+    furnitureBox(eXmid, 1.65, -10.6, 7.4, 0.26, 0.26, oakMat);
+    pier(12.3, -16.0, 3.3); pier(12.3, -12.6, 3.3);
+    // hung on the chapel/apartments partition (z = -8.5), facing back up
+    // the nave -- the courtyard-side facade here is only FACADE_H tall,
+    // so a hanging on that line would have nothing behind it
+    tapestry(eXmid, -8.78, 2.8, 2.0, 0, clothBluMat);
+  })();
+
+  // Lord's apartments: canopied bed, table and stools, chest, hangings
+  (function lordsRooms(){
+    [-1,1].forEach(function(sx){
+      [-1,1].forEach(function(sz){
+        furnitureBox(15.1 + sx*1.25, 0, -3.0 + sz*1.9, 0.16, 2.35, 0.16, oakMat);
+      });
+    });
+    furnitureBox(15.1, 2.35, -3.0, 2.9, 0.14, 4.3, clothRedMat);
+    furnitureBox(15.1, 0.70, -4.95, 2.6, 1.6, 0.10, clothRedMat);       // head curtain
+    furnitureBox(13.1, 0, -6.6, 1.0, 0.74, 1.9, oakMat);                // table
+    stool(12.5, -5.9); stool(12.5, -7.3);
+    candle(13.1, 0.74, -6.6);
+    tapestry(eXmid+0.5, -8.15, 3.8, 2.5, 0, clothBluMat);
+    furnitureBox(12.3, 0, -1.2, 0.60, 1.85, 1.5, oakMat);               // cupboard
+    crock(12.3, 1.85, -1.2, 1.0);
+    embers(eWingX1-0.85, -6.4, 1.6, 0.45);
+  })();
+
+  // Lady's bower: upright loom, spinning, cradle, small table
+  (function bower(){
+    [-1,1].forEach(function(s){
+      furnitureBox(13.0, 0, 6.4 + s*0.85, 0.14, 2.30, 0.14, oakMat);
+    });
+    furnitureBox(13.0, 2.20, 6.4, 0.16, 0.16, 1.9, oakMat);
+    furnitureBox(13.0, 0.55, 6.4, 0.10, 1.55, 1.72, clothCrmMat);       // warp on the loom
+    furnitureBox(13.0, 0.30, 6.4, 0.16, 0.16, 1.9, oakMat);
+    fCyl(12.6, 0, 8.0, 0.30,0.34, 0.42, 9, oakLtMat);                   // wool basket
+    furnitureBox(12.6, 0, 11.4, 0.9, 0.72, 1.4, oakMat);                // table
+    stool(13.4, 11.4);
+    candle(12.6, 0.72, 11.4);
+    furnitureBox(17.6, 0, 6.6, 1.0, 0.55, 1.5, oakLtMat);               // cradle
+    furnitureBox(17.6, 0.55, 6.6, 0.9, 0.14, 1.35, clothCrmMat);
+    tapestry(eXmid+0.4, 19.35, 3.4, 2.4, Math.PI, clothRedMat);
+    embers(eWingX1-0.85, 14.5, 1.4, 0.45);
+    furnitureBox(15.1, 0.70, 9.0, 2.5, 0.16, 3.4, clothBluMat);         // coverlet on the bed
+  })();
+
+  /* ---- WEST RANGE ------------------------------------------------- */
+  // Retainers' hall: benches to every trestle, straw pallets along the
+  // blind outer wall, a timber arcade, stores in the corner.
+  [-15.0, -9.4, -3.8, 1.8].forEach(function(tz){
+    bench(wXmid, tz-0.95, 5.2, 0); bench(wXmid, tz+0.95, 5.2, 0);
+  });
+  bench(wXmid, 6.3, 5.2, 0);
+  for (var pz=0; pz<6; pz++){
+    var zz = -18.2 + pz*4.6;
+    furnitureBox(-18.85, 0, zz, 0.95, 0.24, 1.95, strawMat);
+    furnitureBox(-18.85, 0.24, zz, 0.85, 0.10, 1.75, clothCrmMat);
+  }
+  [-16.4, -10.8, -5.2, 0.4].forEach(function(az){
+    furnitureBox(-12.5, 0, az, 0.26, 4.60, 0.26, oakMat);
+    furnitureBox(-12.5, 4.30, az, 0.24, 0.30, 1.30, oakMat);            // bracket
+  });
+  barrel(-19.1, -19.0, 0.95); barrel(-19.1, -17.9, 0.95); barrel(-18.2, -19.0, 0.9);
+  crate(-12.6, 0, -18.9, 1.0); crate(-12.6, 0.66, -18.9, 0.9);
+  [-13.4, -12.6, -11.8].forEach(function(cz){
+    furnitureBox(-12.2, 1.55, cz, 0.30, 1.05, 0.55, clothCrmMat);       // cloaks on pegs
+  });
+  ladder(-19.2, 3.0, 3.2, Math.PI/2);
+
+  // Servants' kitchen: hearth, cauldron, quern, wood and stores
+  furnitureBox(-19.45, 0, 17.8, 0.5, 1.25, 2.4, hearthMat);
+  cauldron(-18.5, 17.8, 0.9, true);
+  fCyl(-15.4, 0, 10.4, 0.50,0.52, 0.28, 12, ashlarDkMat);              // quern stones
+  fCyl(-15.4, 0.28, 10.4, 0.44,0.46, 0.20, 12, ashlarMat);
+  furnitureBox(-15.0, 0.28, 10.4, 0.55, 0.09, 0.09, oakLtMat);
+  logPile(-13.2, 0, 18.8, 3, 4, true);
+  barrel(-13.0, 15.2, 0.95); sack(-13.6, 16.2); sack(-14.2, 16.6, 0.9);
+  shelf(-19.3, 1.20, 13.4, 2.6, Math.PI/2);
+  crock(-19.3, 1.27, 12.6); crock(-19.3, 1.27, 13.5, 0.9); crock(-19.3, 1.27, 14.3, 1.05);
+
+  /* ---- NORTH RANGE ------------------------------------------------ */
+  // Stores: a second row of casks, crates, sacks, a loading ladder and
+  // a hand cart standing on the courtyard side.
+  for (var b2=0;b2<4;b2++) barrel(6.4 + b2*2.6, nWingZ0+1.15, 0.95);
+  barrelLying(16.9, 0.10, nWingZ0+1.2, 0.95, true);
+  crate(3.6, 0, -18.7, 1.0); crate(4.5, 0, -18.7, 0.9); crate(4.0, 0.66, -18.7, 0.85);
+  [3.4, 4.1, 4.9, 5.6].forEach(function(sx2){ sack(sx2, -13.0, 0.95); });
+  sack(3.8, -13.7, 0.85); sack(4.6, -13.8, 0.9);
+  ladder(19.2, -17.0, 3.2, Math.PI/2);
+  shelf(19.3, 1.25, -13.6, 2.6, Math.PI/2);
+  crock(19.3, 1.32, -14.4); crock(19.3, 1.32, -13.5, 0.9);
+  handcart(11.6, -12.6, false);
+
+  // Stable: stalls behind the mangers, hay in the mangers and a pile in
+  // the corner, a water trough and harness pegs.
+  [-5.4, -9.2, -12.6, -16.4].forEach(function(sx3){
+    furnitureBox(sx3, 0, -18.2, 0.14, 1.35, 3.0, oakLtMat);
+    furnitureBox(sx3, 1.35, -18.2, 0.16, 0.12, 3.0, oakMat);
+  });
+  furnitureBox(-8.0, 0.50, nZmid, 3.7, 0.20, 0.85, strawMat);           // hay in the mangers
+  furnitureBox(-14.0, 0.50, nZmid, 3.7, 0.20, 0.85, strawMat);
+  hayPile(-18.4, -12.8, 2.0, 2.0, 0.95);
+  furnitureBox(-3.9, 0, -12.9, 0.85, 0.52, 1.7, oakMat);                // water trough
+  var troughWater = mkBox(0.70, 0.04, 1.55, wellMat);
+  place(troughWater, -3.9, WING_FLOOR_Y + 0.50, -12.9);
+  interiorGroup.add(troughWater);
+  [-16.0, -15.2, -14.4].forEach(function(hx){
+    furnitureBox(hx, 1.45, -19.55, 0.26, 0.75, 0.28, oakMat);           // harness on pegs
+  });
+  handcart(-11.4, -12.6, false);
+
+  /* ---- COURTYARD: kitchen garden, herb plots, orchard trees --------
+   * Bodiam's courtyard is small (22.8m square), so the planting is kept
+   * to a 2.8m border strip against the range facades, and `life.courtyard`
+   * / `life.patrol` below are pulled in to match so residents wander and
+   * patrol INSIDE the beds rather than through them. Note the farmers
+   * also walk a straight line from wherever they are standing to the gate
+   * at (0, -OW): with the wander rect capped at +/-COURT_INNER, that line
+   * can only ever cross the north strip inside roughly |x| < 6.3, which is
+   * why the north strip carries nothing but two tubs out at |x| = 8.0.
+   * Trees are deliberately small (about 3.6m) -- these are courtyard
+   * fruit trees, not the field oaks outside the moat. */
+  var COURT_INNER = 7.5;               // resident wander half-extent
+  var PLANT_IN = COURT_HALF - 2.55;    // inner edge of the planted border (8.85)
+  function cBox(x,y,z,w,h,d,mat,ry){
+    var m = mkBox(w,h,d,mat);
+    place(m, x, y + h/2, z, ry||0);
+    interiorGroup.add(m);
+    return m;
+  }
+  function cCyl(x,y,z,rt,rb,h,seg,mat){
+    var m = mkCyl(rt,rb,h,seg,mat);
+    place(m, x, y + h/2, z);
+    interiorGroup.add(m);
+    return m;
+  }
+  // raised bed: boarded edge, soil, and `rows` ridges of leaf
+  function gardenBed(cx, cz, w, d, rows, alongZ, mat){
+    cBox(cx, 0, cz, w, 0.26, d, soilMat);
+    cBox(cx, 0.26, cz, w*0.99, 0.05, d*0.99, soilMat);
+    [-1,1].forEach(function(s){
+      if (alongZ) cBox(cx + s*w/2, 0, cz, 0.10, 0.34, d, oakLtMat);
+      else        cBox(cx, 0, cz + s*d/2, w, 0.34, 0.10, oakLtMat);
+    });
+    for (var r=0;r<rows;r++){
+      var t = (r+0.5)/rows - 0.5;
+      if (alongZ) cBox(cx, 0.31, cz + t*d*0.92, w*0.80, 0.26, d*0.92/rows*0.55, mat||cropMat);
+      else        cBox(cx + t*w*0.92, 0.31, cz, w*0.92/rows*0.55, 0.26, d*0.80, mat||cropMat);
+    }
+  }
+  // small courtyard fruit tree: a rounded, broadleaf crown built from two
+  // low-poly spheres (cones read as conifers, which is wrong for a walled
+  // orchard). Deliberately ~3.5m -- a fraction of the field oaks outside.
+  function leafBlob(x,y,z,r,mat){
+    var m = new T.Mesh(new T.SphereGeometry(r, 7, 5), mat);
+    m.castShadow = true; m.receiveShadow = true;
+    m.position.set(x,y,z);
+    m.scale.y = 0.82;
+    interiorGroup.add(m);
+    return m;
+  }
+  function courtTree(x, z, h){
+    cCyl(x, 0, z, 0.15, 0.23, h*0.50, 7, barkMat);
+    leafBlob(x, h*0.66, z, h*0.30, leafDkMat);
+    leafBlob(x - h*0.13, h*0.55, z + h*0.10, h*0.20, leafDkMat);
+    leafBlob(x + h*0.11, h*0.82, z - h*0.07, h*0.21, leafMdMat);
+  }
+  function tub(x, z, s){
+    s = s || 1;
+    cCyl(x, 0, z, 0.32*s, 0.26*s, 0.52*s, 9, oakLtMat);
+    cCyl(x, 0.46*s, z, 0.30*s, 0.30*s, 0.06*s, 9, soilMat);
+    leafBlob(x, 0.78*s, z, 0.30*s, leafMdMat);
+  }
+  // WEST strip: four kitchen beds (beans, cabbage, roots, onions)
+  [-6.6, -2.2, 2.2, 6.6].forEach(function(bz){
+    gardenBed(-PLANT_IN - 1.15, bz, 2.10, 3.60, 3, true, cropMat);
+  });
+  cBox(-PLANT_IN - 1.15, 0, 9.4, 2.10, 0.12, 1.60, soilMat);          // turned-over end plot
+  // EAST strip: the herb / physic garden -- four small square plots
+  [-6.2, -2.1, 2.1, 6.2].forEach(function(hz){
+    gardenBed(PLANT_IN + 1.15, hz, 2.10, 3.10, 4, true, herbMat);
+  });
+  // SOUTH strip: two long beds either side of the screens-passage door,
+  // plus the household woodpile
+  gardenBed(-6.6, PLANT_IN + 1.15, 4.60, 2.10, 3, false, cropMat);
+  gardenBed(6.6, PLANT_IN + 1.15, 4.60, 2.10, 3, false, cropMat);
+  (function courtWood(){
+    for (var r=0;r<3;r++){
+      var n = 5 - r;
+      for (var c=0;c<n;c++){
+        var m = mkCyl(0.10,0.11,1.20,6, barkMat);
+        m.rotation.z = Math.PI/2;
+        m.position.set(0.9, 0.11 + r*0.20, PLANT_IN + 0.55 + (c-(n-1)/2)*0.23);
+        interiorGroup.add(m);
+      }
+    }
+  })();
+  // corner trees + tubs (kept off the gate line, see the note above)
+  courtTree(-PLANT_IN - 1.3, -PLANT_IN - 1.1, 3.7);
+  courtTree( PLANT_IN + 1.3, -PLANT_IN - 1.1, 3.5);
+  courtTree( PLANT_IN + 1.3,  PLANT_IN + 1.2, 3.4);
+  courtTree(-PLANT_IN - 1.3,  PLANT_IN + 1.2, 3.2);
+  tub(-8.0, -PLANT_IN - 1.6, 1.0);
+  tub( 8.0, -PLANT_IN - 1.6, 1.0);
+  tub(-PLANT_IN - 1.2, -0.1, 0.9);
+  // low wattle edging along the courtyard side of the west beds
+  for (var wf=0; wf<9; wf++){
+    cBox(-PLANT_IN + 0.1, 0, -8.4 + wf*2.1, 0.09, 0.50, 1.85, oakLtMat);
+  }
+  registerPick(pickables, 'room', -PLANT_IN - 1.15, 1.1, 0, 3.0, 2.2, 17.5,
+    '菜園 Kitchen Garden', '中庭西側の菜園。豆・キャベツ・根菜の畝を柵で囲う。中世の城館は日々の青物を城内で賄った。');
+  registerPick(pickables, 'room', PLANT_IN + 1.15, 1.1, 0, 3.0, 2.2, 16.0,
+    '薬草園 Herb Garden', '中庭東側の薬草園。厨房と病人の手当てに使うハーブを小区画に分けて育てた。');
+
   /* -------------------------------------------------------------- *
    * moat, graded bank, island, approaches
    * -------------------------------------------------------------- *
@@ -777,17 +1330,105 @@ function buildBodiam(){
   });
   var waterMat = moatSys.waterMat;
 
-  // north approach: bank -> timber bridge -> octagon island -> drawbridge -> gatehouse
-  var octR = 4.0, octZ = -(ISLAND_HALF + MOAT_WIDTH*0.46);
-  var oct = new T.Mesh(new T.CircleGeometry(octR, 8), bankMat);
-  oct.rotation.x = -Math.PI/2; oct.rotation.y = Math.PI/8;
-  place(oct, 0, 0.02, octZ);
-  group.add(oct);
-  // the octagon platform also meets the water on a slope, not a hard disc
-  // edge, using the same vertex-coloured ramp technique as the main banks
-  var octSkirt = buildCircularSkirt(0, octZ, octR, octR+1.8, 0.02, WATER_Y,
-    new T.Color(BANK_COL), new T.Color(BANK_MID_COL), new T.Color(BANK_EDGE_COL));
+  /* ---- north approach: bank -> timber bridge -> THE OCTAGON -> bridge
+   * -> gatehouse.
+   *
+   * THE OCTAGON is not a grassy islet. Historic England's scheduling
+   * entry for Bodiam (list entry 1013554) describes the causeway
+   * projecting into the northern arm of the moat as "ending in an
+   * octagonal plinth which originally carried further defences", and the
+   * reference photograph downloaded for this pass (Wikimedia Commons,
+   * "Bridge to Bodiam Castle" / geograph 6702449, CC BY-SA) shows what
+   * that plinth actually looks like today: an octagonal STONE platform,
+   * revetted all round with a battered ashlar face, standing roughly a
+   * metre clear of the water, with a low coping on its rim, a gravel
+   * path running straight across it from the timber footbridge, and only
+   * thin patches of turf inside the revetment.
+   *
+   * The previous build drew it as a bare CircleGeometry(4.0, 8) in
+   * BANK_COL (0x6d8449). On a flat, upward-facing surface the day
+   * lighting multiplies green by ~1.94, so 0x84 = 132 -> 256: the green
+   * channel CLIPPED and the platform rendered as a solid, vividly
+   * saturated green lozenge floating in the moat -- the "weird island"
+   * in the middle of the bridge. Everything below is stone, and every
+   * base colour is inside the exposure budget noted in the palette. */
+  var octR = 5.0;                      // circum-radius (~10m across, ~9.2m flat-to-flat)
+  var octZ = -(ISLAND_HALF + MOAT_WIDTH*0.46);
+  var OCT_ROT = Math.PI/8;             // rotate 22.5deg so a FLAT face meets each bridge
+  var OCT_APO = octR*Math.cos(Math.PI/8);   // apothem: edge-midpoint radius
+  var OCT_EDGE = 2*octR*Math.sin(Math.PI/8);// length of one octagon edge
+  var OCT_DECK_Y = 0.10;               // gravel deck, just under the bridge deck tops
+  var OCT_FOOT_Y = WATER_Y - 1.2;      // revetment foot, buried below the waterline
+
+  var octStoneMat  = new T.MeshLambertMaterial({ color: 0x635d4e }); // revetment ashlar (darker: reads as a wall face)
+  var octCopeMat   = new T.MeshLambertMaterial({ color: 0x76705f }); // coping / kerb
+  var octGravelMat = new T.MeshLambertMaterial({ color: 0x6a6350 }); // path surface across the plinth
+  var octTurfMat   = new T.MeshLambertMaterial({ color: 0x4a5b3a }); // the thin turf inside the kerb
+  var octBaseMat   = new T.MeshLambertMaterial({ color: 0x4d4838 }); // wet, weed-stained lower courses
+
+  // revetment drum: an 8-sided battered wall from below the waterline up
+  // to deck level. Built as a cylinder with 8 radial segments, spun by
+  // OCT_ROT so the faces (not the corners) look north and south.
+  var octDrum = mkCyl(octR, octR*1.09, OCT_DECK_Y - OCT_FOOT_Y, 8, octStoneMat);
+  octDrum.rotation.y = OCT_ROT;
+  place(octDrum, 0, (OCT_DECK_Y + OCT_FOOT_Y)/2, octZ);
+  group.add(octDrum);
+  // darker, weed-stained band right at the waterline
+  var octBand = mkCyl(octR*1.045, octR*1.075, 0.85, 8, octBaseMat);
+  octBand.rotation.y = OCT_ROT;
+  place(octBand, 0, WATER_Y - 0.15, octZ);
+  group.add(octBand);
+
+  // deck: an octagonal gravel surface, inset just inside the revetment
+  (function octDeck(){
+    var deckGeo = new T.CircleGeometry(octR - 0.16, 8);
+    deckGeo.rotateX(-Math.PI/2);
+    var deck = new T.Mesh(deckGeo, octGravelMat);
+    deck.rotation.y = OCT_ROT;
+    deck.receiveShadow = true;
+    place(deck, 0, OCT_DECK_Y, octZ);
+    group.add(deck);
+    // two narrow turf strips tucked against the kerb either side of the
+    // through path. Deliberately small: the photo shows the plinth as a
+    // stone platform with a little grass on it, NOT a grass island, and
+    // an over-large turf patch is exactly what made the old build read
+    // as a green blob.
+    [-1, 1].forEach(function(s){
+      var turf = mkBox(1.9, 0.05, 3.9, octTurfMat);
+      place(turf, s*2.85, OCT_DECK_Y + 0.025, octZ);
+      group.add(turf);
+    });
+  })();
+
+  // low stone coping round the rim, broken at the north and south faces
+  // where the bridge deck / causeway path runs through
+  (function octKerb(){
+    for (var m=0;m<8;m++){
+      if (m === 2 || m === 6) continue;          // +Z (south) and -Z (north) openings
+      var psi = m*Math.PI/4;
+      var rr = OCT_APO - 0.22;
+      var kerb = mkBox(OCT_EDGE + 0.30, 0.52, 0.44, octCopeMat);
+      place(kerb, Math.cos(psi)*rr, OCT_DECK_Y + 0.26, octZ + Math.sin(psi)*rr, -(psi + Math.PI/2));
+      group.add(kerb);
+    }
+    // stubs of the vanished defences the plinth once carried: two ruined
+    // jamb blocks flanking the south (castle-facing) opening
+    [-1, 1].forEach(function(s){
+      var j = mkBox(0.9, 1.25, 1.0, octStoneMat);
+      place(j, s*2.15, OCT_DECK_Y + 0.62, octZ + OCT_APO - 0.35);
+      group.add(j);
+    });
+  })();
+
+  // rubble apron at the foot of the revetment, graded into the moat bed
+  // so the drum does not end in a hard cylinder-meets-plane line
+  var octSkirt = buildCircularSkirt(0, octZ, octR*1.09, octR*1.09 + 1.5, OCT_FOOT_Y + 0.05, WATER_Y - 1.85,
+    new T.Color(0x44412f), new T.Color(0x36351f), new T.Color(0x24251a));
   group.add(octSkirt);
+
+  registerPick(pickables, 'structure', 0, 1.4, octZ, octR*2, 3.2, octR*2,
+    '八角プラットフォーム The Octagon',
+    '北の橋の中程に残る八角形の石造プラットフォーム。城側に伸びる石の土手道の先端にあたり、かつてバービカン(外堡)への跳ね橋を受けていた。');
 
   /* buildBankRamp (section 0.5) builds its material with
    *   vertexColors: T.VertexColors
@@ -806,11 +1447,15 @@ function buildBodiam(){
     }
   });
 
-  var b1z0 = -MOAT_OUTER+1.0, b1z1 = octZ-octR;
+  // The two north spans land ON the octagon's flat north and south faces
+  // (octZ -/+ the apothem, plus 0.3m of overlap). Running them to the
+  // circum-radius instead, as the first build did, left a ~0.4m slot of
+  // open water between each bridge end and the plinth's flat face.
+  var b1z0 = -MOAT_OUTER+1.0, b1z1 = octZ - OCT_APO + 0.3;
   var bridge1 = mkBox(2.6, 0.35, Math.abs(b1z1-b1z0), woodMat);
   place(bridge1, 0, -0.05, (b1z0+b1z1)/2);
   group.add(bridge1);
-  var b2z0 = octZ+octR, b2z1 = -(OW+GATE_PROJ-0.6);
+  var b2z0 = octZ + OCT_APO - 0.3, b2z1 = -(OW+GATE_PROJ-0.6);
   var bridge2 = mkBox(3.4, 0.3, Math.abs(b2z1-b2z0), woodMat);
   place(bridge2, 0, -0.02, (b2z0+b2z1)/2);
   group.add(bridge2);
@@ -857,7 +1502,9 @@ function buildBodiam(){
       { name:"従者ホール (Retainers' Hall)", desc:'西棟。外壁側は窓なし、暖炉なし。' },
       { name:'倉庫・宿舎', desc:'北棟東側、ゲートハウスの東隣。' },
       { name:'厩舎 (Stable)', desc:'北棟西側、ゲートハウスの西隣。' },
-      { name:'井戸 (Well)', desc:'南西円塔のたもと、南棟の石床上。' }
+      { name:'井戸 (Well)', desc:'南西円塔のたもと、南棟の石床上。' },
+      { name:'菜園 (Kitchen Garden)', desc:'中庭西側。豆・キャベツ・根菜の畝を柵で囲う。' },
+      { name:'薬草園 (Herb Garden)', desc:'中庭東側。厨房と手当てに使うハーブの小区画。' }
     ]
   };
 
@@ -876,10 +1523,18 @@ function buildBodiam(){
   var life = {
     gates: [ { path: [ {x:0, z:-OW}, {x:0, z:gateOuterZ} ], outDir:{x:0,z:-1},
       vanishDist: (MOAT_OUTER - OW + 6) - gatePathLen } ],
-    courtyard: [ { minX:-COURT_HALF, maxX:COURT_HALF, minZ:-COURT_HALF, maxZ:COURT_HALF } ],
+    // The wander rect and the patrol loop are pulled in from COURT_HALF to
+    // COURT_INNER (7.5) so that neither farmers nor guards ever stand in
+    // the new kitchen-garden / herb-garden border, whose inner edge is at
+    // PLANT_IN - 0.05 = 8.8. Farmers additionally walk a straight line
+    // from their wander point to the gate at (0,-OW); from a rect capped
+    // at +/-7.5 that line stays inside |x| < 6.3 where it crosses the
+    // north strip, which is why the north strip is left bare except for
+    // the two tubs out at |x| = 8.0.
+    courtyard: [ { minX:-COURT_INNER, maxX:COURT_INNER, minZ:-COURT_INNER, maxZ:COURT_INNER } ],
     patrol: [
-      [ COURT_HALF-0.8, 0, -(COURT_HALF-0.8)], [ COURT_HALF-0.8, 0,  COURT_HALF-0.8],
-      [-(COURT_HALF-0.8), 0,  COURT_HALF-0.8], [-(COURT_HALF-0.8), 0, -(COURT_HALF-0.8)]
+      [ COURT_INNER, 0, -COURT_INNER], [ COURT_INNER, 0,  COURT_INNER],
+      [-COURT_INNER, 0,  COURT_INNER], [-COURT_INNER, 0, -COURT_INNER]
     ],
     population: { farmers: 8, guards: 2 }
   };
