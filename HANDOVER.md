@@ -1,34 +1,66 @@
 # 中世城3Dビューア 引継ぎメモ(2026-08-14 更新)
 
 ## プロジェクト概要
-- 成果物: `C:\Dev\Claude\HTMLTown\castle-viewer\index.html`(単一HTML・ビルド不要・Three.js r128 UMDをcdnjsから読込)
-- 内容: 中世城の3Dビューア。カットアウェイ(ズームで壁フェード→内観)、時間帯×天候、遠景山並み、日英ツールチップ、ラベル常時表示、カメラパン、住人シミュレーション、城レジストリ `CASTLES` による複数城対応
-- 運用体制: Fable=指示・判断・検証、実作業はSonnetサブエージェント(同一ファイルのため直列実行)
-- Git 管理: このフォルダ(`castle-viewer/`)がリポジトリ。親フォルダの既存 HTML は別物・不干渉
+- 成果物: `C:\Dev\Claude\HTMLTown\castle-viewer\` — **ビルド不要・ローカルサーバ不要**(`index.html` をダブルクリックで動作)。Three.js r128 UMD を cdnjs から読込
+- 内容: 中世城の3Dビューア。カットアウェイ(ズームで壁フェード→内観)、時間帯×天候、遠景山並み、日英ツールチップ、ラベル常時表示、カメラパン、住人シミュレーション
+- Git 管理: このフォルダがリポジトリ。親フォルダの既存 HTML とは無関係
 
-## 収録城(3城)
-1. **ボディアム城**(イングランド, 1385)— 水堀の方形城・双塔ゲートハウス
-2. **ヴァンセンヌ城**(フランス, 1380)— 実物準拠改修済み: 330×175m外郭・角塔9基(実名・実配置、西辺は塔なし)、西長辺中央のドンジョン(52m・マシクレーション冠)+シェミーズ(13m・歩廊・バルティザン)、40m級サント・シャペル。出典: Wikipedia/Wikimedia写真・公式平面図
-3. **マルボルク城**(ポーランド, 1406)— 赤レンガ+テラコッタ。高城(回廊四翼+主塔+教会後陣、tier:'inner'カットアウェイ+内観4室)・中城(大マスター宮殿)・低城(二重壁+乾堀+橋門)、ノガト川
+## ファイル構成(2026-08-14 に単一HTMLから分割)
+```
+index.html            HTML/CSS/UI と <script> 読み込み順のみ
+js/00-core.js         共有プリミティブ(mkBox/place/registerPick/buildLabelGroup 等)
+js/01-moat.js         堀・水面・土手(buildWaterMoatSystem/ringPerimPoint 'square'|'circle'|'rect')
+js/10-scene.js        renderer/scene/camera/lights/山並みリング
+js/11-environment.js  時間帯・天候・空・パーティクル
+js/12-camera.js       orbit/pan/zoom/reveal/updateFade/リビールUI
+js/13-pick.js         レイキャスト・ツールチップ・ラベル表示
+js/14-residents.js    住人システム
+js/20-registry.js     var CASTLES = []; registerCastle(def)
+castles/*.js          城ごとに1ファイル。末尾で自己登録  ← 並行編集の単位
+js/90-main.js         applyCastle/UI配線/メインループ/デバッグヘルパー(最後に読む)
+```
+
+### 重要な制約
+- **ES モジュール禁止**。`type="module"` は file:// で CORS ブロックされる(ヘッドレスChromeで実測確認済み)。クラシックスクリプトのみ
+- 全ファイルが**同一グローバルスコープを共有**する(IIFEで包まない)。トップレベルの関数・変数名は他ファイルと重複させないこと
+- **城を追加する手順**: `castles/<id>.js` を新規作成し、`index.html` の `<script>` 行を1行追加するだけ。他ファイルの編集は不要
+
+## 収録城(6件)
+| id | 名称 | 国 | 年 | 備考 |
+|---|---|---|---|---|
+| bodiam | ボディアム城 | イングランド | 1385 | 水堀の方形城・双塔ゲートハウス |
+| vincennes | ヴァンセンヌ城 | フランス | 1380 | 実物準拠改修済み。角塔9基・52mドンジョン・シェミーズ |
+| malbork | マルボルク城 | ポーランド | 1406 | **写真ベース版**。三郭を140x288mに圧縮 |
+| malbork-plan | マルボルク城(実測版) | ポーランド | 1406 | **実測ベース版**。南北508m。グダニスコ+5連アーチ架橋あり |
+| beaumaris | ボーマリス城 | ウェールズ | 1295 | 完全同心円式・未完成の切り詰められた塔 |
+| castel-del-monte | カステル・デル・モンテ | イタリア | 1240 | 正八角形+八角形塔8基。堀なし |
+
+※ malbork と malbork-plan は**意図的に両方残している**(写真ベース vs 実測ベースの比較用)
 
 ## 主要システム
-- `CASTLES[].view` = {targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, camFar, panLimit, envScale, envLift}(applyCastle が切替時適用)
-- カメラパン: 右ドラッグ/Shift+左ドラッグ/2本指。`panLimit` でクランプ、切替リセット
-- ラベル: `buildLabelGroup`(pickables から自動生成)。外観=トグルONで常時、内観=リビール>0.28。**カメラ距離比例で毎フレーム再スケール(画面上約24px一定)**
-- 住人(section 6.5): 「住人」トグル。build() 戻り値 `life` = { gates(通路中心線ウェイポイント配列), courtyard(矩形配列), patrol, population }。農民=門を通って出入り(through/throughIn 状態)+中庭徘徊、衛兵=巡回。夜は農民1/3。ジオメトリ/マテリアル共有、切替で確実に破棄
-- 門: 3城とも実開口(貫通)。ポートカリスは巻き上げ位置、扉は開状態
-- デバッグヘルパー: `__applyCastle/__setPan/__panBy/__setZoom(0..1)/__setOrbit/__setEnv/__setLabels/__setResidents/__stepResidents/__residentStates/__pickAt/__findPickScreen/__debugState`(ペイン非表示時は canvas.toDataURL でキャプチャ可)
+- `CASTLES[].view` = {targetY, zMin, zMax, initDist, fogNear, fogFar, shadowExtent, shadowFar, camFar, panLimit, envScale, envLift}
+- カメラパン: 右ドラッグ/Shift+左ドラッグ/2本指。上下方向はユーザー要望により**反転済み**
+- ラベル: 外観=トグルONで常時、内観=リビール>0.28。**カメラ距離比例で画面上約24px一定に再スケール**
+- 住人: build() 戻り値 `life` = { gates(通路中心線ウェイポイント), courtyard(矩形配列), patrol, population }。門の実開口を通って出入り。夜は農民1/3
+- デバッグヘルパー: `__applyCastle/__setPan/__panBy/__setZoom(0..1)/__setOrbit/__setEnv/__setLabels/__setResidents/__stepResidents/__pickAt/__findPickScreen/__debugState/__scene/__camera/__MOUNTAIN_RINGS`
 
-## 検証状況(2026-08-14 時点、全ゲート合格)
-- node --check、スタブ実行(3城カウント: ボディアム18/18、ヴァンセンヌ22/24、マルボルク21/13)
-- 実表示: 3城切替往復・住人ON/OFF・カットアウェイ・ラベル・時間帯/天候でコンソールエラー0件
-- 目視: 3城の門開口貫通、農民の門通過・橋渡り、ラベル判読性、山並み、実物準拠形状
+## 検証手法(確立済み)
+- **file:// 実測**: `& "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --disable-gpu --no-sandbox --user-data-dir=<tmp> --virtual-time-budget=10000 --dump-dom "file:///.../index.html"` で `<option>` 数とローディング解除を確認
+- ブラウザペインが非表示でスクリーンショットが撮れない場合: `javascript_exec` で `canvas.toDataURL('image/jpeg',0.7)` を取得しファイル化して Read
+- 全城回帰: 6城 x 時間帯4 x 天候4 x 住人ON/OFF x ズーム3段 + `window.onerror` 収集
+
+## 寸法資料の所在
+- マルボルク実測仕様書: scratchpad の `malbork_spec.md`(座標系・実測値・確信度・出典略号つき)
+- 有用な情報源: **medievalheritage.eu**(マルボルク・ボーマリスとも高精度)、各国文化財機関、伊/波語版Wikipedia
+- **UNESCO推薦書類は期待薄**: 多くの物件はICOMOS評価書のみで推薦書PDF自体が存在しない。whc.unesco.org は自動取得を403拒否、PDFもダウンロード強制
 
 ## 検討事項(未実施・提案のみ)
-- マルボルクの色調が単調(壁と屋根が同系オレンジ)。差別化するなら屋根をより暗い赤褐色に
-- アーティファクト公開には Three.js のインライン化が必要(CSP対応、ユーザー判断待ち)
-- 国旗絵文字は Windows Chrome では文字表示(OS制限)
+- **テクスチャ表現**(手続き的レンガ/瓦、窓トレサリー) — 「正確な箱の模型」の次の段階。実施すると全城の作り直し級
+- `img2threejs` スキルによる参照画像との反復ループ — トークン消費が大きいため保留中
+- 姫路城 — 差別化度は最高だが曲線屋根が箱モデルと不相性。テクスチャ段階での第一候補
+- クロンボー城 — UNESCO推薦書PDF(29MB)が実在する数少ない例。緑青の銅屋根で差別化可
 
 ## 出典
-- https://en.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes / https://fr.wikipedia.org/wiki/Ch%C3%A2teau_de_Vincennes
-- https://en.wikipedia.org/wiki/Malbork_Castle
+- https://medievalheritage.eu/ (Vincennes / Malbork / Beaumaris)
+- https://en.wikipedia.org/wiki/Malbork_Castle / https://pl.wikipedia.org/wiki/Zamek_w_Malborku
+- https://it.wikipedia.org/wiki/Castel_del_Monte
