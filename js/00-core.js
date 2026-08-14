@@ -120,9 +120,21 @@ function makeCheckerTexture(colorA, colorB, tilesPerSide){
 
 /* label sprite (canvas-text pill) used by the "always-on labels" toggle
  * (section 6). Castle-agnostic: any castle's room-name strings can use
- * this. depthTest stays on so a label sitting inside a still-solid wall
- * is correctly occluded; it is only ever shown once reveal has faded the
- * relevant walls anyway (see labelGroup visibility gating). */
+ * this.
+ * depthTest is OFF (with a high renderOrder) so a label always draws on
+ * top of the castle. Reason: the cutaway's whole purpose is to show the
+ * interior, but a half-faded wall still writes depth while opaque and the
+ * un-faded near walls certainly do, so room labels behind them were
+ * either clipped away entirely or half-swallowed by a floor/wall/furniture
+ * mesh that happened to intersect the sprite quad. Labels are an overlay,
+ * not scene geometry -- occluding them defeats the point. Room labels are
+ * still gated behind the reveal threshold (see updateLabelVisibility) so
+ * this never shows interior names through a fully solid castle.
+ * frustumCulled is off because updateLabelVisibility offsets the sprite in
+ * screen space via `center` (anti-overlap stacking); the cull test only
+ * knows the un-offset position and would pop labels out near the top edge
+ * of the frame. Label counts are tiny (5-22 per castle), so always
+ * submitting them costs nothing measurable. */
 function roundRectPath(ctx,x,y,w,h,r){
   ctx.beginPath();
   ctx.moveTo(x+r,y);
@@ -152,8 +164,10 @@ function makeTextSprite(text, worldHeight){
   ctx.fillStyle = '#f2ead6';
   ctx.fillText(text, c.width/2, c.height/2 + 1);
   var tex = new T.CanvasTexture(c);
-  var mat = new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  var mat = new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false });
   var spr = new T.Sprite(mat);
+  spr.renderOrder = 9000;
+  spr.frustumCulled = false;
   var h = worldHeight || 0.9;
   spr.scale.set(h * (c.width/c.height), h, 1);
   return spr;
@@ -170,7 +184,15 @@ function makeTextSprite(text, worldHeight){
  * independently once the toggle is on: 'structure' labels (towers, gates,
  * walls, ...) show immediately since they're exterior and never occluded
  * by the cutaway; 'room' labels stay gated behind the reveal threshold so
- * they don't float visibly through a still-solid wall. */
+ * they don't float visibly through a still-solid wall.
+ * The sprite sits exactly ON the top face of its pick volume (the anchor);
+ * the visible lift above that -- and any extra lift used to unstack
+ * overlapping labels -- is applied per frame in *screen* space through
+ * Sprite.center (see updateLabelVisibility). A fixed world-space lift was
+ * what buried labels in the first place: +0.6m clears a Bodiam room wall
+ * (33m castle) but is invisible at Malbork (470m), and any single constant
+ * is wrong for both. A screen-space lift is scale-free by construction --
+ * it reads the same at every castle and every zoom. */
 function buildLabelGroup(group, pickables){
   var labelGroup = new T.Group();
   labelGroup.visible = false;
@@ -181,11 +203,19 @@ function buildLabelGroup(group, pickables){
     var worldHeight = pi.kind === 'structure' ? 1.4 : 0.85;
     var spr = makeTextSprite(shortName, worldHeight);
     var h = p.geometry.parameters.height;
-    spr.position.set(p.position.x, p.position.y + h/2 + 0.6, p.position.z);
+    var ay = p.position.y + h/2;
+    spr.position.set(p.position.x, ay, p.position.z);
     spr.userData.labelKind = pi.kind;
+    // anchor = top-centre of the pick volume, in the castle group's local
+    // space. Kept separately from position because the layout pass needs a
+    // stable point to project (position never moves now, but this keeps the
+    // two concerns readable and survives any future world-space nudge).
+    spr.userData.anchor = new T.Vector3(p.position.x, ay, p.position.z);
     // pill aspect ratio, kept so the per-frame constant-screen-size
     // rescale in updateLabelVisibility preserves the text proportions
     spr.userData.aspect = spr.scale.x / spr.scale.y;
+    // last anti-overlap stacking level, retried first next solve (hysteresis)
+    spr.userData.slot = 0;
     labelGroup.add(spr);
   });
   return labelGroup;
