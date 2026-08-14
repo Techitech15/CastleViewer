@@ -99,6 +99,15 @@
     display:none;left:0;top:0}
   #tooltip .tt-title{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:3px;letter-spacing:.2px}
   #tooltip .tt-desc{font-size:11.5px;line-height:1.5;color:var(--ink2)}
+  /* ラベル連動イメージ動画(media/manifest.js にキーがあるラベルだけ)。
+     16:9 の箱を先に確保しておくことで、ポスター→動画の切り替わりでツールチップの
+     高さが動かない(位置計算は showTooltip が表示直後に実測している)。
+     幅は #tooltip の max-width 260px - 左右 padding 13px×2 = 234px に収まる。 */
+  #tooltip .tt-media{display:none;width:100%;aspect-ratio:16/9;margin:0 0 7px;
+    border-radius:9px;overflow:hidden;background:rgba(0,0,0,.4);
+    border:1px solid var(--hair);position:relative}
+  #tooltip .tt-media video{display:block;width:100%;height:100%;object-fit:cover;
+    border-radius:inherit;background:#000;pointer-events:none}
 
   @media (max-width:640px){
     #infoPanel{max-width:230px;padding:12px 14px}
@@ -203,6 +212,11 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- ラベル連動クリップの一覧 -> window.CASTLE_CLIPS。file:// では fetch / XHR が
+     使えないため manifest.json ではなくクラシックスクリプトで読む
+     (HANDOVER_VIDEO.md §10.2)。読めなくても js/13-pick.js 側が
+     オプショナルに引くのでビューアは通常どおり動く。 -->
+<script src="media/manifest.js"></script>
 <script src="js/00-core.js"></script>
 <script src="js/01-moat.js"></script>
 <script src="js/10-scene.js"></script>

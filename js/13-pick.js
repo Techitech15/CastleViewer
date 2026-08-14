@@ -40,18 +40,132 @@ function doPick(clientX, clientY){
     hideTooltip();
   }
 }
+/* -- tooltip DOM + label-linked image clip ----------------------------
+ * The tooltip used to be rebuilt with innerHTML on every show, which is
+ * fine for two <div>s but fatal for a <video>: a fresh element per hover
+ * means a fresh decoder and a fresh network load every time the cursor
+ * crosses a pill. So the three nodes (media box / title / desc) are built
+ * once and kept; a show only writes textContent and swaps video.src.
+ *
+ * One <video> serves every clip. It is muted+loop+playsinline (the
+ * clips carry no audio track at all, but muted is what makes programmatic
+ * play() legal without a user gesture) and preload="none", so nothing is
+ * fetched until a hover actually asks for a clip -- an unlabelled orbit
+ * costs zero bytes.
+ *
+ * Clips are looked up optionally: no manifest, no clips table, no entry
+ * for this castle+label, or no castle registry at all -> the media box
+ * stays hidden and the tooltip is exactly the old text-only one.
+ * ------------------------------------------------------------------- */
+var ttTitleEl = null, ttDescEl = null, ttMediaEl = null, ttVideoEl = null;
+var ttVideoSrc = '';   // src currently attached to ttVideoEl ('' = none)
+var ttShownInfo = null; // pickInfo the tooltip currently shows (identity-compared)
+function ensureTooltipDom(){
+  if (ttTitleEl) return;
+  tooltipEl.textContent = '';
+  ttMediaEl = document.createElement('div');
+  ttMediaEl.className = 'tt-media';
+  ttVideoEl = document.createElement('video');
+  // properties *and* attributes: some of these are only honoured by the
+  // autoplay/inline policy when present as attributes at play() time.
+  ttVideoEl.muted = true; ttVideoEl.defaultMuted = true;
+  ttVideoEl.loop = true; ttVideoEl.controls = false; ttVideoEl.preload = 'none';
+  ttVideoEl.setAttribute('muted', '');
+  ttVideoEl.setAttribute('loop', '');
+  ttVideoEl.setAttribute('playsinline', '');
+  ttVideoEl.setAttribute('webkit-playsinline', '');
+  ttVideoEl.setAttribute('preload', 'none');
+  ttVideoEl.setAttribute('disablepictureinpicture', '');
+  // a decode error must never take the tooltip down with it -- the text
+  // still shows, the box just folds away. Forgetting the src as well means
+  // the next hover of that same clip re-attaches (and so retries) it rather
+  // than taking the "same clip, just seek to 0" path into a dead element.
+  ttVideoEl.addEventListener('error', function(){
+    ttMediaEl.style.display = 'none';
+    ttVideoSrc = '';
+  });
+  ttMediaEl.appendChild(ttVideoEl);
+  ttTitleEl = document.createElement('div'); ttTitleEl.className = 'tt-title';
+  ttDescEl = document.createElement('div'); ttDescEl.className = 'tt-desc';
+  tooltipEl.appendChild(ttMediaEl);
+  tooltipEl.appendChild(ttTitleEl);
+  tooltipEl.appendChild(ttDescEl);
+}
+function tooltipClipFor(info){
+  if (!info || !info.name) return null;
+  var reg = window.CASTLE_CLIPS;
+  var clips = reg && reg.clips;
+  if (!clips) return null;
+  // castle id comes from the registry entry the viewer is currently on;
+  // 20-registry.js / 90-main.js load *after* this file, so both are read
+  // defensively (they only ever exist by the time a hover can happen).
+  if (typeof CASTLES === 'undefined' || typeof currentIdx !== 'number') return null;
+  var def = CASTLES[currentIdx];
+  if (!def || !def.id) return null;
+  var clip = clips[def.id + '::' + info.name];
+  return (clip && clip.src) ? clip : null;
+}
+function startTooltipClip(clip){
+  if (!clip){ stopTooltipClip(); return; }
+  ttMediaEl.style.display = 'block';
+  if (ttVideoSrc !== clip.src){
+    // poster before src: the still is what the box shows until the first
+    // frame is decoded, so it has to be in place before loading starts
+    ttVideoEl.poster = clip.poster || '';
+    ttVideoEl.src = clip.src;
+    ttVideoSrc = clip.src;
+  } else {
+    // same clip hovered again -> restart from the top rather than resuming
+    // wherever the previous hover left off
+    try { ttVideoEl.currentTime = 0; } catch (e){}
+  }
+  // play() rejects on a src swap mid-load (AbortError) and whenever the
+  // policy declines -- both are non-fatal (the poster stays up), and an
+  // unhandled rejection here would show up as a console error.
+  var pr = ttVideoEl.play();
+  if (pr && pr.catch) pr.catch(function(){});
+}
+function stopTooltipClip(){
+  if (!ttVideoEl) return;
+  ttMediaEl.style.display = 'none';
+  if (!ttVideoEl.paused) ttVideoEl.pause();
+  if (ttVideoEl.readyState > 0){ try { ttVideoEl.currentTime = 0; } catch (e){} }
+}
 function showTooltip(info, x, y){
-  tooltipEl.innerHTML = '<div class="tt-title">' + info.name + '</div><div class="tt-desc">' + info.desc + '</div>';
+  ensureTooltipDom();
+  // content is rewritten only when the hovered thing actually changes:
+  // doPick runs on every mousemove, and restarting the clip 60x a second
+  // while the cursor drifts across one pill would never show a frame past
+  // the first. Moving within the same target is a pure reposition.
+  if (info !== ttShownInfo){
+    ttShownInfo = info;
+    ttTitleEl.textContent = info.name;
+    ttDescEl.textContent = info.desc;
+    startTooltipClip(tooltipClipFor(info));
+  }
   tooltipEl.style.display = 'block';
   var pad = 16;
   var rectW = tooltipEl.offsetWidth, rectH = tooltipEl.offsetHeight;
   var left = x + pad, top = y + pad;
   if (left + rectW > window.innerWidth - 8) left = x - rectW - pad;
   if (top + rectH > window.innerHeight - 8) top = y - rectH - pad;
+  // a tooltip with a clip is ~3x taller than a text-only one, so the flip
+  // above can now land off the *top* of the screen (a cursor near the
+  // bottom edge flips a 210px box to y-226). Clamping to the viewport on
+  // both ends keeps the whole box visible; the old Math.max(4,..) only
+  // ever guarded the near edge.
+  if (rectH + 8 < window.innerHeight) top = Math.min(top, window.innerHeight - rectH - 8);
+  if (rectW + 8 < window.innerWidth) left = Math.min(left, window.innerWidth - rectW - 8);
   tooltipEl.style.left = Math.max(4,left) + 'px';
   tooltipEl.style.top = Math.max(4,top) + 'px';
 }
-function hideTooltip(){ tooltipEl.style.display = 'none'; }
+function hideTooltip(){
+  tooltipEl.style.display = 'none';
+  // dropping the remembered info makes re-hovering the same label replay
+  // the clip from frame 0 instead of picking up mid-loop
+  ttShownInfo = null;
+  stopTooltipClip();
+}
 
 /* -- always-on labels toggle: independent of the hover tooltip. Exterior
  * ('structure') labels show as soon as the toggle is on, regardless of
@@ -237,6 +351,27 @@ window.__labelHitAt = function(clientX, clientY){
   // is under this client point. null when none / labels off.
   var rect = canvas.getBoundingClientRect();
   return labelHitAt(clientX - rect.left, clientY - rect.top);
+};
+window.__ttClip = function(){
+  // what the tooltip's single reused <video> is doing right now, for tests:
+  // `shown` is whether the media box is actually laid out (a clipless label
+  // leaves it display:none), `src` is the attribute as authored.
+  if (!ttVideoEl) return { built: false, shown: false, src: '', paused: true };
+  return {
+    built: true,
+    shown: ttMediaEl.style.display === 'block' && ttMediaEl.offsetWidth > 0,
+    tooltipShown: tooltipEl.style.display === 'block',
+    src: ttVideoEl.getAttribute('src') || '',
+    poster: ttVideoEl.getAttribute('poster') || '',
+    paused: ttVideoEl.paused,
+    readyState: ttVideoEl.readyState,
+    currentTime: ttVideoEl.currentTime,
+    error: ttVideoEl.error ? ttVideoEl.error.code : 0,
+    videoCount: document.querySelectorAll('#tooltip video').length,
+    title: ttTitleEl ? ttTitleEl.textContent : '',
+    box: (function(){ var r = tooltipEl.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height }; })()
+  };
 };
 window.__labelHits = function(){
   // every drawn label's box + name, in draw (near -> far) order

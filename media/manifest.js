@@ -1,0 +1,106 @@
+/* castle-viewer のラベル連動クリップ一覧。
+ * file:// では fetch / XHR が使えないため、manifest.json ではなくこの
+ * クラシックスクリプトを <script src="media/manifest.js"> で読むこと。
+ * キーは `<城id>::<ラベル名>` で、ラベル名は castles/*.js の文字列と完全一致。
+ * 自動生成物なので手で編集しない。 */
+window.CASTLE_CLIPS = {
+  "version": 1,
+  "clips": {
+    "malbork::大食堂 Great Refectory": {
+      "src": "media/malbork/great-refectory.mp4",
+      "poster": "media/malbork/great-refectory.jpg",
+      "seconds": 5.04,
+      "bytes": 312672
+    },
+    "bodiam::ゲートハウス Gatehouse": {
+      "src": "media/bodiam/gatehouse.mp4",
+      "poster": "media/bodiam/gatehouse.jpg",
+      "seconds": 5.04,
+      "bytes": 346029
+    },
+    "bodiam::大広間 Great Hall": {
+      "src": "media/bodiam/great-hall.mp4",
+      "poster": "media/bodiam/great-hall.jpg",
+      "seconds": 5.04,
+      "bytes": 222419
+    },
+    "bodiam::八角プラットフォーム The Octagon": {
+      "src": "media/bodiam/the-octagon.mp4",
+      "poster": "media/bodiam/the-octagon.jpg",
+      "seconds": 5.04,
+      "bytes": 269154
+    },
+    "vincennes::身廊 Nave": {
+      "src": "media/vincennes/nave.mp4",
+      "poster": "media/vincennes/nave.jpg",
+      "seconds": 5.04,
+      "bytes": 333029
+    },
+    "vincennes::サント・シャペル Sainte-Chapelle": {
+      "src": "media/vincennes/sainte-chapelle.mp4",
+      "poster": "media/vincennes/sainte-chapelle.jpg",
+      "seconds": 5.04,
+      "bytes": 321339
+    },
+    "malbork::教会後陣+聖母像 Church Apse & Virgin Mary": {
+      "src": "media/malbork/church-apse-virgin-mary.mp4",
+      "poster": "media/malbork/church-apse-virgin-mary.jpg",
+      "seconds": 5.04,
+      "bytes": 363773
+    },
+    "malbork::グダニスコ(便所塔) Gdanisko / Dansker": {
+      "src": "media/malbork/gdanisko-dansker.mp4",
+      "poster": "media/malbork/gdanisko-dansker.jpg",
+      "seconds": 5.04,
+      "bytes": 336882
+    },
+    "malbork::中庭回廊 Cloister Arcade": {
+      "src": "media/malbork/cloister-arcade.mp4",
+      "poster": "media/malbork/cloister-arcade.jpg",
+      "seconds": 5.04,
+      "bytes": 280815
+    },
+    "malbork::中庭の井戸 Courtyard Well": {
+      "src": "media/malbork/courtyard-well.mp4",
+      "poster": "media/malbork/courtyard-well.jpg",
+      "seconds": 5.04,
+      "bytes": 364089
+    },
+    "malbork::中庭の菜園 Courtyard Herb Garden": {
+      "src": "media/malbork/courtyard-herb-garden.mp4",
+      "poster": "media/malbork/courtyard-herb-garden.jpg",
+      "seconds": 5.04,
+      "bytes": 221768
+    },
+    "beaumaris::中間塔(礼拝堂塔) East Mid Tower / Chapel Tower": {
+      "src": "media/beaumaris/east-mid-tower-chapel-tower.mp4",
+      "poster": "media/beaumaris/east-mid-tower-chapel-tower.jpg",
+      "seconds": 5.04,
+      "bytes": 329646
+    },
+    "beaumaris::北門楼 門道と落とし格子 North Gate Passage & Portcullis": {
+      "src": "media/beaumaris/north-gate-passage-portcullis.mp4",
+      "poster": "media/beaumaris/north-gate-passage-portcullis.jpg",
+      "seconds": 5.04,
+      "bytes": 264875
+    },
+    "beaumaris::潮汐ドック Tidal Dock (\"Gate next the Sea\")": {
+      "src": "media/beaumaris/tidal-dock-gate-next-the-sea.mp4",
+      "poster": "media/beaumaris/tidal-dock-gate-next-the-sea.jpg",
+      "seconds": 5.04,
+      "bytes": 333641
+    },
+    "castel-del-monte::主玄関ポータル Main Portal": {
+      "src": "media/castel-del-monte/main-portal.mp4",
+      "poster": "media/castel-del-monte/main-portal.jpg",
+      "seconds": 5.04,
+      "bytes": 379781
+    },
+    "castel-del-monte::中庭 Courtyard": {
+      "src": "media/castel-del-monte/courtyard.mp4",
+      "poster": "media/castel-del-monte/courtyard.jpg",
+      "seconds": 5.04,
+      "bytes": 240213
+    }
+  }
+};
