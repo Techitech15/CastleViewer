@@ -76,6 +76,26 @@ function smoothstep(a,b,x){
   var t = Math.max(0, Math.min(1, (x-a)/(b-a)));
   return t*t*(3-2*t);
 }
+/* Decals inside a fade group that do NOT use fg.mat -- window and door
+ * openings share one windowMat across every wall of a castle, portcullis
+ * grids share a metal material, and so on. A shared material instance
+ * cannot carry a per-group opacity, so while a wall is mid-fade its
+ * windows stayed fully opaque and hung in the air as black rectangles.
+ * Cloning the material per group would fix the opacity but break the
+ * night window glow, which applyEnvironment writes to the ONE windowMat
+ * the castle returns. So instead the decals are simply switched off once
+ * their wall is more than about half gone: by then the wall itself is
+ * faint enough that the pop reads as part of the dissolve. */
+var EXTRA_HIDE_AT = 0.55;
+function fadeExtras(fg){
+  if (fg._extras) return fg._extras;
+  var extras = [];
+  fg.group.traverse(function(o){
+    if (o.isMesh && o.material && o.material !== fg.mat) extras.push(o);
+  });
+  fg._extras = extras;
+  return extras;
+}
 function setGroupOpacity(fg, op, instant){
   fg.op = op;
   var visible = op > 0.02;
@@ -85,6 +105,11 @@ function setGroupOpacity(fg, op, instant){
     fg.mat.transparent = !full;
     fg.mat.depthWrite = full;
     fg.mat.opacity = op;
+    var extras = fadeExtras(fg);
+    if (extras.length){
+      var showExtras = op > EXTRA_HIDE_AT;
+      for (var i = 0; i < extras.length; i++) extras[i].visible = showExtras;
+    }
   }
 }
 function updateFade(reveal, dt){

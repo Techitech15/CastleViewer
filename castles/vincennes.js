@@ -37,10 +37,16 @@ function buildVincennes(){
     return desc;
   }
 
-  /* ---- palette: pale Paris limestone, slate roofs ------------------ */
-  var STONE_WALL   = 0xb9b2a0;
-  var STONE_WALL_V = 0xafa896;
-  var STONE_DARK   = 0x8a8474;
+  /* ---- palette: pale Paris limestone, slate roofs ------------------
+   * Reference photos (Commons "Chateau-de-Vincennes-donjon.jpg",
+   * "Château de Vincennes Paris FRA 002.jpg") show a very light, warm
+   * cream limestone -- the earlier 0xb9b2a0/0x8a8474 pair read grey-brown
+   * and made the chemise look like a different, darker material than the
+   * donjon it wraps. Everything above ground is now the same cream family,
+   * only lightly value-separated so faces still read apart. */
+  var STONE_WALL   = 0xd2c8ae;
+  var STONE_WALL_V = 0xc9bea2;
+  var STONE_DARK   = 0xc3b89c;
   var ROOF_COL     = 0x3f3c38; // dark slate -- used for roofs, chemise walkway cap, bartizan caps
   var WINDOW_COL   = 0x1c150e;
   var FLOOR_COL    = 0x9c9484;
@@ -76,9 +82,19 @@ function buildVincennes(){
    * -------------------------------------------------------------- */
   var OHX = 87.5, OHZ = 165;          // outer wall half-extents (175 x 330m)
   var WT = 2.8, WH = 11, MER = 1.5;   // wall thickness / height / merlon height
-  var TOWER_W = 9, TOWER_D = 7, TOWER_H = 42, TOWER_ROOF_H = 6.5;
-  var GATE_W = 12, GATE_D = 9, GATE_ROOF_H = 7.5;     // Tour du Village (main gate), larger
-  var GATE2_W = 10, GATE2_D = 8, GATE2_ROOF_H = 7;    // Tour du Bois (second gate)
+  // Roof heights are capped so no tower apex overtops the donjon's 52m
+  // turrets: 42 (parapet) + 1.5 (merlon) + roofH must stay <= ~52. The
+  // earlier 6.5m looked flat only because the pyramid's base was
+  // undersized (see buildTower); with the base fixed, ~8.5m already gives
+  // the steep pitch the 1668 bird's-eye shows without stealing the keep's
+  // place as the highest point of the castle.
+  var TOWER_W = 9, TOWER_D = 7, TOWER_H = 42, TOWER_ROOF_H = 8.2;
+  // Tour du Village is drawn markedly bigger than every other tower on the
+  // 2021 official plan and projects further out from the curtain -- it is
+  // the castle's principal gate. 12x9 barely separated it from the plain
+  // 9x7 flanking towers.
+  var GATE_W = 15, GATE_D = 11, GATE_ROOF_H = 9.4;    // Tour du Village (main gate), larger
+  var GATE2_W = 11, GATE2_D = 9, GATE2_ROOF_H = 8.8;  // Tour du Bois (second gate)
 
   function addCrenellations(target, mat, cx, cz, length, ry, topY, thickness){
     var merlonW = 1.5, gapW = 1.35, mt = thickness*0.72;
@@ -181,11 +197,26 @@ function buildVincennes(){
       place(body, cx, h/2, cz, ry);
       fg.group.add(body);
     }
-    var lip = mkBox(w*1.08, 0.7, d*1.1, fg.mat);
-    place(lip, cx, h-0.6, cz, ry);
-    fg.group.add(lip);
-    addCrenellations(fg.group, fg.mat, cx, cz, w, ry, h, d);
-    var roof = mkCone(Math.max(w,d)*0.62, roofH, 4, roofCaps.mat);
+    // machicolated crown: a corbel course stepping out, then the full
+    // projecting gallery it carries, then the parapet on top of that.
+    // The old single `lip` (w*1.08 wide, 0.7 tall) projected ~0.35m and
+    // vanished at viewing distance -- every reference photo of Vincennes
+    // shows a heavy shadowed corbel band ringing each tower just under
+    // the parapet, so it now steps out ~1.1m in two courses.
+    var corbel = mkBox(w+1.1, 0.6, d+1.1, fg.mat);
+    place(corbel, cx, h-2.7, cz, ry);
+    fg.group.add(corbel);
+    var machic = mkBox(w+2.2, 1.5, d+2.2, fg.mat);
+    place(machic, cx, h-1.6, cz, ry);
+    fg.group.add(machic);
+    addCrenellations(fg.group, fg.mat, cx, cz, w+2.0, ry, h, d+2.0);
+    // steep 4-sided slate pyramid. A ConeGeometry with 4 segments has a
+    // square base of CIRCUMradius r, i.e. half-side r/sqrt(2) -- the old
+    // r = max(w,d)*0.62 therefore gave a half-side of only 0.44*max(w,d),
+    // a cap far narrower than the tower it sat on. r = max(w,d)*0.80 makes
+    // the half-side ~0.57*max(w,d), so it oversails the parapet the way
+    // the 17th-c. bird's-eye view (Daumont, "en vue d'oyseau") shows.
+    var roof = mkCone(Math.max(w,d)*0.80, roofH, 4, roofCaps.mat);
     roof.rotation.y = Math.PI/4;
     place(roof, cx, h+MER+roofH/2, cz);
     roofCaps.group.add(roof);
@@ -261,8 +292,20 @@ function buildVincennes(){
    * only once the outer enceinte has already faded away (tier 'inner').
    * -------------------------------------------------------------- */
   var DCX = -95, DCZ = 50;              // donjon complex centre (bulging past the west wall)
-  var DHALF = 8.25, DH = 52;            // 16.5m square footprint, 52m tall
-  var TURR_R = 3.6;                     // corner turret radius (7.2m diameter), full height
+  var DHALF = 8.25, DH = 52;            // 16.5m square footprint, 52m to the turret tops
+  // Every photo of the keep (Commons "Chateau-de-Vincennes-donjon.jpg",
+  // "Château de Vincennes Paris FRA 002.jpg") shows the four corner
+  // turrets carrying ON UP past the square body's parapet and finishing
+  // with their own machicolated crowns a storey higher. The previous model
+  // ran body and turrets to the same 52m and capped both flat, so the body
+  // disappeared between four equal cylinders and read as a bundle of
+  // pipes. BODY_H is now the body's parapet, DH the turret tops.
+  // Measured off the frontal photographs: the turret crowns clear the body
+  // parapet by only about 7% of the keep's height (~3.5m), not the 7m a
+  // 45m body would have given -- that read as a deep notch between four
+  // stubs rather than one mass with four corner shafts.
+  var BODY_H = 48.0;
+  var TURR_R = 3.3;                     // corner turret radius (6.6m diameter, per plan)
   var STAIR_R = 3.0;                    // north stair-tower radius
 
   var dWallN = makeFadeGroup('donjonWallN', {x:0,z:-1}, false, STONE_WALL_V, 'inner');
@@ -274,28 +317,49 @@ function buildVincennes(){
   var dRoof = makeFadeGroup('donjonRoof', null, true, ROOF_COL, 'inner');
 
   function donjonWallFace(fg, cx, cz, ry){
-    var w = mkBox(DHALF*2, DH, 0.9, fg.mat);
-    place(w, cx, DH/2, cz, ry);
+    var w = mkBox(DHALF*2, BODY_H, 0.9, fg.mat);
+    place(w, cx, BODY_H/2, cz, ry);
     fg.group.add(w);
-    // machicolation-style projecting cornice near the top
-    var lip = mkBox(DHALF*2+0.8, 0.8, 1.3, fg.mat);
-    place(lip, cx, DH-1.0, cz, ry);
-    fg.group.add(lip);
-    addCrenellations(fg.group, fg.mat, cx, cz, DHALF*2, ry, DH, 0.9);
+    // machicolation: corbel course then the projecting gallery it carries.
+    // The old single 1.3m-deep lip on a 0.9m wall projected 0.2m per side
+    // and was invisible; the real keep's corbelled gallery stands ~1.2m
+    // proud and throws the deep shadow line that reads from the ground.
+    var corbel = mkBox(DHALF*2+1.0, 0.55, 1.9, fg.mat);
+    place(corbel, cx, BODY_H-3.1, cz, ry);
+    fg.group.add(corbel);
+    var machic = mkBox(DHALF*2+2.2, 1.6, 3.1, fg.mat);
+    place(machic, cx, BODY_H-2.0, cz, ry);
+    fg.group.add(machic);
+    addCrenellations(fg.group, fg.mat, cx, cz, DHALF*2+1.6, ry, BODY_H, 2.6);
   }
   donjonWallFace(dWallN, DCX, DCZ-DHALF, 0);
   donjonWallFace(dWallS, DCX, DCZ+DHALF, Math.PI);
   donjonWallFace(dWallE, DCX+DHALF, DCZ, -Math.PI/2);
   donjonWallFace(dWallW, DCX-DHALF, DCZ, Math.PI/2);
 
+  // Photographs show two kinds of opening on each face: tall traceried
+  // Gothic windows lighting the king's floors, plus a scatter of small
+  // square/slit lights. The previous single column of four identical 0.55m
+  // slits gave the 16.5m face nothing to read its size against.
   function donjonWindows(fg, cx, cz, ry){
-    var co=Math.cos(ry), si=Math.sin(ry);
-    for (var lvl=0; lvl<4; lvl++){
-      var y = 6 + lvl*10.4;
-      var win = mkBox(0.55, 1.9, 0.35, windowMat); // single vertical column per face, centred
-      place(win, cx, y, cz, ry);
+    var co = Math.cos(ry), si = Math.sin(ry);
+    function at(lx, y, w, h){
+      var win = mkBox(w, h, 0.35, windowMat);
+      place(win, cx + lx*co, y, cz - lx*si, ry);
       fg.group.add(win);
     }
+    for (var lvl=0; lvl<4; lvl++){
+      var y = 5.4 + lvl*10.4;
+      if (lvl === 1 || lvl === 2){
+        at(0, y+0.9, 1.5, 3.6);            // tall pointed window, floors 2-3
+        at(-4.2, y, 0.5, 1.5);
+        at( 4.2, y, 0.5, 1.5);
+      } else {
+        at(-2.6, y, 0.5, 1.6);
+        at( 2.6, y, 0.5, 1.6);
+      }
+    }
+    at(0, BODY_H-7.2, 0.5, 1.4);           // upper guard storey slit
   }
   donjonWindows(dWallN, DCX, DCZ-DHALF, 0);
   donjonWindows(dWallS, DCX, DCZ+DHALF, Math.PI);
@@ -307,34 +371,47 @@ function buildVincennes(){
     {x:DCX+DHALF, z:DCZ+DHALF}, {x:DCX-DHALF, z:DCZ+DHALF}
   ];
   turretPos.forEach(function(p){
-    var t = mkCyl(TURR_R, TURR_R*1.05, DH, 14, dTurrets.mat);
-    place(t, p.x, DH/2, p.z);
+    // shaft runs the full 52m, i.e. a clear 7m past the body's parapet
+    var t = mkCyl(TURR_R, TURR_R*1.04, DH-2.6, 16, dTurrets.mat);
+    place(t, p.x, (DH-2.6)/2, p.z);
     dTurrets.group.add(t);
-    var tlip = mkCyl(TURR_R*1.22, TURR_R*1.3, 0.9, 14, dTurrets.mat);
-    place(tlip, p.x, DH-1.0, p.z);
+    // each turret repeats the body's crown at its own, higher level
+    var tcorbel = mkCyl(TURR_R*1.14, TURR_R*1.06, 0.5, 16, dTurrets.mat);
+    place(tcorbel, p.x, DH-3.4, p.z);
+    dTurrets.group.add(tcorbel);
+    var tlip = mkCyl(TURR_R*1.34, TURR_R*1.24, 1.3, 16, dTurrets.mat);
+    place(tlip, p.x, DH-2.5, p.z);
     dTurrets.group.add(tlip);
-    var cap = mkCyl(TURR_R*1.1, TURR_R*1.1, 1.6, 14, dRoof.mat); // flat dark cap, not conical
-    place(cap, p.x, DH+0.8, p.z);
+    var parapet = mkCyl(TURR_R*1.3, TURR_R*1.32, 1.9, 16, dTurrets.mat);
+    place(parapet, p.x, DH-0.9, p.z);
+    dTurrets.group.add(parapet);
+    var cap = mkCyl(TURR_R*1.2, TURR_R*1.2, 0.5, 16, dRoof.mat); // flat lead terrace, not conical
+    place(cap, p.x, DH-0.15, p.z);
     dRoof.group.add(cap);
   });
 
+  // north stair turret: in the photos it is a slim shaft climbing the back
+  // of the keep and finishing just under the body parapet.
   var stairCz = DCZ - DHALF - STAIR_R*0.7;
-  var stairShaft = mkCyl(STAIR_R, STAIR_R*1.05, DH-4, 14, dStair.mat);
-  place(stairShaft, DCX, (DH-4)/2, stairCz);
+  var stairShaft = mkCyl(STAIR_R, STAIR_R*1.05, BODY_H-1.5, 14, dStair.mat);
+  place(stairShaft, DCX, (BODY_H-1.5)/2, stairCz);
   dStair.group.add(stairShaft);
-  var stairCap = mkCyl(STAIR_R*1.05, STAIR_R*1.05, 1.4, 14, dRoof.mat);
-  place(stairCap, DCX, DH-3.3, stairCz);
+  var stairLip = mkCyl(STAIR_R*1.2, STAIR_R*1.12, 0.9, 14, dStair.mat);
+  place(stairLip, DCX, BODY_H-1.9, stairCz);
+  dStair.group.add(stairLip);
+  var stairCap = mkCyl(STAIR_R*1.06, STAIR_R*1.06, 0.5, 14, dRoof.mat);
+  place(stairCap, DCX, BODY_H-1.2, stairCz);
   dRoof.group.add(stairCap);
-  registerPick(pickables, 'structure', DCX, DH*0.4, stairCz, STAIR_R*2.4, DH*0.7, STAIR_R*2.4,
+  registerPick(pickables, 'structure', DCX, BODY_H*0.4, stairCz, STAIR_R*2.4, BODY_H*0.7, STAIR_R*2.4,
     '螺旋階段塔 Spiral Staircase Tower', 'ドンジョン北面に付属する塔。各階を結ぶ螺旋階段を収める。');
 
-  // flat dark roof cap spanning the whole body (between the 4 turret caps)
-  var donjonRoofMesh = mkBox(DHALF*2-0.4, 1.6, DHALF*2-0.4, dRoof.mat);
-  place(donjonRoofMesh, DCX, DH+0.8, DCZ);
+  // flat lead terrace over the body, sunk just inside its parapet
+  var donjonRoofMesh = mkBox(DHALF*2-1.2, 0.6, DHALF*2-1.2, dRoof.mat);
+  place(donjonRoofMesh, DCX, BODY_H-0.6, DCZ);
   dRoof.group.add(donjonRoofMesh);
 
   registerPick(pickables, 'structure', DCX, DH*0.4, DCZ, DHALF*2+TURR_R*2, DH*0.75, DHALF*2+TURR_R*2,
-    'ドンジョン Donjon (大塔)', '高さ52m、一辺16.5mの主塔。四隅の太い円形小塔とマシクレーション風の張り出しを持つ、当時ヨーロッパ最大級の居住塔。');
+    'ドンジョン Donjon (大塔)', '高さ52m、一辺16.5mの主塔。四隅の円形小塔が本体の胸壁を越えて立ち上がり、マシクレーション(石落とし)の張り出しが本体・小塔それぞれの頂部を巡る、当時ヨーロッパ最大級の居住塔。');
 
   /* ---- five floors: basement + 3 lower floors (decorative central
    * pillar) + upper guard/armoury levels. All furniture sits in
@@ -349,7 +426,7 @@ function buildVincennes(){
       desc:'シャルル5世の私室。中央柱と暖炉を備えた、大塔で最も格式高い部屋。' },
     { y0:20.8, y1:31.2, name:'賓客の間 Guest Chamber (3F)', pillar:true,
       desc:'来賓を迎えた部屋。下層4フロア共通の装飾中央柱で天井を支える。' },
-    { y0:31.2, y1:52,   name:'兵士詰所・弾薬庫 Guard Room & Armoury (Upper)', pillar:false,
+    { y0:31.2, y1:BODY_H, name:'兵士詰所・弾薬庫 Guard Room & Armoury (Upper)', pillar:false,
       desc:'上層階は守備兵の詰所と武具・弾薬の保管に充てられた。' }
   ];
   donjonFloors.forEach(function(f){
@@ -378,41 +455,135 @@ function buildVincennes(){
    * bailey-facing (east) side, its own moat via the shared square-moat
    * helper, and two drawbridges. ------------------------------------ */
   var CHEM_HALF = 24, CHEM_H = 13;
-  function chemiseSide(cx,cz,length,ry){
+  function chemiseSide(cx,cz,length,ry, inDir){
+    var co = Math.cos(ry), si = Math.sin(ry);
+    // inDir = unit vector pointing INWARD (towards the donjon) in world XZ,
+    // used to lean the covered wall-walk roof back off the parapet.
     var w = mkBox(length, CHEM_H, 1.4, chemiseMat);
     place(w, cx, CHEM_H/2, cz, ry);
     group.add(w);
-    // dark slate wall-walk cap (a covered parapet cover, simplified from a
-    // true single-pitch shed roof -- reads the same at this scale)
-    var cap = mkBox(length+1.0, 0.6, 2.0, slateMat);
-    place(cap, cx, CHEM_H+0.3, cz, ry);
-    group.add(cap);
+    // corbelled machicolation gallery ringing the chemise just under its
+    // parapet -- the single most recognisable band in every photograph of
+    // the keep enclosure, and previously missing entirely.
+    var corbel = mkBox(length, 0.5, 2.0, chemiseMat);
+    place(corbel, cx, CHEM_H-1.9, cz, ry);
+    group.add(corbel);
+    var machic = mkBox(length, 1.4, 2.9, chemiseMat);
+    place(machic, cx, CHEM_H-0.7, cz, ry);
+    group.add(machic);
+    // parapet standing on the gallery, pierced by the row of rectangular
+    // openings the photos show at wall-walk level
+    var parapet = mkBox(length, 2.4, 1.5, chemiseMat);
+    place(parapet, cx - inDir.x*0.6, CHEM_H+1.2, cz - inDir.z*0.6, ry);
+    group.add(parapet);
+    for (var oi=-1, n=Math.floor(length/6); oi<n; oi++){
+      var lx = -length/2 + 3 + (oi+1)*6;
+      if (Math.abs(lx) > length/2-2) continue;
+      var slot = mkBox(1.5, 1.1, 1.7, windowMat);
+      place(slot, cx + lx*co - inDir.x*0.6, CHEM_H+1.5, cz - lx*si - inDir.z*0.6, ry);
+      group.add(slot);
+    }
+    // covered wall-walk: a single-pitch slate shed leaning inward off the
+    // parapet, matching the continuous dark roof that runs round the top
+    // of the chemise in the reference photos.
+    var runW = 4.4, drop = 1.6;
+    var slabLen = Math.hypot(runW, drop);
+    var shed = mkBox(length+0.6, 0.35, slabLen, slateMat);
+    shed.position.set(cx + inDir.x*(runW/2-0.2), CHEM_H+2.4 - drop/2, cz + inDir.z*(runW/2-0.2));
+    shed.rotation.y = ry;
+    // local +Z always points inward (rotation.y = ry already applied), so a
+    // POSITIVE rotateX drops the inner edge -- the pitch falls away from
+    // the parapet towards the keep, as the photos show.
+    shed.rotateX(Math.atan2(drop, runW));
+    shed.castShadow = true; shed.receiveShadow = true;
+    group.add(shed);
   }
-  chemiseSide(DCX, DCZ-CHEM_HALF, CHEM_HALF*2, 0);
-  chemiseSide(DCX, DCZ+CHEM_HALF, CHEM_HALF*2, Math.PI);
-  chemiseSide(DCX+CHEM_HALF, DCZ, CHEM_HALF*2, -Math.PI/2);
-  chemiseSide(DCX-CHEM_HALF, DCZ, CHEM_HALF*2, Math.PI/2);
+  var CHEM_GATE_W = 9.5;   // footprint of the chatelet built below
+  chemiseSide(DCX, DCZ-CHEM_HALF, CHEM_HALF*2, 0,          {x:0,z:1});
+  chemiseSide(DCX, DCZ+CHEM_HALF, CHEM_HALF*2, Math.PI,    {x:0,z:-1});
+  // east side is split either side of the chatelet's own footprint so the
+  // gate tower's arched passage opens onto real daylight, not a solid
+  // panel of chemise wall standing behind it
+  (function(){
+    var seg = (CHEM_HALF*2 - CHEM_GATE_W)/2, off = CHEM_GATE_W/2 + seg/2;
+    chemiseSide(DCX+CHEM_HALF, DCZ-off, seg, -Math.PI/2, {x:-1,z:0});
+    chemiseSide(DCX+CHEM_HALF, DCZ+off, seg, -Math.PI/2, {x:-1,z:0});
+  })();
+  chemiseSide(DCX-CHEM_HALF, DCZ, CHEM_HALF*2, Math.PI/2,  {x:1,z:0});
 
   var bartPos = [
     {x:DCX-CHEM_HALF, z:DCZ-CHEM_HALF}, {x:DCX+CHEM_HALF, z:DCZ-CHEM_HALF},
     {x:DCX+CHEM_HALF, z:DCZ+CHEM_HALF}, {x:DCX-CHEM_HALF, z:DCZ+CHEM_HALF}
   ];
   bartPos.forEach(function(p){
-    var bt = mkCyl(1.6, 1.7, 3.0, 12, chemiseMat);
-    place(bt, p.x, CHEM_H+1.5, p.z);
+    // corner bartizans: in the photos these are the tallest thing on the
+    // chemise -- a corbelled drum carried from well below the wall-walk and
+    // a slate cone about as tall as the drum is wide again. The old 3m drum
+    // + 2m cone barely cleared the parapet.
+    var bt = mkCyl(2.0, 2.1, 7.0, 14, chemiseMat);
+    place(bt, p.x, CHEM_H-1.0, p.z);
     group.add(bt);
-    var cap = mkCone(1.9, 2.0, 12, slateMat);
-    place(cap, p.x, CHEM_H+3.0+1.0, p.z);
+    var btLip = mkCyl(2.35, 2.2, 0.7, 14, chemiseMat);
+    place(btLip, p.x, CHEM_H+2.1, p.z);
+    group.add(btLip);
+    var cap = mkCone(2.5, 5.6, 14, slateMat);
+    place(cap, p.x, CHEM_H+2.5+5.6/2, p.z);
     group.add(cap);
   });
 
-  // decorative gate on the bailey-facing (east) side
-  var chemGate = mkBox(3.4, CHEM_H*0.55, 0.35, windowMat);
-  place(chemGate, DCX+CHEM_HALF-0.05, CHEM_H*0.28, DCZ, -Math.PI/2);
-  group.add(chemGate);
-  var chemGatePediment = mkBox(4.2, 0.6, 0.7, chemiseMat);
-  place(chemGatePediment, DCX+CHEM_HALF-0.05, CHEM_H*0.55+0.3, DCZ, -Math.PI/2);
-  group.add(chemGatePediment);
+  /* chatelet: the chemise's own gate tower on the bailey-facing (east)
+   * side. This is the single most recognisable element of the keep
+   * enclosure in the frontal photographs (Commons "Vincennes - Chateau
+   * 02.jpg") -- a square tower standing well above the chemise parapet,
+   * flanked by two round turrets running its full height, pierced by an
+   * arched passage, and crowned by its own machicolation. It replaces the
+   * previous flat "gate decal" on the wall face. */
+  (function(){
+    var GW = CHEM_GATE_W, GD = 6.0, GH = 23.0, gx = DCX+CHEM_HALF, gz = DCZ;
+    var openW = 3.6, openH = 6.4;
+    var pillarW = (GW-openW)/2;
+    [-1,1].forEach(function(side){
+      var pil = mkBox(GD, GH, pillarW, chemiseMat);
+      place(pil, gx, GH/2, gz + side*(openW/2+pillarW/2));
+      group.add(pil);
+    });
+    var lintel = mkBox(GD, GH-openH, openW, chemiseMat);
+    place(lintel, gx, openH+(GH-openH)/2, gz);
+    group.add(lintel);
+    var arch = mkCone(openW*0.62, 2.2, 3, windowMat);
+    arch.rotation.y = Math.PI/2;
+    place(arch, gx+GD/2-0.1, openH+0.5, gz);
+    group.add(arch);
+    // flanking round turrets, full height, corbelled crown like the keep's
+    [-1,1].forEach(function(side){
+      // set well forward of the tower's own front face so they read as two
+      // free-standing drums flanking the arch, as in the photographs
+      var tz = gz + side*(GW/2), tx = gx + GD/2 - 0.9;
+      var tur = mkCyl(2.2, 2.3, GH-1.6, 14, chemiseMat);
+      place(tur, tx, (GH-1.6)/2, tz);
+      group.add(tur);
+      var tlip = mkCyl(2.6, 2.35, 1.1, 14, chemiseMat);
+      place(tlip, tx, GH-1.7, tz);
+      group.add(tlip);
+      var tpar = mkCyl(2.55, 2.6, 1.6, 14, chemiseMat);
+      place(tpar, tx, GH-0.4, tz);
+      group.add(tpar);
+      var tcap = mkCyl(2.4, 2.4, 0.4, 14, slateMat);
+      place(tcap, tx, GH+0.3, tz);
+      group.add(tcap);
+    });
+    var gCorbel = mkBox(GD+1.0, 0.5, GW+1.0, chemiseMat);
+    place(gCorbel, gx, GH-3.0, gz);
+    group.add(gCorbel);
+    var gMachic = mkBox(GD+2.0, 1.4, GW+2.0, chemiseMat);
+    place(gMachic, gx, GH-1.9, gz);
+    group.add(gMachic);
+    addCrenellations(group, chemiseMat, gx, gz, GW+1.6, -Math.PI/2, GH-1.2, GD+1.6);
+    // timber approach deck through the arch, meeting the east drawbridge
+    var deck = mkBox(GD+1.2, 0.3, openW, woodMat);
+    place(deck, gx, 0.12, gz);
+    group.add(deck);
+  })();
 
   registerPick(pickables, 'structure', DCX, CHEM_H*0.5, DCZ-CHEM_HALF, CHEM_HALF*2, CHEM_H, 2,
     'シェミーズ Chemise Wall', '高さ13mでドンジョンを囲む方形の防壁。隅の物見(バルティザン)と専用の堀を伴い、大塔だけの独立した防御線を成す。');
@@ -431,7 +602,13 @@ function buildVincennes(){
     islandHalf: CHEM_HALF, islandY: 0.06,
     moatOuterHalf: CHEM_HALF + 7,
     bankWidthOut: 2.2, bankWidthIn: 1.6,
-    groundMat: courtGrassMat, islandMat: courtGrassMat,
+    // buildWaterMoatSystem's collar is forced out to moatOuterHalf+30m, so
+    // this system paints a 122m square of ground around the keep. Painting
+    // it in the bailey's own grass makes that square disappear inside the
+    // walls instead of reading as a bright rectangle on the lawn; only the
+    // part outside the west curtain still shows, where it correctly reads
+    // as the raised terrace the donjon complex stands on.
+    groundMat: grassMat2, islandMat: courtGrassMat,
     waterColor: WATER_COL,
     bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL,
     groundSize: 96, groundSegs: 24
@@ -459,87 +636,152 @@ function buildVincennes(){
   interiorGroup.add(doorRecess);
 
   /* -------------------------------------------------------------- *
-   * Sainte-Chapelle: enlarged Gothic chapel (40 x 15m nave, ~19m eave,
-   * steep slate roof to ~34m ridge), east-of-centre in the bailey per
-   * the official plan. In 1380 (this viewer's year) it was still under
-   * construction in reality -- completed 1379-1552; noted in the
-   * tooltip rather than modelled as a building site.
+   * Sainte-Chapelle: single-vessel Flamboyant Gothic chapel, east of
+   * centre in the bailey. TWO corrections against the reference material:
+   *
+   *  1. ORIENTATION. The chapel is a church, so it is laid out liturgically
+   *     east-west -- west front towards the donjon, polygonal apse at the
+   *     east. The official plan (Commons "Plan Château de Vincennes -
+   *     2021.svg") shows it lying ACROSS the enceinte's 175m short axis,
+   *     not along its 330m long axis. The previous model ran the 40m nave
+   *     north-south, i.e. rotated 90 degrees from the real building.
+   *  2. VERTICALITY. Photographs (Commons "Sainte-Chapelle de Vincennes
+   *     snow 02.jpg", "...angle 3.JPG") show glass filling practically the
+   *     whole bay between buttresses from a low sill right up to the eaves
+   *     balustrade, every buttress finishing in a tall crocketed pinnacle,
+   *     and the west front framed by two turrets that climb past the
+   *     gable. The previous 4.2m windows floating at mid-height read as a
+   *     stone barn with slits.
+   *
+   * In 1380 (this viewer's year) it was still under construction in
+   * reality -- begun 1379, completed 1552; noted in the tooltip rather
+   * than modelled as a building site.
    * -------------------------------------------------------------- */
-  var chapelMat = new T.MeshLambertMaterial({ color: 0xcac2ae });
+  var chapelMat = new T.MeshLambertMaterial({ color: 0xdbd2bb });
   var CHX = 25, CHZ = 25;
-  var CH_W = 15, CH_LEN = 40, CH_EAVE = 19, CH_RIDGE = 34;
-  var nave = mkBox(CH_W, CH_EAVE, CH_LEN, chapelMat);
+  var CH_W = 15, CH_LEN = 40, CH_EAVE = 20, CH_RIDGE = 36;
+  var CH_WEST = CHX - CH_LEN/2, CH_EAST = CHX + CH_LEN/2;
+  var nave = mkBox(CH_LEN, CH_EAVE, CH_W, chapelMat);   // long axis = X (east-west)
   place(nave, CHX, CH_EAVE/2, CHZ);
   group.add(nave);
   (function(){
+    // twin roof slabs pitched about the east-west ridge line
     var run = CH_W/2, rise = CH_RIDGE-CH_EAVE, slant = Math.hypot(run, rise);
     [1,-1].forEach(function(sign){
-      var geo = new T.BoxGeometry(slant, 0.4, CH_LEN+1.2);
+      var geo = new T.BoxGeometry(CH_LEN+1.2, 0.4, slant);
       var m = new T.Mesh(geo, slateMat);
       m.castShadow = true; m.receiveShadow = true;
-      m.position.set(CHX + sign*run/2, CH_EAVE + rise/2, CHZ);
-      // rotation.z = -sign*atan2(rise,run): verified by projecting each
-      // slab's local +/-X endpoint through the eave/ridge line -- the
-      // *opposite* sign from the naive `sign*atan2(...)` (which instead
-      // swings both slabs the wrong way, one standing up near-vertical).
-      m.rotation.z = -sign * Math.atan2(rise, run);
+      m.position.set(CHX, CH_EAVE + rise/2, CHZ + sign*run/2);
+      // pitch about X now that the ridge runs east-west: +sign tips the
+      // +Z slab down towards its own eave (mirror of the -Z slab).
+      m.rotation.x = sign * Math.atan2(rise, run);
       group.add(m);
     });
   })();
-  // gable end walls: triangular infill from the eave line up to the ridge
-  // point, closing the gap the two roof slabs leave at both ends.
-  [CHZ - CH_LEN/2, CHZ + CH_LEN/2].forEach(function(z){
+  // gable infill at both ends of the ridge (west front + apse end)
+  [CH_WEST, CH_EAST].forEach(function(x){
     var run = CH_W/2, rise = CH_RIDGE-CH_EAVE;
     var shape = new T.Shape();
     shape.moveTo(-run, 0);
     shape.lineTo(run, 0);
     shape.lineTo(0, rise);
     shape.closePath();
-    var gm = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshLambertMaterial({ color:0xcac2ae, side:T.DoubleSide }));
+    var gm = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshLambertMaterial({ color:0xdbd2bb, side:T.DoubleSide }));
     gm.castShadow = true; gm.receiveShadow = true;
-    gm.position.set(CHX, CH_EAVE, z);
+    gm.rotation.y = Math.PI/2;          // gable plane now faces east-west
+    gm.position.set(x, CH_EAVE, CHZ);
     group.add(gm);
   });
-  // entrance facade (south end, facing the donjon/main approach): rose
-  // window, two flanking pinnacles, and an apex spire.
+  // tall bay windows + buttresses + pinnacles down both flanks
+  var CH_BAYS = 5;
   (function(){
-    var facadeZ = CHZ + CH_LEN/2 + 0.08;
-    var rose = new T.Mesh(new T.CircleGeometry(3.2, 24), windowMat);
-    rose.position.set(CHX, CH_EAVE*0.62, facadeZ);
-    group.add(rose);
-    var roseRing = new T.Mesh(new T.TorusGeometry(3.2, 0.28, 8, 24), chapelMat);
-    roseRing.position.set(CHX, CH_EAVE*0.62, facadeZ);
-    group.add(roseRing);
-    var mainDoor = mkBox(2.6, 4.4, 0.4, windowMat);
-    place(mainDoor, CHX, 2.2, facadeZ);
-    group.add(mainDoor);
-    [-1,1].forEach(function(side){
-      var pin = mkCone(0.65, 5.0, 4, chapelMat);
-      place(pin, CHX+side*(CH_W/2-0.9), CH_EAVE+5.0/2, CHZ+CH_LEN/2-0.7);
-      group.add(pin);
-    });
-    var apexSpire = mkCone(0.55, 3.4, 4, chapelMat);
-    place(apexSpire, CHX, CH_RIDGE+1.7, CHZ+CH_LEN/2-0.25);
-    group.add(apexSpire);
-  })();
-  // pointed (gothic) windows + buttresses down each flank
-  for (var wi=-1; wi<=1; wi+=2){
-    for (var wl=0; wl<4; wl++){
-      var wz = CHZ - CH_LEN/2 + 5 + wl*(CH_LEN-10)/3;
-      var win = mkBox(0.18, 4.2, 1.7, windowMat);
-      place(win, CHX+wi*CH_W/2, 6.0, wz);
-      group.add(win);
-      var cap = mkCone(1.05, 1.2, 3, windowMat);
-      cap.rotation.y = Math.PI/2;
-      place(cap, CHX+wi*(CH_W/2+0.05), 8.4, wz);
-      group.add(cap);
-      var buttress = mkBox(1.1, CH_EAVE*0.82, 2.0, chapelMat);
-      place(buttress, CHX+wi*(CH_W/2+0.65), CH_EAVE*0.41, wz-2.4);
-      group.add(buttress);
+    var sill = 4.2, head = CH_EAVE - 2.2;
+    for (var side=-1; side<=1; side+=2){
+      var wz = CHZ + side*CH_W/2;
+      for (var b=0; b<CH_BAYS; b++){
+        var bx = CH_WEST + (CH_LEN/CH_BAYS)*(b+0.5);
+        var win = mkBox(4.4, head-sill, 0.3, windowMat);
+        place(win, bx, (sill+head)/2, wz + side*0.06);
+        group.add(win);
+        var arch = mkCone(2.3, 2.6, 3, windowMat);   // pointed head
+        arch.rotation.y = Math.PI/2;
+        place(arch, bx, head+1.0, wz + side*0.06);
+        group.add(arch);
+      }
+      // buttress + pinnacle on every bay division, ends included
+      for (var q=0; q<=CH_BAYS; q++){
+        var qx = CH_WEST + (CH_LEN/CH_BAYS)*q;
+        var but = mkBox(1.7, CH_EAVE+0.6, 2.6, chapelMat);
+        place(but, qx, (CH_EAVE+0.6)/2, wz + side*1.0);
+        group.add(but);
+        var pinBase = mkBox(1.5, 3.2, 1.5, chapelMat);
+        place(pinBase, qx, CH_EAVE+2.2, wz + side*1.3);
+        group.add(pinBase);
+        var pin = mkCone(1.05, 6.0, 4, chapelMat);
+        place(pin, qx, CH_EAVE+3.8+3.0, wz + side*1.3);
+        group.add(pin);
+      }
+      // eaves balustrade running between the pinnacles
+      var bal = mkBox(CH_LEN, 1.0, 0.5, chapelMat);
+      place(bal, CHX, CH_EAVE+0.5, wz + side*0.9);
+      group.add(bal);
     }
-  }
-  registerPick(pickables, 'structure', CHX, CH_EAVE*0.6, CHZ, CH_W+2, CH_RIDGE, CH_LEN+2,
-    'サント・シャペル Sainte-Chapelle', 'ドンジョン東側に建つゴシック様式の礼拝堂。1380年時点ではまだ建設中であった(実際の完成は1552年)。');
+  })();
+  // polygonal apse closing the east end (with its own conical slate roof)
+  (function(){
+    var apse = mkCyl(CH_W/2, CH_W/2, CH_EAVE, 7, chapelMat);
+    apse.rotation.y = Math.PI/7;
+    place(apse, CH_EAST, CH_EAVE/2, CHZ);
+    group.add(apse);
+    // conical apse roof, kept BELOW the nave ridge so it reads as the end
+    // of the same roof rather than a witch's-hat tower cap
+    var apseRoofH = (CH_RIDGE-CH_EAVE)*0.7;
+    var apseRoof = mkCone(CH_W/2+0.5, apseRoofH, 7, slateMat);
+    apseRoof.rotation.y = Math.PI/7;
+    place(apseRoof, CH_EAST, CH_EAVE+apseRoofH/2, CHZ);
+    group.add(apseRoof);
+    // radiating lancets on the apse facets, set on the 7-gon's own radius
+    for (var a=-2; a<=2; a++){
+      var ang = a*(2*Math.PI/7);
+      var ex = CH_EAST + Math.cos(ang)*(CH_W/2*0.97);
+      var ez = CHZ + Math.sin(ang)*(CH_W/2*0.97);
+      var lan = mkBox(0.3, 11.0, 3.0, windowMat);
+      place(lan, ex, 10.5, ez, -ang);
+      group.add(lan);
+    }
+  })();
+  // west front: giant traceried window under a steep gable, framed by two
+  // stair turrets that climb past the roofline and finish in spires.
+  (function(){
+    var fx = CH_WEST - 0.12;
+    var greatWin = mkBox(0.3, 12.5, 8.6, windowMat);
+    place(greatWin, fx, 12.4, CHZ);
+    group.add(greatWin);
+    var winHead = mkCone(4.3, 3.4, 3, windowMat);
+    winHead.rotation.y = Math.PI/2;
+    place(winHead, fx, 20.3, CHZ);
+    group.add(winHead);
+    var portal = mkBox(0.4, 5.4, 3.6, windowMat);
+    place(portal, fx, 2.7, CHZ);
+    group.add(portal);
+    var portalArch = mkCone(2.1, 2.4, 3, chapelMat);
+    portalArch.rotation.y = Math.PI/2;
+    place(portalArch, fx-0.15, 6.5, CHZ);
+    group.add(portalArch);
+    [-1,1].forEach(function(side){
+      var turr = mkCyl(2.1, 2.2, CH_RIDGE+2.0, 8, chapelMat);
+      place(turr, CH_WEST+0.4, (CH_RIDGE+2.0)/2, CHZ + side*(CH_W/2+0.4));
+      group.add(turr);
+      var spire = mkCone(2.4, 10.0, 8, chapelMat);
+      place(spire, CH_WEST+0.4, CH_RIDGE+2.0+5.0, CHZ + side*(CH_W/2+0.4));
+      group.add(spire);
+    });
+    var apexFinial = mkCone(0.7, 4.2, 4, chapelMat);
+    place(apexFinial, CH_WEST+0.3, CH_RIDGE+2.1, CHZ);
+    group.add(apexFinial);
+  })();
+  registerPick(pickables, 'structure', CHX, CH_EAVE*0.6, CHZ, CH_LEN+2, CH_RIDGE, CH_W+2,
+    'サント・シャペル Sainte-Chapelle', 'ドンジョン東側に建つフランボワイヤン・ゴシックの礼拝堂。東西方向に身廊を通し、西正面の大窓と両脇の階段塔、側面を埋める背の高い尖頭窓が特徴。1380年時点ではまだ建設中であった(実際の完成は1552年)。');
 
   /* -------------------------------------------------------------- *
    * outer moat: 175 x 330m rectangle, so buildWaterMoatSystem's square-
@@ -665,11 +907,15 @@ function buildVincennes(){
       { path:[ {x:0,z: OHZ-GATE2_D/2}, {x:0,z: OHZ+GATE2_D/2} ], outDir:{x:0,z:1},
         vanishDist: (MOAT_OHZ - OHZ + 8) - GATE2_D/2 }  // 木の門塔 Tour du Bois(南)
     ],
+    // 礼拝堂は東西方向(X 方向)に身廊を通すよう向きを正したので、
+    // その躯体(x=4..46 / z=17..33、控え壁と西正面塔を含め x=1..49 / z=14..36)を
+    // 避けるように中庭の区画も引き直す。
     courtyard: [
-      { minX:-84, maxX:84,  minZ:-160, maxZ:-2 },  // 北側の広い区画(シェミーズ・礼拝堂より北)
+      { minX:-84, maxX:84,  minZ:-160, maxZ:8 },   // 北側の広い区画(シェミーズ・礼拝堂より北)
       { minX:-84, maxX:84,  minZ:92,   maxZ:160 }, // 南側の広い区画
-      { minX:-60, maxX:-22, minZ:-2,   maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
-      { minX:38,  maxX:84,  minZ:-2,   maxZ:92 }   // 礼拝堂と東城壁の間の帯
+      { minX:-58, maxX:-6,  minZ:8,    maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
+      { minX:56,  maxX:84,  minZ:8,    maxZ:92 },  // 礼拝堂と東城壁の間の帯
+      { minX:-6,  maxX:56,  minZ:42,   maxZ:92 }   // 礼拝堂南側の前庭
     ],
     patrol: [
       [80,0,-158], [80,0,158], [-80,0,158], [-80,0,90],
