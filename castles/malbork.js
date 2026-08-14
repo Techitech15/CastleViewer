@@ -165,6 +165,33 @@ function buildMalborkPlan(){
    * mpWingWall already uses for its trim band. */
   var nicheMat   = new T.MeshLambertMaterial({ color: NICHE_COL });
 
+  /* ---- INTERIOR palette. Declared up here (rather than inside the
+   * interior fit-out IIFE near the bottom of the file) because three of
+   * the room fittings that already existed -- the Great Refectory's
+   * granite columns, the church's nave piers, the High Castle
+   * refectory's piers -- are built inline with the plan above and want
+   * the same stone as the fit-out that now surrounds them. Colours read
+   * off the two Great Refectory reference photographs (Commons
+   * "Malbork Wielki Refektarz"): near-black granite shafts with pale
+   * stone bases/capitals, dark red-brown ribs, whitewashed webbing, and
+   * a red clay tile floor. ---------------------------------------- */
+  var GRANITE_COL = 0x3a3536; // Baltic granite monolith shafts
+  var RIB_COL     = 0x6b4436; // vault ribs (dark red-brown in the photos)
+  /* whitewash, pulled well down from a naive 0xd8cfbc: the interior
+   * dados and wall responds are seen against dark red brick and, at
+   * 0x9d9280 and above, read as a white picket fence ringing every
+   * opened room instead of as plastered masonry. */
+  var PLASTER_COL = 0x8a8070;
+  var TILE_COL    = 0x74463a; // red clay floor tile
+  var FLAG_COL    = 0x877c6c; // stone flag floor
+  var EARTH_COL   = 0x6a5942; // packed-earth floor (service ranges)
+  var graniteMat = new T.MeshLambertMaterial({ color: GRANITE_COL });
+  var ribMat     = new T.MeshLambertMaterial({ color: RIB_COL });
+  var plasterMat = new T.MeshLambertMaterial({ color: PLASTER_COL });
+  var tileMat    = new T.MeshLambertMaterial({ color: TILE_COL });
+  var flagMat    = new T.MeshLambertMaterial({ color: FLAG_COL });
+  var earthMat   = new T.MeshLambertMaterial({ color: EARTH_COL });
+
   /* -------------------------------------------------------------- *
    * local helpers (per-file-local convention, see header)
    * -------------------------------------------------------------- */
@@ -986,9 +1013,19 @@ function buildMalborkPlan(){
   var altar = mkBox(2.4, 1.3, 1.0, stoneDarkMat);
   place(altar, CH_X1-3, 0.65, APSE_CZ);
   interiorGroup.add(altar);
-  for (var pw=0; pw<3; pw++){
-    var pillar = mkCyl(0.35,0.4, CH_H-0.6, 8, stubMat);
-    place(pillar, (CH_X0+CH_X1)/2, (CH_H-0.6)/2, CH_Z-3+pw*3);
+  /* Nave piers. These used to be three cylinders spaced 3m apart ACROSS
+   * the 12m-deep north wing -- i.e. laid out at right angles to the
+   * 38m-long church they were supposed to stand in, so they read as
+   * three random posts. They now march down the length of the nave on
+   * the church's own centre line, 6m apart, which is what carries the
+   * rib vault added with the interior fit-out below. Neither the 38m
+   * length nor the 14.4m height [MH] is touched. */
+  var CH_PIER_X = [];
+  for (var pw=0; pw<5; pw++){
+    var pierX = CH_X0 + 7 + pw*6;
+    CH_PIER_X.push(pierX);
+    var pillar = mkCyl(0.42,0.5, CH_H-1.5, 8, stubMat);
+    place(pillar, pierX, (CH_H-1.5)/2, CH_Z);
     interiorGroup.add(pillar);
   }
   mpPickRoom(CH_X0, CH_X1+APSE_R, HC_HZ-HC_WD_NS+1, HC_HZ+2, CH_H-1, '聖母マリア教会 St Mary’s Church',
@@ -1000,9 +1037,17 @@ function buildMalborkPlan(){
   mpPickRoom(chX0, chX1, chZ0, chZ1, HC_WALL_H-1, '参事会室 Chapter House',
     '南翼に置かれた評議の間。団長と幹部騎士たちがここで会議を開いた。');
   var rfX0=-HC_HX+1, rfX1=-HC_HX+HC_WD_EW-1, rfZ0=-8, rfZ1=8;
+  /* Convent refectory pier row. Height was HC_WALL_H-0.6 = 21.4m, i.e.
+   * the piers ran the full two-storey height of the wing and read as
+   * scaffolding poles rather than as the columns of a vaulted hall. They
+   * are now room-height (the hall's own 7.6m vault springs off them,
+   * built with the fit-out below); the wing's 22m eave height itself is
+   * unchanged. */
+  var HCRF_H = 7.6;
+  var HCRF_COL_Z = [rfZ0+2, rfZ0+8, rfZ0+14];
   for (var rp=0; rp<3; rp++){
-    var rpillar = mkCyl(0.32,0.36, HC_WALL_H-0.6, 8, stubMat);
-    place(rpillar, (rfX0+rfX1)/2, (HC_WALL_H-0.6)/2, rfZ0+2+rp*6);
+    var rpillar = mkCyl(0.36,0.44, HCRF_H-1.0, 8, stubMat);
+    place(rpillar, (rfX0+rfX1)/2, (HCRF_H-1.0)/2, HCRF_COL_Z[rp]);
     interiorGroup.add(rpillar);
   }
   mpPickRoom(rfX0, rfX1, rfZ0, rfZ1, HC_WALL_H-1, '食堂 Refectory',
@@ -1169,10 +1214,24 @@ function buildMalborkPlan(){
   var RF_CZ = MC_Z0 + 24;
   registerPick(pickables, 'structure', MC_WX, RF_H*0.5, RF_CZ, RF_W, RF_H, RF_D,
     '大食堂 Great Refectory', '西翼、30x15m [MH]。天井高9〜9.7m、花崗岩の八角柱3本(柱高3.3m)、尖頭アーチ窓14枚、収容400人。');
+  /* The three documented granite monoliths. Previously three bare grey
+   * cylinders; the reference photographs show near-black octagonal
+   * granite shafts standing on a pale stone base with a carved pale
+   * capital, from which the palm vault springs. The 3.3m [MH] shaft
+   * height is unchanged -- the base sits below it and the capital above
+   * it, exactly as the photographs read. The vault they carry is built
+   * with the rest of the interior fit-out further down this file. */
+  var RF_COL_Z = [RF_CZ-9, RF_CZ, RF_CZ+9];
   for (var rc=0; rc<3; rc++){
-    var col = mkCyl(0.55, 0.55, 3.3, 8, stubMat);
-    place(col, MC_WX, 1.65, RF_CZ-9+rc*9);
+    var col = mkCyl(0.5, 0.5, 3.3, 8, graniteMat);
+    place(col, MC_WX, 0.5 + 1.65, RF_COL_Z[rc]);   // 0.5 = base block height
     interiorGroup.add(col);
+    var colBase = mkCyl(0.8, 0.92, 0.5, 8, plasterMat);
+    place(colBase, MC_WX, 0.25, RF_COL_Z[rc]);
+    interiorGroup.add(colBase);
+    var colCap = mkCyl(0.86, 0.62, 0.62, 8, plasterMat);
+    place(colCap, MC_WX, 0.5 + 3.3 + 0.31, RF_COL_Z[rc]);
+    interiorGroup.add(colCap);
   }
   /* The 14 documented pointed-arch windows, now as full-height lancets
    * on the river face -- the Great Refectory's west wall is a near-
@@ -1557,6 +1616,1152 @@ function buildMalborkPlan(){
   })();
 
   /* ================================================================
+   * INTERIOR FIT-OUT + COURTYARD PLANTING
+   * ================================================================
+   * Everything below is fittings, furniture and planting hung off the
+   * plan built above. Four rules it follows throughout:
+   *
+   * 1. It all lives in `interiorGroup` (which never fades), so the
+   *    cutaway can strip the shell off a range and leave a furnished
+   *    room standing. Because the shell that fades takes its walls with
+   *    it, each detailed room also gets its own low DADO wall + corner
+   *    piers + wall responds in here -- enough to read as a room from
+   *    above, low enough that the near-side wall never re-blocks the
+   *    view the cutaway just opened. Nothing here is ever taller than
+   *    the shell it sits inside, so with the shell up it is invisible.
+   * 2. Every repeated prop shares its geometry through boxGeo/cylGeo/
+   *    coneGeo, keyed on rounded dimensions -- ~1000 new meshes come out
+   *    of well under 100 distinct geometries.
+   * 3. PERFORMANCE. Malbork is by a wide margin the heaviest castle in
+   *    the viewer and its opening shot sits 580m out, where a bench is a
+   *    third of a pixel. So every block of fit-out hangs off a THREE.LOD
+   *    gate (`det()`) and is dropped from the scene graph entirely
+   *    beyond a distance chosen per block. WebGLRenderer.projectObject
+   *    calls LOD.update() itself, so this needs no per-frame hook and no
+   *    edit to any shared file; if THREE.LOD is ever absent the helper
+   *    degrades to a plain always-on Group.
+   * 4. Planting keeps clear of `life`: nothing is placed inside a
+   *    `life.courtyard` wander box or within reach of the `life.patrol`
+   *    line (the one exception is the Middle Castle courtyard, whose
+   *    wander box is narrowed at the bottom of this file by exactly the
+   *    width of the kitchen garden added here).
+   * ================================================================ */
+  (function interiorFitOut(){
+
+    /* ---- shared geometry cache ---------------------------------- */
+    var geoCache = {};
+    function boxGeo(w,h,d){
+      var k = 'B'+w.toFixed(2)+'_'+h.toFixed(2)+'_'+d.toFixed(2);
+      return geoCache[k] || (geoCache[k] = new T.BoxGeometry(w,h,d));
+    }
+    function cylGeo(rt,rb,h,seg){
+      var k = 'C'+rt.toFixed(2)+'_'+rb.toFixed(2)+'_'+h.toFixed(2)+'_'+seg;
+      return geoCache[k] || (geoCache[k] = new T.CylinderGeometry(rt,rb,h,seg));
+    }
+    function coneGeo(r,h,seg){
+      var k = 'N'+r.toFixed(2)+'_'+h.toFixed(2)+'_'+seg;
+      return geoCache[k] || (geoCache[k] = new T.ConeGeometry(r,h,seg));
+    }
+    function add(t, geo, mat, x, y, z, ry){
+      var m = new T.Mesh(geo, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set(x,y,z);
+      if (ry) m.rotation.y = ry;
+      t.add(m);
+      return m;
+    }
+    /* horizontal cylinder: the Y-axis geometry is tipped onto its side
+     * and then yawed. Euler order must be YXZ/roll-first here -- with the
+     * default XYZ order the yaw is applied before the tip and every
+     * "lying" log/windlass/axle ends up pointing the same way. */
+    function lay(t, geo, mat, x, y, z, ry){
+      var m = new T.Mesh(geo, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set(x,y,z);
+      m.rotation.order = 'YXZ';
+      m.rotation.set(0, ry || 0, Math.PI/2);
+      t.add(m);
+      return m;
+    }
+    /* upright disc (cart wheel) whose axle is horizontal and square to
+     * the `ry` travel direction */
+    function wheelDisc(t, geo, mat, x, y, z, ry){
+      var m = new T.Mesh(geo, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set(x,y,z);
+      m.rotation.order = 'YXZ';
+      m.rotation.set(Math.PI/2, ry || 0, 0);
+      t.add(m);
+      return m;
+    }
+    /* thin bar from A to B -- vault ribs, roof trusses, ladders, cart
+     * shafts, vine wires. lookAt() is called before the mesh is parented
+     * so its target is read in the same local space the endpoints are
+     * given in (nothing in this castle's ancestor chain is rotated). */
+    function bar(t, mat, x0,y0,z0, x1,y1,z1, th){
+      th = th || 0.15;
+      var len = Math.hypot(x1-x0, y1-y0, z1-z0);
+      var m = new T.Mesh(boxGeo(th, th, len), mat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.position.set((x0+x1)/2, (y0+y1)/2, (z0+z1)/2);
+      m.lookAt(x1, y1, z1);
+      t.add(m);
+      return m;
+    }
+
+    /* ---- distance gate ------------------------------------------ */
+    function det(cx, cy, cz, dist){
+      var g = new T.Group();
+      if (!T.LOD){ interiorGroup.add(g); return g; }
+      var lod = new T.LOD();
+      g.position.set(-cx, -cy, -cz);   // keep authoring in sheet coords
+      lod.addLevel(g, 0);
+      lod.addLevel(new T.Group(), dist);
+      lod.position.set(cx, cy, cz);
+      interiorGroup.add(lod);
+      return g;
+    }
+    // three cutaway-matched gate distances. orbDist = 820 - zoom*750, so
+    // D_NEAR/D_MID/D_FAR correspond to reveal 0.75 / 0.64 / 0.43 -- i.e.
+    // each block switches on just after the shell in front of it has
+    // finished fading (DONJON_WALL_END 0.90 / WALL_END 0.58) or, for
+    // open-air planting, well before anything fades at all.
+    var D_NEAR = 260;   // High Castle rooms (inner cutaway tier)
+    var D_MID  = 340;   // Middle / Low Castle rooms (outer tier)
+    var D_FAR  = 500;   // open-air courtyard planting and yard clutter
+
+    /* ---- extra materials (the stone/plaster/tile set is declared with
+     * the main palette at the top of this file so the inline fittings
+     * above can share it) ---------------------------------------- */
+    var strawMat = new T.MeshLambertMaterial({ color: 0x9c8548 });
+    var emberMat = new T.MeshLambertMaterial({ color: 0xbf5c1e });
+    var clothMat = new T.MeshLambertMaterial({ color: 0x7c3134 });
+    var frescoMat= new T.MeshLambertMaterial({ color: 0x8d7c5a });
+    var sackMat  = new T.MeshLambertMaterial({ color: 0x9c8a68 });
+    var soilMat  = new T.MeshLambertMaterial({ color: 0x4c3a2b });
+    /* crop greens are deliberately DARKER and greyer than the 0x5c7a48
+     * lawn they sit next to. Brighter values (0x5c8a3c / 0x7d9c46 were
+     * tried first) came back off the renderer as neon stripes that read
+     * as painted lines rather than as planting. */
+    var cropMat1 = new T.MeshLambertMaterial({ color: 0x44632c });
+    var cropMat2 = new T.MeshLambertMaterial({ color: 0x556f33 });
+    var hedgeMat = new T.MeshLambertMaterial({ color: 0x3d6434 });
+    var potMat   = new T.MeshLambertMaterial({ color: 0x8a4b32 });
+
+    /* ================================================================
+     * generic fittings
+     * ================================================================ */
+    /* floor slab. Top lands at y=0.16 -- above the courtyard lawn/apron
+     * tops (0.00 / 0.24) it abuts and below every dado, so no coplanar
+     * pair anywhere can z-fight. */
+    function floorSlab(t, mat, x0, x1, z0, z1){
+      add(t, boxGeo(Math.abs(x1-x0), 0.3, Math.abs(z1-z0)), mat,
+          (x0+x1)/2, 0.01, (z0+z1)/2);
+    }
+    /* low perimeter wall ("dado"): reads as the room's footprint once
+     * the cutaway has taken the real wall away, without blocking the
+     * view down into the room. `skip` drops named faces ('x-','x+',
+     * 'z-','z+') where a room opens into another. */
+    function dado(t, mat, x0, x1, z0, z1, h, th, skip){
+      th = th || 0.5;
+      var y = 0.16 + h/2, w = Math.abs(x1-x0), d = Math.abs(z1-z0);
+      function want(f){ return !skip || skip.indexOf(f) < 0; }
+      if (want('z-')) add(t, boxGeo(w, h, th), mat, (x0+x1)/2, y, z0+th/2);
+      if (want('z+')) add(t, boxGeo(w, h, th), mat, (x0+x1)/2, y, z1-th/2);
+      if (want('x-')) add(t, boxGeo(th, h, d-2*th), mat, x0+th/2, y, (z0+z1)/2);
+      if (want('x+')) add(t, boxGeo(th, h, d-2*th), mat, x1-th/2, y, (z0+z1)/2);
+    }
+    /* wall responds: slim full-height shafts marching along a wall face.
+     * They carry the vault ribs and, being 0.4m thin with 3-5m gaps, let
+     * the eye straight past them into the room. */
+    function responds(t, mat, axis, fixed, a0, a1, n, h, w){
+      w = w || 0.42;
+      for (var i=0;i<n;i++){
+        var s = a0 + (a1-a0)*(n<=1 ? 0.5 : i/(n-1));
+        if (axis==='z') add(t, boxGeo(w, h, w), mat, fixed, 0.16+h/2, s);
+        else            add(t, boxGeo(w, h, w), mat, s, 0.16+h/2, fixed);
+      }
+    }
+    /* palm / star vault, RIBS ONLY. A solid webbed vault would roof the
+     * room over and hide everything the cutaway just exposed, so the
+     * webbing is omitted and only the ribs are drawn: from above you see
+     * the fan radiating off each pier head and the furnished floor
+     * through the gaps, which is the read the Great Refectory reference
+     * photographs give from below. */
+    function fanVault(t, mat, cx, cz, y0, y1, rx, rz, n, th){
+      for (var i=0;i<n;i++){
+        var a = (i/n)*Math.PI*2 + Math.PI/n;
+        bar(t, mat, cx, y0, cz, cx + Math.cos(a)*rx, y1, cz + Math.sin(a)*rz, th || 0.16);
+      }
+      // small boss where the fan closes
+      add(t, cylGeo(0.28, 0.28, 0.22, 6), plasterMat, cx, y0-0.05, cz);
+    }
+    /* wall rib: the rectangle of ribs that closes a fan vault off along
+     * the tops of its walls. Without it the fans end in mid-air and read
+     * as bare wire spokes rather than as a vault. */
+    function vaultRing(t, mat, x0, x1, z0, z1, y, th){
+      th = th || 0.16;
+      bar(t, mat, x0, y, z0, x1, y, z0, th);
+      bar(t, mat, x0, y, z1, x1, y, z1, th);
+      bar(t, mat, x0, y, z0, x0, y, z1, th);
+      bar(t, mat, x1, y, z0, x1, y, z1, th);
+    }
+    /* transverse pointed-arch rib across a room (two raking bars meeting
+     * at an apex) -- the cheap way to say "vaulted bay" in a room too
+     * small to be worth a full fan. */
+    function archRib(t, mat, axis, fixed, a0, a1, ySpring, yApex, th){
+      var m = (a0+a1)/2;
+      if (axis==='z'){
+        bar(t, mat, fixed, ySpring, a0, fixed, yApex, m, th||0.14);
+        bar(t, mat, fixed, ySpring, a1, fixed, yApex, m, th||0.14);
+      } else {
+        bar(t, mat, a0, ySpring, fixed, m, yApex, fixed, th||0.14);
+        bar(t, mat, a1, ySpring, fixed, m, yApex, fixed, th||0.14);
+      }
+    }
+    /* trestle table + a bench down each long side, running along `ry` */
+    function tableSet(t, cx, cz, len, ry, benches){
+      var y = 0.78;
+      add(t, boxGeo(len, 0.14, 0.95), woodMat, cx, y, cz, ry);
+      [-1,1].forEach(function(s){
+        var lx = s*len*0.34;
+        add(t, boxGeo(0.5, y-0.07, 0.7), woodMat,
+            cx + lx*Math.cos(ry), (y-0.07)/2, cz - lx*Math.sin(ry), ry);
+      });
+      if (benches === false) return;
+      [-1,1].forEach(function(s){
+        var off = s*1.0;
+        var bx = cx + off*Math.sin(ry), bz = cz + off*Math.cos(ry);
+        add(t, boxGeo(len*0.94, 0.12, 0.36), woodMat, bx, 0.46, bz, ry);
+        [-1,1].forEach(function(s2){
+          var lx2 = s2*len*0.36;
+          add(t, boxGeo(0.24, 0.4, 0.3), woodMat,
+              bx + lx2*Math.cos(ry), 0.2, bz - lx2*Math.sin(ry), ry);
+        });
+      });
+    }
+    function benchRun(t, cx, cz, len, ry, mat){
+      add(t, boxGeo(len, 0.14, 0.4), mat || woodMat, cx, 0.62, cz, ry);
+      [-1,1].forEach(function(s){
+        var lx = s*len*0.4;
+        add(t, boxGeo(0.2, 0.46, 0.36), mat || woodMat,
+            cx + lx*Math.cos(ry), 0.28, cz - lx*Math.sin(ry), ry);
+      });
+    }
+    function chest(t, cx, cz, ry, w){
+      w = w || 1.6;
+      add(t, boxGeo(w, 0.75, 0.8), darkWoodMat, cx, 0.53, cz, ry);
+      add(t, boxGeo(w+0.1, 0.16, 0.9), woodMat, cx, 0.98, cz, ry);
+      [-0.28,0.28].forEach(function(f){
+        add(t, boxGeo(0.1, 0.95, 0.86), metalMat, cx + f*w*Math.cos(ry), 0.6, cz - f*w*Math.sin(ry), ry);
+      });
+    }
+    function barrel(t, x, z, r, h){
+      add(t, cylGeo(r*0.86, r*0.86, h, 8), woodMat, x, 0.16+h/2, z);
+      [0.28,0.72].forEach(function(f){
+        add(t, cylGeo(r, r, 0.12, 8), metalMat, x, 0.16+h*f, z);
+      });
+    }
+    function sackPile(t, x, z, n, ry){
+      for (var i=0;i<n;i++){
+        var a = ry + i*1.9;
+        add(t, cylGeo(0.34, 0.44, 0.85, 6), sackMat,
+            x + Math.cos(a)*0.5*(i%3), 0.16+0.43 + (i>2?0.85:0), z + Math.sin(a)*0.5*(i%3));
+      }
+    }
+    function crateStack(t, x, z, ry){
+      add(t, boxGeo(1.1, 0.8, 1.0), woodMat, x, 0.56, z, ry);
+      add(t, boxGeo(0.95, 0.7, 0.9), woodMat, x+0.1, 1.31, z-0.05, ry+0.3);
+    }
+    function woodPile(t, x, z, len, ry){
+      var pc = Math.cos(ry + Math.PI/2), ps = Math.sin(ry + Math.PI/2);
+      for (var r=0;r<3;r++){
+        for (var c=0;c<4-r;c++){
+          var off = (c-(3-r)/2)*0.36;
+          lay(t, cylGeo(0.16,0.16,len,5), woodMat, x + off*pc, 0.32+r*0.32, z - off*ps, ry);
+        }
+      }
+    }
+    function hayPile(t, x, z, r, h){
+      add(t, cylGeo(r*0.55, r, h, 7), strawMat, x, 0.16+h/2, z);
+      add(t, coneGeo(r*0.62, h*0.5, 7), strawMat, x, 0.16+h+h*0.24, z);
+    }
+    function cart(t, x, z, ry, loaded){
+      add(t, boxGeo(3.0, 0.35, 1.7), woodMat, x, 1.0, z, ry);
+      [-1,1].forEach(function(s){
+        [-1,1].forEach(function(s2){
+          var lx = s*1.0, lz = s2*0.95;
+          var wx = x + lx*Math.cos(ry) + lz*Math.sin(ry);
+          var wz = z - lx*Math.sin(ry) + lz*Math.cos(ry);
+          wheelDisc(t, cylGeo(0.72,0.72,0.16,10), darkWoodMat, wx, 0.88, wz, ry);
+        });
+      });
+      // draught shafts
+      [-0.55,0.55].forEach(function(o){
+        bar(t, woodMat, x + 1.5*Math.cos(ry) + o*Math.sin(ry), 1.0, z - 1.5*Math.sin(ry) + o*Math.cos(ry),
+                        x + 3.4*Math.cos(ry) + o*Math.sin(ry), 0.7, z - 3.4*Math.sin(ry) + o*Math.cos(ry), 0.12);
+      });
+      if (loaded){
+        add(t, boxGeo(2.4, 0.7, 1.3), sackMat, x, 1.52, z, ry);
+      }
+    }
+    /* wall fireplace: firebox, ember block, conical/pyramidal hood and a
+     * chimney breast. `nrm` is the wall the hearth is set into. */
+    function hearth(t, x, z, nrm, w, wallMat){
+      // local frame opens toward +Z; ry maps that to the room side of the
+      // named wall (a hearth in the x+ wall must open toward -x)
+      var ry = (nrm==='x+') ? -Math.PI/2 : (nrm==='x-') ? Math.PI/2 : (nrm==='z+') ? Math.PI : 0;
+      var g = new T.Group();
+      g.position.set(x, 0, z); g.rotation.y = ry;
+      t.add(g);
+      // local frame: hearth opens toward +Z
+      add(g, boxGeo(w+1.0, 3.4, 0.7), wallMat || stoneDarkMat, 0, 0.16+1.7, -0.35);
+      add(g, boxGeo(w, 0.35, 1.5), flagMat, 0, 0.3, 0.5);
+      add(g, boxGeo(w*0.8, 0.3, 1.0), emberMat, 0, 0.5, 0.45);
+      var hood = new T.Mesh(coneGeo(w*0.78, 2.6, 4), wallMat || stoneDarkMat);
+      hood.castShadow = true; hood.receiveShadow = true;
+      hood.rotation.y = Math.PI/4;
+      hood.position.set(0, 3.0, 0.15);
+      g.add(hood);
+      // logs
+      [-0.3,0.3].forEach(function(o){
+        lay(g, cylGeo(0.14,0.14,w*0.6,5), woodMat, 0, 0.62, 0.45 + o, 0);
+      });
+      return g;
+    }
+    function candleStand(t, x, z){
+      add(t, cylGeo(0.3,0.36,0.12,6), metalMat, x, 0.22, z);
+      add(t, cylGeo(0.07,0.07,1.5,5), metalMat, x, 0.9, z);
+      add(t, cylGeo(0.3,0.24,0.1,6), metalMat, x, 1.68, z);
+      [-0.22,0,0.22].forEach(function(o){
+        add(t, cylGeo(0.05,0.05,0.35,5), plasterMat, x+o, 1.9, z);
+      });
+    }
+    function bannerBoard(t, x, y, z, ry, w, h, mat){
+      add(t, boxGeo(w, h, 0.1), mat || clothMat, x, y, z, ry);
+      add(t, cylGeo(0.07,0.07,w+0.4,5), woodMat, x, y + h/2 + 0.16, z, ry);
+    }
+    /* straight flight of steps */
+    function stairFlight(t, mat, x, z, ry, n, rise, run, width){
+      for (var i=0;i<n;i++){
+        var d = (i+0.5)*run;
+        add(t, boxGeo(run, rise*(i+1), width), mat,
+            x + d*Math.cos(ry), 0.16 + rise*(i+1)/2, z - d*Math.sin(ry), ry);
+      }
+    }
+    /* spiral stair: a helix of treads round a newel */
+    function spiralStair(t, mat, x, z, r, n, totalH){
+      add(t, cylGeo(0.28,0.28,totalH,8), mat, x, 0.16+totalH/2, z);
+      for (var i=0;i<n;i++){
+        var a = i*(Math.PI*2/12);
+        add(t, boxGeo(r, 0.2, 0.62), mat,
+            x + Math.cos(a)*r*0.5, 0.16 + (i+1)*(totalH/n), z + Math.sin(a)*r*0.5, -a);
+      }
+    }
+    /* roof truss (tie beam + two rafters + king post) for a timber range */
+    function truss(t, mat, cx, cz, halfSpan, eaveY, apexY, axis){
+      if (axis==='x'){
+        add(t, boxGeo(0.24, 0.24, halfSpan*2), mat, cx, eaveY, cz);
+        bar(t, mat, cx, eaveY, cz-halfSpan, cx, apexY, cz, 0.2);
+        bar(t, mat, cx, eaveY, cz+halfSpan, cx, apexY, cz, 0.2);
+      } else {
+        add(t, boxGeo(halfSpan*2, 0.24, 0.24), mat, cx, eaveY, cz);
+        bar(t, mat, cx-halfSpan, eaveY, cz, cx, apexY, cz, 0.2);
+        bar(t, mat, cx+halfSpan, eaveY, cz, cx, apexY, cz, 0.2);
+      }
+      add(t, boxGeo(0.22, apexY-eaveY, 0.22), mat, cx, (eaveY+apexY)/2, cz);
+    }
+
+    /* ================================================================
+     * planting kit -- kitchen garden beds, herb plats, hedges, small
+     * courtyard trees, vines. Deliberately SMALL-scale: these are
+     * enclosed-garden plants, not the 8-10m riverbank trees scattered
+     * outside the walls, so nothing here exceeds ~4.5m.
+     * ================================================================ */
+    function gardenBed(t, cx, cz, w, d, rows, cropMat, ry){
+      ry = ry || 0;
+      var g = new T.Group();
+      g.position.set(cx, 0, cz); g.rotation.y = ry;
+      t.add(g);
+      add(g, boxGeo(w, 0.55, d), soilMat, 0, 0.28, 0);
+      // low board edging
+      [-1,1].forEach(function(s){
+        add(g, boxGeo(w, 0.46, 0.16), woodMat, 0, 0.36, s*(d/2-0.08));
+        add(g, boxGeo(0.16, 0.46, d), woodMat, s*(w/2-0.08), 0.36, 0);
+      });
+      // ridged rows of crop, one box per row
+      for (var i=0;i<rows;i++){
+        var z = -d/2 + d*(i+0.5)/rows;
+        add(g, boxGeo(w-0.9, 0.55, d/rows*0.5), cropMat, 0, 0.8, z);
+      }
+      return g;
+    }
+    /* herb plat: a square bed quartered by little paths, the standard
+     * monastic hortulus layout */
+    function herbPlat(t, cx, cz, s){
+      add(t, boxGeo(s, 0.5, s), soilMat, cx, 0.25, cz);
+      [-1,1].forEach(function(sx){
+        [-1,1].forEach(function(sz){
+          add(t, boxGeo(s*0.4, 0.62, s*0.4), sx*sz > 0 ? cropMat1 : cropMat2,
+              cx + sx*s*0.24, 0.76, cz + sz*s*0.24);
+        });
+      });
+      add(t, boxGeo(s+0.4, 0.2, 0.3), flagMat, cx, 0.56, cz);
+      add(t, boxGeo(0.3, 0.2, s+0.4), flagMat, cx, 0.56, cz);
+      // board frame round the plat
+      [-1,1].forEach(function(sg){
+        add(t, boxGeo(s+0.2, 0.4, 0.14), woodMat, cx, 0.34, cz + sg*s/2);
+        add(t, boxGeo(0.14, 0.4, s+0.2), woodMat, cx + sg*s/2, 0.34, cz);
+      });
+    }
+    function hedgeRun(t, cx, cz, len, ry, h){
+      h = h || 1.0;
+      add(t, boxGeo(len, h, 0.85), hedgeMat, cx, 0.16+h/2, cz, ry);
+    }
+    /* small enclosed-garden tree: 2.6-4.5m, not the riverbank species */
+    function gardenTree(t, x, z, scale, shaped){
+      scale = scale || 1;
+      add(t, cylGeo(0.13*scale, 0.19*scale, 1.5*scale, 5), treeTrunkMat, x, 0.16+0.75*scale, z);
+      if (shaped){                       // clipped bay / topiary cone
+        add(t, coneGeo(0.85*scale, 2.1*scale, 7), treeLeafMat2, x, 0.16+1.5*scale+1.05*scale, z);
+      } else {                           // fruit tree
+        var ball = new T.Mesh(cylGeo(1.15*scale, 0.75*scale, 1.5*scale, 7), treeLeafMat1);
+        ball.castShadow = true; ball.receiveShadow = true;
+        ball.position.set(x, 0.16+1.5*scale+0.75*scale, z);
+        t.add(ball);
+        add(t, coneGeo(1.15*scale, 1.1*scale, 7), treeLeafMat1, x, 0.16+1.5*scale+1.5*scale+0.5*scale, z);
+      }
+    }
+    function pottedPlant(t, x, z){
+      add(t, cylGeo(0.34, 0.26, 0.55, 7), potMat, x, 0.44, z);
+      add(t, coneGeo(0.44, 1.0, 6), treeLeafMat2, x, 1.2, z);
+    }
+    /* vine trellis: posts + wires + foliage, run along `ry` */
+    function vineRun(t, cx, cz, len, ry, h){
+      h = h || 2.2;
+      var n = Math.max(2, Math.round(len/3));
+      for (var i=0;i<=n;i++){
+        var lx = -len/2 + len*i/n;
+        add(t, boxGeo(0.16, h, 0.16), woodMat,
+            cx + lx*Math.cos(ry), 0.16+h/2, cz - lx*Math.sin(ry), ry);
+      }
+      [0.55, 0.95].forEach(function(f){
+        add(t, boxGeo(len, 0.08, 0.08), woodMat, cx, 0.16+h*f, cz, ry);
+      });
+      add(t, boxGeo(len*0.96, 0.75, 0.6), treeLeafMat1, cx, 0.16+h*0.86, cz, ry);
+    }
+
+    /* ================================================================
+     * A. HIGH CASTLE -- conventual rooms (inner cutaway tier)
+     * ================================================================ */
+    (function highCastle(){
+      var g = det(0, 7, 0, D_NEAR);
+
+      // ---- floors of the four wings, so a faded wing leaves paving
+      floorSlab(g, flagMat, -HC_HX+0.8, HC_HX-0.8,  HC_COURT_HZ, HC_HZ-0.8);   // N
+      floorSlab(g, flagMat, -HC_HX+0.8, HC_HX-0.8, -HC_HZ+0.8, -HC_COURT_HZ);  // S
+      floorSlab(g, flagMat,  HC_COURT_HX, HC_HX-0.8, -HC_COURT_HZ, HC_COURT_HZ);// E
+      floorSlab(g, flagMat, -HC_HX+0.8, -HC_COURT_HX, -HC_COURT_HZ, HC_COURT_HZ);// W
+
+      /* ---- St Mary's Church ---------------------------------------
+       * 38m x 12m nave with a 5-pier arcade down the centre line (the
+       * piers themselves are built with the plan above), a rib vault
+       * springing off them, choir stalls flanking the sanctuary, a
+       * reredos behind the altar already placed at the east end, and a
+       * rood beam across the chancel entrance. */
+      var cz0 = HC_HZ - HC_WD_NS + 0.9, cz1 = HC_HZ - 1.1;   // 19.4 .. 29.4
+      floorSlab(g, tileMat, CH_X0+0.6, CH_X1-1.2, cz0, cz1);
+      dado(g, plasterMat, CH_X0+0.4, CH_X1-1.2, cz0, cz1, 1.5, 0.55, 'x+');
+      responds(g, plasterMat, 'x', cz0-0.05, CH_X0+2, CH_X1-2, 7, CH_H-2.2);
+      responds(g, plasterMat, 'x', cz1+0.05, CH_X0+2, CH_X1-2, 7, CH_H-2.2);
+      CH_PIER_X.forEach(function(px){
+        // pier capital + a transverse rib pair to each side wall
+        add(g, cylGeo(0.62, 0.46, 0.5, 8), plasterMat, px, CH_H-1.5+0.25, CH_Z);
+        fanVault(g, ribMat, px, CH_Z, CH_H-1.2, CH_H-0.1, 5.6, 3.4, 8, 0.14);
+      });
+      // ridge rib running the length of the nave + the wall ribs that
+      // close the vault off along the tops of the side walls
+      bar(g, ribMat, CH_X0+1, CH_H-0.1, CH_Z, CH_X1-1, CH_H-0.1, CH_Z, 0.18);
+      vaultRing(g, ribMat, CH_X0+1, CH_X1-1.4, cz0+0.3, cz1-0.3, CH_H-0.1, 0.18);
+      // altar furniture (the altar block itself is placed with the plan)
+      add(g, boxGeo(2.8, 4.2, 0.5), goldMat, CH_X1-2.2, 2.3, APSE_CZ);       // reredos
+      add(g, boxGeo(3.0, 0.3, 1.6), flagMat, CH_X1-3, 0.28, APSE_CZ);        // predella
+      [-1,1].forEach(function(s){ candleStand(g, CH_X1-4.2, APSE_CZ + s*1.6); });
+      // choir stalls: two facing runs down the eastern third of the nave
+      [-1,1].forEach(function(s){
+        benchRun(g, CH_X1-9, CH_Z + s*2.6, 12, Math.PI/2, darkWoodMat);
+        add(g, boxGeo(12, 2.2, 0.3), darkWoodMat, CH_X1-9, 1.3, CH_Z + s*3.0, Math.PI/2);
+      });
+      // rood beam + cross over the chancel entrance
+      add(g, boxGeo(0.24, 0.24, 9.6), darkWoodMat, CH_X1-15, 7.4, CH_Z);
+      add(g, boxGeo(0.2, 1.9, 0.2), goldMat, CH_X1-15, 8.4, CH_Z);
+      add(g, boxGeo(0.2, 0.2, 1.1), goldMat, CH_X1-15, 8.7, CH_Z);
+      // nave benches
+      for (var nb=0; nb<4; nb++){
+        [-1,1].forEach(function(s){
+          benchRun(g, CH_X0+6 + nb*4.6, CH_Z + s*2.4, 3.6, Math.PI/2, woodMat);
+        });
+      }
+      // lectern
+      add(g, cylGeo(0.2,0.28,1.2,6), darkWoodMat, CH_X1-13, 0.76, CH_Z-3.2);
+      add(g, boxGeo(0.8, 0.12, 0.6), darkWoodMat, CH_X1-13, 1.42, CH_Z-3.2, 0.4);
+      /* painted frieze round the top of both nave walls. This was a band
+       * of 3m-tall panels at mid height, which from outside the wing read
+       * as five blank billboards standing across the church and hid the
+       * whole interior from the north. Kept to a narrow band just under
+       * the vault springing, it reads as painted decoration and blocks
+       * nothing. */
+      for (var fr=0; fr<5; fr++){
+        [cz0+0.2, cz1-0.2].forEach(function(fz){
+          add(g, boxGeo(5.4, 1.3, 0.12), frescoMat, CH_X0+5 + fr*6.6, CH_H-1.6, fz);
+        });
+      }
+
+      /* ---- St Anne's Chapel -- ground floor, west end of the north
+       * wing, under the church's western bays [MH]. Three bays, its own
+       * altar, and the burial crypt of the Grand Masters below: the
+       * crypt is shown as a sunken floor panel with three tomb chests,
+       * reached by a short flight down from the chapel. Dimensions are
+       * unmeasured -> 推定; only the "3 bays + crypt" arrangement is
+       * documented. */
+      var SA_X0 = -HC_HX+1.4, SA_X1 = CH_X0-0.4, SA_H = 5.6;
+      floorSlab(g, tileMat, SA_X0, SA_X1, cz0, cz1);
+      dado(g, plasterMat, SA_X0, SA_X1, cz0, cz1, 1.4, 0.5, 'x+');
+      var saBayX = [SA_X0+2.0, (SA_X0+SA_X1)/2, SA_X1-2.0];
+      saBayX.forEach(function(bx){
+        responds(g, plasterMat, 'x', cz0+0.3, bx, bx, 1, SA_H);
+        responds(g, plasterMat, 'x', cz1-0.3, bx, bx, 1, SA_H);
+        // transverse arch across the wing's depth at each bay
+        archRib(g, ribMat, 'z', bx, cz0+0.3, cz1-0.3, SA_H, SA_H+1.6, 0.14);
+      });
+      bar(g, ribMat, SA_X0+1, SA_H+1.6, CH_Z, SA_X1-1, SA_H+1.6, CH_Z, 0.14);
+      // altar at the east end of the chapel
+      add(g, boxGeo(0.6, 1.1, 2.0), flagMat, SA_X1-1.2, 0.72, CH_Z);
+      add(g, boxGeo(0.3, 2.4, 1.6), goldMat, SA_X1-0.7, 1.5, CH_Z);
+      // sunken crypt with three tomb chests
+      add(g, boxGeo(6.4, 0.28, 5.6), stoneDarkMat, SA_X0+4.2, -0.02, CH_Z);
+      for (var tb=0; tb<3; tb++){
+        add(g, boxGeo(2.4, 0.62, 1.0), flagMat, SA_X0+4.2, 0.35, CH_Z-2.0 + tb*2.0);
+        add(g, boxGeo(2.5, 0.16, 1.1), plasterMat, SA_X0+4.2, 0.74, CH_Z-2.0 + tb*2.0);
+      }
+      stairFlight(g, flagMat, SA_X0+7.8, CH_Z, 0, 4, 0.22, 0.5, 2.0);
+      [-1,1].forEach(function(s){ candleStand(g, SA_X1-2.6, CH_Z + s*1.8); });
+      mpPickRoom(SA_X0, SA_X1, cz0, cz1, SA_H, '聖アンナ礼拝堂 St Anne’s Chapel',
+        '教会の下層、3ベイの礼拝堂。床下は歴代総長を葬った地下納骨室。');
+
+      /* ---- Chapter House (south wing) ---------------------------- */
+      var cpz0 = -HC_HZ + 1.0, cpz1 = -HC_COURT_HZ - 0.6, CP_H = 7.2;
+      floorSlab(g, tileMat, chX0-0.6, chX1+0.6, cpz0, cpz1);
+      dado(g, plasterMat, chX0-0.8, chX1+0.8, cpz0, cpz1, 1.3, 0.5);
+      // two piers carrying a pair of fan vaults, stone bench round the wall
+      [-11, -1].forEach(function(px){
+        add(g, cylGeo(0.42, 0.5, CP_H-1.2, 8), stubMat, px, 0.16+(CP_H-1.2)/2, (cpz0+cpz1)/2);
+        add(g, cylGeo(0.66, 0.48, 0.5, 8), plasterMat, px, 0.16+CP_H-1.2+0.25, (cpz0+cpz1)/2);
+        fanVault(g, ribMat, px, (cpz0+cpz1)/2, CP_H-0.4, CP_H+0.6, 6.2, 4.6, 10, 0.16);
+      });
+      vaultRing(g, ribMat, chX0-0.4, chX1+0.4, cpz0+0.4, cpz1-0.4, CP_H+0.6, 0.17);
+      [cpz0+0.7, cpz1-0.7].forEach(function(bz){
+        add(g, boxGeo(chX1-chX0, 0.4, 0.7), flagMat, (chX0+chX1)/2, 0.72, bz);
+        add(g, boxGeo(chX1-chX0, 1.5, 0.28), plasterMat, (chX0+chX1)/2, 1.66, bz);
+      });
+      // grand master's high seat at the west end
+      add(g, boxGeo(0.9, 0.5, 1.6), darkWoodMat, chX0+1.2, 0.72, (cpz0+cpz1)/2);
+      add(g, boxGeo(0.34, 2.8, 1.6), darkWoodMat, chX0+0.7, 1.7, (cpz0+cpz1)/2);
+      bannerBoard(g, chX0+1.0, 4.4, (cpz0+cpz1)/2, Math.PI/2, 2.2, 3.0);
+      // the long council table already sits at the room's centre; add
+      // benches down each side of it and a lectern at the head
+      [-1,1].forEach(function(s){
+        benchRun(g, (chX0+chX1)/2, (cpz0+cpz1)/2 + s*2.0, 6.0, 0, woodMat);
+      });
+      add(g, cylGeo(0.2,0.28,1.2,6), darkWoodMat, chX0+4.2, 0.76, (cpz0+cpz1)/2);
+      add(g, boxGeo(0.7, 0.12, 0.6), darkWoodMat, chX0+4.2, 1.42, (cpz0+cpz1)/2, 0.3);
+      hearth(g, chX1-2.5, cpz0+0.9, 'z-', 2.4, stoneDarkMat);
+
+      /* ---- Convent Refectory (west wing) ------------------------- */
+      floorSlab(g, tileMat, rfX0-0.2, rfX1+0.4, rfZ0-4, rfZ1+4);
+      dado(g, plasterMat, rfX0-0.1, rfX1+0.6, rfZ0-4.4, rfZ1+4.4, 1.3, 0.5, 'x+');
+      responds(g, plasterMat, 'z', rfX0+0.2, rfZ0-3.5, rfZ1+3.5, 5, HCRF_H);
+      HCRF_COL_Z.forEach(function(cz){
+        add(g, cylGeo(0.6, 0.44, 0.5, 8), plasterMat, (rfX0+rfX1)/2, 0.16+HCRF_H-1.0+0.25, cz);
+        fanVault(g, ribMat, (rfX0+rfX1)/2, cz, HCRF_H-0.6, HCRF_H+0.6, 4.4, 3.4, 9, 0.16);
+      });
+      bar(g, ribMat, (rfX0+rfX1)/2, HCRF_H+0.6, rfZ0-3, (rfX0+rfX1)/2, HCRF_H+0.6, rfZ1+3, 0.17);
+      vaultRing(g, ribMat, rfX0, rfX1+0.4, rfZ0-3.6, rfZ1+3.6, HCRF_H+0.6, 0.17);
+      [-1,1].forEach(function(s){
+        tableSet(g, (rfX0+rfX1)/2 + s*2.6, 0, 13, Math.PI/2);
+      });
+      hearth(g, rfX0+0.4, 6.0, 'x-', 2.6, stoneDarkMat);
+      add(g, boxGeo(1.0, 2.4, 3.0), darkWoodMat, rfX1-0.9, 1.36, -10.5);   // cupboard
+      candleStand(g, (rfX0+rfX1)/2, -9);
+      bannerBoard(g, rfX1-0.3, 5.0, 9.5, -Math.PI/2, 2.0, 2.8);
+
+      /* ---- Grand Master's Old Chamber (east wing) ---------------- */
+      floorSlab(g, tileMat, gmX0-0.5, gmX1+0.2, gmZ0-1, gmZ1+1);
+      dado(g, plasterMat, gmX0-0.7, gmX1+0.2, gmZ0-1.4, gmZ1+1.4, 1.3, 0.5, 'x-');
+      responds(g, plasterMat, 'z', gmX1-0.1, gmZ0, gmZ1, 4, 6.4);
+      // three transverse arches across the wing's depth
+      [gmZ0+1.5, (gmZ0+gmZ1)/2, gmZ1-1.5].forEach(function(az){
+        archRib(g, ribMat, 'x', az, gmX0-0.4, gmX1, 6.4, 7.4, 0.13);
+      });
+      // canopy over the bed already placed at the room centre
+      var bedX = (gmX0+gmX1)/2, bedZ = (gmZ0+gmZ1)/2;
+      [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+        add(g, boxGeo(0.16, 2.6, 0.16), darkWoodMat, bedX + s[0]*1.1, 1.46, bedZ + s[1]*1.7);
+      });
+      add(g, boxGeo(2.6, 0.2, 3.8), clothMat, bedX, 2.86, bedZ);
+      chest(g, gmX0+1.4, gmZ1-1.6, 0, 1.8);
+      tableSet(g, bedX, gmZ0+1.6, 2.6, 0, false);
+      add(g, boxGeo(0.7, 1.0, 0.7), darkWoodMat, bedX+1.6, 0.66, gmZ0+1.6);   // stool/chair
+      hearth(g, gmX1+0.2, bedZ+3.4, 'x+', 2.2, stoneDarkMat);
+      bannerBoard(g, gmX0+0.4, 4.6, bedZ, Math.PI/2, 2.4, 3.2);
+      candleStand(g, bedX-1.8, gmZ0+2.4);
+
+      /* ---- spiral stair in the NE corner turret + a straight flight
+       * from the courtyard up to the cloister's upper gallery ------ */
+      spiralStair(g, flagMat, HC_HX-3.0, HC_HZ-3.0, 2.6, 22, 11.0);
+      stairFlight(g, flagMat, HC_COURT_HX-2.6, -HC_COURT_HZ+3.0, Math.PI/2, 10, 0.56, 0.62, 1.6);
+    })();
+
+    /* ---- High Castle courtyard: garth planting + a proper well head.
+     * The reference courtyard photograph shows a cobbled garth, so the
+     * planting here is deliberately restrained -- four small raised herb
+     * plats in the quarters of the cross path, a pair of clipped bays
+     * flanking the well and a vine trained along the east walk -- rather
+     * than the full kitchen garden, which goes in the Middle Castle
+     * courtyard where there is real open ground. No resident ever walks
+     * the High Castle garth (`life.courtyard` has no box here and the
+     * patrol turns back at the dry-ditch bridge), so nothing here can be
+     * walked through. ------------------------------------------------ */
+    (function highCourtyard(){
+      var g = det(0, 2, 0, D_FAR);
+      // herb plats in three quarters of the cross path (the fourth holds
+      // the well) -- inside the cloister walk, clear of both paths
+      herbPlat(g,  7.0, -8.0, 5.0);
+      herbPlat(g,  7.0,  8.0, 5.0);
+      herbPlat(g, -7.5, -8.0, 5.0);
+      // the well quarter gets narrower beds either side of the well head
+      gardenBed(g, -9.5, 9.5, 3.4, 5.0, 3, cropMat2, 0);
+      gardenBed(g,  3.0, 11.5, 3.0, 4.4, 3, cropMat1, 0);   // clear of the N-S cross path (|x| < 1.1)
+      [[-6.2,-1.9],[-6.2,1.9]].forEach(function(p){ gardenTree(g, p[0], p[1], 0.85, true); });
+      // vine along the inside of the east cloister walk
+      vineRun(g, HC_COURT_HX-3.4, 0, 18, Math.PI/2, 2.3);
+      [[-13.0,-13.5],[13.0,-13.5],[13.0,13.5]].forEach(function(p){ pottedPlant(g, p[0], p[1]); });
+      // well head: windlass, rope, bucket and a finial, matching the
+      // canopied well house in the reference photograph
+      var wx=-3, wz=3;
+      lay(g, cylGeo(0.13,0.13,2.0,6), woodMat, wx, 1.55, wz, 0);
+      lay(g, cylGeo(0.22,0.22,0.5,6), woodMat, wx, 1.55, wz, 0);
+      add(g, boxGeo(0.1, 0.6, 0.1), woodMat, wx+0.55, 1.3, wz);
+      add(g, boxGeo(0.06, 0.9, 0.06), metalMat, wx, 1.05, wz);
+      add(g, cylGeo(0.28,0.24,0.36,7), woodMat, wx, 0.72, wz);
+      add(g, coneGeo(0.24, 0.7, 6), goldMat, wx, 3.55, wz);
+      registerPick(pickables, 'room', 0, 1.4, 10.5, 26, 3.0, 14,
+        '中庭の菜園 Courtyard Herb Garden', '高城中庭の薬草・香草区画。修道院型の四分割花壇に薬草を育てた。');
+    })();
+
+    /* ================================================================
+     * B. MIDDLE CASTLE
+     * ================================================================ */
+    /* ---- Great Refectory (Wielki Refektarz) ----------------------
+     * The single most famous interior at Malbork and the centrepiece of
+     * this fit-out. 30m long [MH]◎ along Z; the modelled width is the
+     * west wing's own 13m depth (MC_WD, itself an unmeasured △ estimate)
+     * rather than the documented 15m [MH] -- the surveyed 30x15m figure
+     * is left untouched in the pick volume and the comment above, and
+     * only the wall-to-wall geometry here is trimmed by ~1m a side so
+     * the hall fits inside the wing the plan actually builds.
+     *
+     * Fittings follow the two Commons reference photographs closely:
+     * three near-black granite monoliths on pale bases with carved pale
+     * capitals; a palm vault whose ribs fan out ~14 to a pier; a red
+     * clay tile floor; the great hooded fireplace; wall benches; the
+     * fresco band round the top of the walls; and the near-continuous
+     * screen of 14 pointed windows [MH]◎ on the river wall, which are
+     * given interior reveals here.
+     * ============================================================== */
+    (function greatRefectory(){
+      var cx = MC_WX, cz = RF_CZ;
+      var g = det(cx, 5, cz, D_MID);
+      var hw = MC_WD/2 - 0.6;                      // 5.9m to each wall face
+      var z0 = cz - RF_D/2, z1 = cz + RF_D/2;      // documented 30m length
+      var CROWN = RF_H - 0.3;                      // 9.2m, under the 9.5m ceiling
+
+      floorSlab(g, tileMat, cx-hw, cx+hw, z0, z1);
+      dado(g, plasterMat, cx-hw-0.3, cx+hw+0.3, z0-0.3, z1+0.3, 1.35, 0.55);
+      // wall responds at every bay, both long walls + the two ends
+      responds(g, plasterMat, 'z', cx-hw-0.05, z0+1.6, z1-1.6, 7, CROWN-0.6);
+      responds(g, plasterMat, 'z', cx+hw+0.05, z0+1.6, z1-1.6, 7, CROWN-0.6);
+      responds(g, plasterMat, 'x', z0+0.1, cx-hw+1.6, cx+hw-1.6, 3, CROWN-0.6);
+      responds(g, plasterMat, 'x', z1-0.1, cx-hw+1.6, cx+hw-1.6, 3, CROWN-0.6);
+      // the palm vault: one 14-rib fan off each granite pier, plus a
+      // longitudinal ridge rib tying the three crowns together and half
+      // fans against the two end walls
+      RF_COL_Z.forEach(function(pz){
+        fanVault(g, ribMat, cx, pz, 4.5, CROWN, hw+0.2, 5.0, 14, 0.19);
+      });
+      bar(g, ribMat, cx, CROWN, z0+0.4, cx, CROWN, z1-0.4, 0.2);
+      vaultRing(g, ribMat, cx-hw-0.1, cx+hw+0.1, z0+0.3, z1-0.3, CROWN, 0.2);
+      [z0, z1].forEach(function(ez){
+        var dir = ez < cz ? 1 : -1;
+        for (var i=0;i<5;i++){
+          var a = -Math.PI/2 + Math.PI*(i/4);
+          bar(g, ribMat, cx + Math.sin(a)*hw*0.98, CROWN, ez + dir*0.4,
+                         cx, CROWN, ez + dir*3.6, 0.13);
+        }
+      });
+      // interior reveals for the 14 documented river-wall windows: a
+      // splayed pale jamb pair per light, stopping at 4.2m so the vault
+      // and the floor both stay visible from a cutaway view above
+      for (var w=0; w<14; w++){
+        var wz = z0 + 1.2 + w*((RF_D-2.4)/13);
+        add(g, boxGeo(0.5, 3.0, 1.05), plasterMat, cx-hw+0.2, 1.55+0.16, wz);
+        add(g, boxGeo(0.22, 2.9, 0.8), windowMat,  cx-hw-0.05, 1.6+0.16, wz);
+      }
+      // the painted cycle round the top of the east wall (reference
+      // photograph); a narrow band just under the vault springing, so it
+      // never stands between the camera and the room
+      for (var f=0; f<6; f++){
+        add(g, boxGeo(0.12, 1.5, 4.2), frescoMat, cx+hw-0.1, CROWN-2.2, z0+2.6 + f*4.8);
+      }
+      // the great hooded fireplace, east wall, north end
+      hearth(g, cx+hw-0.4, cz+9.5, 'x+', 3.0, plasterMat);
+      // four long refectory tables (the hall seated 400 [MH]) + wall
+      // benches down both sides
+      [-1,1].forEach(function(s){
+        [-1,1].forEach(function(s2){
+          tableSet(g, cx + s*3.3, cz + s2*7.2, 11, Math.PI/2);
+        });
+        benchRun(g, cx + s*(hw-0.9), cz, 24, Math.PI/2, woodMat);
+      });
+      // dais + high table at the south end
+      add(g, boxGeo(hw*2-1.0, 0.35, 3.4), flagMat, cx, 0.33, z0+2.4);
+      tableSet(g, cx, z0+2.2, 6.0, 0, false);
+      add(g, boxGeo(1.0, 1.9, 0.8), darkWoodMat, cx, 1.5, z0+1.2);
+      candleStand(g, cx-2.6, z0+3.6);
+      candleStand(g, cx+2.6, z0+3.6);
+      // serving door + a tall Gothic cupboard, as in the photographs
+      add(g, boxGeo(0.4, 2.6, 1.6), windowMat, cx+hw-0.1, 1.46, z1-3.0);
+      add(g, boxGeo(1.0, 4.6, 2.0), darkWoodMat, cx-hw+1.0, 2.46, z1-4.0);
+    })();
+
+    /* ---- Grand Master's Palace: the Summer Refectory, whose single
+     * central granite column carrying a palm vault is the palace's
+     * signature room (the same trick as the Great Refectory at one-pier
+     * scale). Plan dimensions of the palace are unmeasured △, so the
+     * room is simply centred in the 22x22m block. ------------------ */
+    (function grandMasterPalace(){
+      var g = det(GMP_CX, 6, GMP_CZ, D_MID);
+      var hw = GMP_W/2 - 1.6, hd = GMP_D/2 - 1.6, H = 8.4;
+      floorSlab(g, tileMat, GMP_CX-hw, GMP_CX+hw, GMP_CZ-hd, GMP_CZ+hd);
+      dado(g, plasterMat, GMP_CX-hw, GMP_CX+hw, GMP_CZ-hd, GMP_CZ+hd, 1.4, 0.55);
+      responds(g, plasterMat, 'z', GMP_CX-hw+0.3, GMP_CZ-hd+1.5, GMP_CZ+hd-1.5, 4, H-0.6);
+      responds(g, plasterMat, 'z', GMP_CX+hw-0.3, GMP_CZ-hd+1.5, GMP_CZ+hd-1.5, 4, H-0.6);
+      responds(g, plasterMat, 'x', GMP_CZ-hd+0.3, GMP_CX-hw+1.5, GMP_CX+hw-1.5, 3, H-0.6);
+      responds(g, plasterMat, 'x', GMP_CZ+hd-0.3, GMP_CX-hw+1.5, GMP_CX+hw-1.5, 3, H-0.6);
+      // the one central granite column + its palm vault
+      add(g, cylGeo(0.9, 1.0, 0.5, 8), plasterMat, GMP_CX, 0.41, GMP_CZ);
+      add(g, cylGeo(0.52, 0.52, 4.4, 8), graniteMat, GMP_CX, 2.86, GMP_CZ);
+      add(g, cylGeo(0.9, 0.62, 0.6, 8), plasterMat, GMP_CX, 5.36, GMP_CZ);
+      fanVault(g, ribMat, GMP_CX, GMP_CZ, 5.7, H, hw+0.3, hd+0.3, 12, 0.18);
+      vaultRing(g, ribMat, GMP_CX-hw, GMP_CX+hw, GMP_CZ-hd, GMP_CZ+hd, H, 0.18);
+      // fittings: the master's table on a dais, benches, hearth, hangings
+      add(g, boxGeo(hw*1.4, 0.3, 2.6), flagMat, GMP_CX, 0.31, GMP_CZ-hd+1.9);
+      tableSet(g, GMP_CX, GMP_CZ-hd+1.8, 5.0, 0, false);
+      add(g, boxGeo(1.0, 2.2, 0.9), darkWoodMat, GMP_CX, 1.6, GMP_CZ-hd+1.0);
+      [-1,1].forEach(function(s){ tableSet(g, GMP_CX + s*3.4, GMP_CZ+1.5, 8, Math.PI/2); });
+      hearth(g, GMP_CX+hw-0.2, GMP_CZ+hd-3.0, 'x+', 2.6, plasterMat);
+      bannerBoard(g, GMP_CX-hw+0.4, 5.4, GMP_CZ, Math.PI/2, 3.0, 3.6);
+      bannerBoard(g, GMP_CX+hw-0.4, 5.4, GMP_CZ-2.5, -Math.PI/2, 2.4, 3.2, frescoMat);
+      candleStand(g, GMP_CX-2.4, GMP_CZ-hd+3.4);
+      candleStand(g, GMP_CX+2.4, GMP_CZ-hd+3.4);
+      spiralStair(g, flagMat, GMP_CX+hw-1.4, GMP_CZ-hd+1.4, 2.2, 16, 8.0);
+      mpPickRoom(GMP_CX-hw, GMP_CX+hw, GMP_CZ-hd, GMP_CZ+hd, H,
+        '夏の食堂 Summer Refectory', '大団長宮殿の主室。中央の花崗岩柱1本がパームヴォールトを支える、大食堂を縮めた構成。');
+    })();
+
+    /* ---- Infirmary (north wing) ---------------------------------- */
+    (function infirmary(){
+      var g = det(IF_CX, 5, IF_CZ, D_MID);
+      var hw = IF_W/2 - 1.2, z0 = IF_CZ - MC_WD/2 + 1.0, z1 = IF_CZ + MC_WD/2 - 1.0;
+      floorSlab(g, flagMat, IF_CX-hw, IF_CX+hw, z0, z1);
+      dado(g, plasterMat, IF_CX-hw, IF_CX+hw, z0, z1, 1.3, 0.5);
+      responds(g, plasterMat, 'x', z0+0.3, IF_CX-hw+1.4, IF_CX+hw-1.4, 4, 6.4);
+      responds(g, plasterMat, 'x', z1-0.3, IF_CX-hw+1.4, IF_CX+hw-1.4, 4, 6.4);
+      for (var b=0;b<3;b++){
+        archRib(g, ribMat, 'z', IF_CX-hw+2.6 + b*(hw*2-5.2)/2, z0+0.4, z1-0.4, 6.4, 7.4, 0.13);
+      }
+      // two rows of sick beds with a chest at each foot
+      for (var i=0;i<4;i++){
+        [-1,1].forEach(function(s){
+          var bx = IF_CX - hw + 2.2 + i*(hw*2-4.4)/3;
+          var bz = IF_CZ + s*3.2;
+          add(g, boxGeo(1.3, 0.5, 2.3), woodMat, bx, 0.41, bz);
+          add(g, boxGeo(1.35, 0.24, 2.35), clothMat, bx, 0.78, bz);
+          add(g, boxGeo(1.35, 1.4, 0.16), darkWoodMat, bx, 0.86, bz + s*1.2);
+        });
+      }
+      hearth(g, IF_CX-hw+0.3, IF_CZ, 'x-', 2.2, plasterMat);
+      add(g, boxGeo(1.0, 2.2, 2.4), darkWoodMat, IF_CX+hw-0.7, 1.26, IF_CZ);  // medicine press
+      candleStand(g, IF_CX, IF_CZ);
+      mpPickRoom(IF_CX-hw, IF_CX+hw, z0, z1, 6.4, '施療院内部 Infirmary Ward',
+        '北翼の病室。両側に病床が並び、端に薬品棚と暖炉を備える。');
+    })();
+
+    /* ---- Middle Castle courtyard: the castle's kitchen garden.
+     * This is the only large piece of open, level, enclosed ground in
+     * the complex, so it takes the vegetable beds, the herb plats and a
+     * small orchard. It occupies the EAST strip of the courtyard only
+     * (x 12..26); the farmers' wander box is narrowed to maxX 10 at the
+     * bottom of this file to match, and the guard patrol runs the
+     * courtyard on x=0, well clear. --------------------------------- */
+    (function middleCourtyard(){
+      /* The courtyard's clear ground is x -27..+27, z MC_Z0..MC_Z1-MC_WD
+       * (= 50.5..137.5). The whole garden is kept inside x 11..27 and
+       * z 56..133 so nothing can end up standing in a wing or, worse,
+       * out in the outer moat. */
+      var g = det(19, 2, MC_Z0 + 40, D_FAR);
+      var gz0 = MC_Z0 + 6, gz1 = MC_Z0 + 82;
+      // bare soil ground under the whole plot, over the cobbled apron
+      add(g, boxGeo(15.4, 0.3, gz1-gz0), soilMat, 18.8, 0.25, (gz0+gz1)/2);
+      // vegetable beds in two ranks with a walking path between
+      for (var i=0;i<5;i++){
+        var bz = MC_Z0 + 11.5 + i*11.0;
+        gardenBed(g, 15.6, bz, 5.2, 8.6, 4, i%2 ? cropMat1 : cropMat2, 0);
+        gardenBed(g, 22.0, bz, 5.2, 8.6, 4, i%2 ? cropMat2 : cropMat1, 0);
+      }
+      add(g, boxGeo(1.5, 0.26, gz1-gz0-2), cobbleMat, 18.8, 0.28, (gz0+gz1)/2);
+      hedgeRun(g, 18.8, gz0-0.6, 15.4, 0, 0.9);
+      hedgeRun(g, 11.4, (gz0+gz1)/2, gz1-gz0, Math.PI/2, 0.9);
+      // herb plats north of the vegetable ranks (z 115..131)
+      [[15.6,119.0],[22.2,119.0],[15.6,127.5],[22.2,127.5]].forEach(function(p){
+        herbPlat(g, p[0], p[1], 5.2);   // p[1] is an absolute sheet Z
+      });
+      hedgeRun(g, 18.8, 132.6, 15.4, 0, 0.9);
+      // four small fruit trees down the west edge of the strip
+      [66, 88, 106, 124].forEach(function(tz){
+        gardenTree(g, 11.9, tz, 1.0, false);
+      });
+      vineRun(g, 25.8, MC_Z0 + 55, 34, Math.PI/2, 2.4);
+      // a gardener's shed + tools + water butt at the south end
+      add(g, boxGeo(3.2, 2.4, 2.6), woodMat, 22.8, 1.36, MC_Z0 + 3.4);
+      add(g, coneGeo(2.6, 1.3, 4), woodMat, 22.8, 3.2, MC_Z0 + 3.4, Math.PI/4);
+      barrel(g, 20.2, MC_Z0 + 3.0, 0.6, 1.2);
+      cart(g, 16.0, MC_Z0 + 3.0, 0.3, true);
+      registerPick(pickables, 'room', 18.8, 1.5, MC_Z0 + 44, 15, 3.0, 88,
+        '中城の菜園 Kitchen Garden', '中城中庭の東側を占める菜園と薬草区画。畝・生垣・葡萄棚・果樹を備え、城内の食糧を支えた。');
+    })();
+
+    /* ================================================================
+     * C. LOW CASTLE -- the working Vorburg. Seven ranges get interiors;
+     * the rest keep their plain shells, because a 140x270m ward with
+     * twenty-two furnished buildings would cost far more than it reads.
+     * Ranges are picked to cover the documented functions: the Karwan
+     * (armoury/coach house), a granary/store, the stables, the bakehouse,
+     * the smithy, a workshop range and St Lawrence's chapel.
+     * ================================================================ */
+    /* generic service-range shell: earth or flag floor, low dado, a pair
+     * of roof trusses, and whatever props the caller adds */
+    function serviceRange(cx, cz, w, d, h, floorMat, axis, dist){
+      axis = axis || 'z';                       // direction the ridge runs
+      var g = det(cx, h*0.4, cz, dist || D_MID);
+      var hw = w/2 - 0.8, hd = d/2 - 0.8;
+      floorSlab(g, floorMat, cx-hw, cx+hw, cz-hd, cz+hd);
+      dado(g, stoneDarkMat, cx-hw, cx+hw, cz-hd, cz+hd, 1.2, 0.5);
+      // roof trusses, spaced along the ridge and spanning across it. The
+      // apex is deliberately kept under the shell's own ridge (which sits
+      // at h + span*0.71, see mpRange) so no truss can poke through the
+      // tiles while the roof is still standing.
+      var span = (axis==='z') ? hw : hd, run = (axis==='z') ? d : w;
+      var n = Math.max(2, Math.round(run/9));
+      for (var i=0;i<n;i++){
+        var t = -run/2 + (run-1.6)*(i+0.5)/n;
+        truss(g, woodMat, axis==='z' ? cx : cx+t, axis==='z' ? cz+t : cz,
+              span, h-1.2, h+span*0.85, axis);
+      }
+      return { g:g, hw:hw, hd:hd, cx:cx, cz:cz };
+    }
+
+    // ---- Karwan: armoury + coach house, 20x45m [measured]
+    (function karwan(){
+      var r = serviceRange(-20, KARWAN_CZ, 20, 45, 13.0, earthMat);
+      var g = r.g;
+      cart(g, -24, KARWAN_CZ - 14, 0.1, false);
+      cart(g, -16, KARWAN_CZ - 14, Math.PI + 0.1, true);
+      cart(g, -24, KARWAN_CZ + 6, 0.0, true);
+      // weapon racks: a frame with a row of spear shafts
+      for (var k=0;k<4;k++){
+        var rz = KARWAN_CZ - 4 + k*5.0;
+        add(g, boxGeo(0.3, 2.4, 3.2), woodMat, -27.6, 1.36, rz);
+        for (var s=0;s<7;s++){
+          add(g, cylGeo(0.06,0.06,2.9,4), woodMat, -27.4, 1.6, rz - 1.4 + s*0.46);
+          add(g, coneGeo(0.11, 0.4, 4), metalMat, -27.4, 3.25, rz - 1.4 + s*0.46);
+        }
+      }
+      // barrels of powder/pitch, crates of bolts, stacked shields
+      for (var b=0;b<6;b++) barrel(g, -13.2, KARWAN_CZ - 16 + b*3.0, 0.62, 1.25);
+      crateStack(g, -13.6, KARWAN_CZ + 6, 0.2);
+      crateStack(g, -13.6, KARWAN_CZ + 9.5, -0.3);
+      for (var sh=0; sh<5; sh++){
+        add(g, boxGeo(0.18, 1.3, 0.9), clothMat, -27.4, 0.85, KARWAN_CZ + 12 + sh*1.1);
+      }
+      woodPile(g, -20, KARWAN_CZ + 19, 3.4, 0);
+    })();
+
+    // ---- storehouse (row 1 south): barrels, sacks, a hoist
+    (function storehouse(){
+      var r = serviceRange(-51, LC_Z0 + 37, 22, 50, 12.5, flagMat);
+      var g = r.g, cz = LC_Z0 + 37;
+      for (var row=0; row<2; row++){
+        for (var b=0;b<9;b++){
+          barrel(g, -57.5 + row*13.0, cz - 18 + b*4.3, 0.7, 1.5);
+        }
+      }
+      for (var s=0;s<5;s++) sackPile(g, -51, cz - 14 + s*7.0, 6, s*0.7);
+      crateStack(g, -47, cz + 20, 0.4);
+      crateStack(g, -55, cz + 20, -0.2);
+      // sack hoist over the central aisle
+      add(g, boxGeo(0.3, 0.3, 4.0), woodMat, -51, 9.4, cz - 21);
+      bar(g, metalMat, -51, 9.2, cz - 22.4, -51, 4.2, cz - 22.4, 0.07);
+      add(g, boxGeo(1.2, 0.9, 1.0), sackMat, -51, 3.6, cz - 22.4);
+    })();
+
+    // ---- stables (row 1, mid): stalls, hay, troughs, tack
+    (function stables(){
+      var r = serviceRange(-50, LC_Z0 + 135, 20, 46, 11.0, strawMat);
+      var g = r.g, cz = LC_Z0 + 135;
+      for (var i=0;i<9;i++){
+        var sz = cz - 19 + i*4.6;
+        [-1,1].forEach(function(s){
+          add(g, boxGeo(6.0, 1.7, 0.22), woodMat, -50 + s*5.6, 1.01, sz);      // stall divider
+          add(g, boxGeo(1.6, 0.5, 2.6), woodMat, -50 + s*8.4, 0.58, sz + 2.3); // manger
+        });
+      }
+      // central straw-strewn aisle + hay bales and water troughs
+      add(g, boxGeo(3.0, 0.24, 42), earthMat, -50, 0.3, cz);
+      hayPile(g, -50, cz - 21.0, 1.6, 2.0);
+      hayPile(g, -50, cz + 21.0, 1.4, 1.8);
+      [-1,1].forEach(function(s){
+        add(g, boxGeo(1.0, 0.7, 3.0), woodMat, -50 + s*3.0, 0.51, cz);
+        for (var t=0;t<4;t++){
+          add(g, boxGeo(0.16, 0.9, 0.16), woodMat, -50 + s*9.0, 2.4, cz - 12 + t*8);  // tack pegs
+          add(g, boxGeo(0.5, 0.8, 0.7), darkWoodMat, -50 + s*8.6, 2.2, cz - 12 + t*8);
+        }
+      });
+      mpPickRoom(-60, -40, cz-23, cz+23, 11.0, '厩舎 Stables',
+        '低城西列の厩舎。中央通路の両側に馬房が並び、飼葉桶と干し草が置かれる。');
+    })();
+
+    // ---- bakehouse (cross range at z=146): two domed bread ovens
+    (function bakehouse(){
+      // this one is a CROSS range -- its ridge runs east-west, so the
+      // trusses have to span the 14m depth, not the 26m frontage
+      var r = serviceRange(-4, LC_Z0 + 146, 26, 14, 9.5, flagMat, 'x');
+      var g = r.g, cz = LC_Z0 + 146;
+      [-1,1].forEach(function(s){
+        var ox = -4 + s*8.0;
+        add(g, cylGeo(2.3, 2.6, 1.6, 10), stoneDarkMat, ox, 0.96, cz - 3.4);
+        var dome = new T.Mesh(coneGeo(2.4, 2.0, 10), stoneDarkMat);
+        dome.castShadow = true; dome.receiveShadow = true;
+        dome.position.set(ox, 2.7, cz - 3.4);
+        g.add(dome);
+        add(g, boxGeo(1.5, 1.1, 0.5), emberMat, ox, 1.0, cz - 1.5);   // oven mouth
+        add(g, boxGeo(1.1, 4.2, 1.1), stoneDarkMat, ox, 5.4, cz - 4.4); // flue
+      });
+      tableSet(g, -4, cz + 1.6, 7.0, 0, false);
+      tableSet(g, -4, cz + 4.0, 7.0, 0, false);
+      sackPile(g, 6.5, cz + 3.5, 6, 0.4);
+      sackPile(g, -14.5, cz + 3.5, 5, 1.2);
+      woodPile(g, 8.0, cz - 3.0, 2.6, Math.PI/2);
+      // peels leaning by the ovens
+      [-1,1].forEach(function(s){
+        bar(g, woodMat, -4 + s*4.6, 0.2, cz-2.0, -4 + s*4.0, 2.9, cz-1.0, 0.1);
+      });
+      mpPickRoom(-17, 9, cz-7, cz+7, 9.5, 'パン焼き所 Bakehouse',
+        '低城のパン焼き窯。ドーム状の窯2基と練り台が並び、修道会全体のパンを焼いた。');
+    })();
+
+    // ---- smithy (row 3, south): forge, anvil, bellows, quench trough
+    (function smithy(){
+      var r = serviceRange(15, LC_Z0 + 74, 14, 28, 6.5, earthMat);
+      var g = r.g, cz = LC_Z0 + 74;
+      add(g, boxGeo(3.2, 1.1, 2.4), stoneDarkMat, 19.4, 0.71, cz - 8);      // forge bed
+      add(g, boxGeo(2.4, 0.4, 1.7), emberMat, 19.4, 1.46, cz - 8);
+      add(g, boxGeo(2.0, 3.6, 2.0), stoneDarkMat, 19.4, 3.4, cz - 10.0);    // hood + flue
+      add(g, boxGeo(1.4, 1.0, 2.2), woodMat, 17.0, 1.5, cz - 8.4);          // bellows
+      add(g, cylGeo(0.42,0.52,0.85,7), darkWoodMat, 15.0, 0.58, cz - 6.0);  // anvil stump
+      add(g, boxGeo(0.5, 0.4, 1.3), metalMat, 15.0, 1.2, cz - 6.0);         // anvil
+      add(g, boxGeo(1.1, 0.8, 2.2), woodMat, 12.2, 0.56, cz - 4.0);         // quench trough
+      tableSet(g, 12.4, cz + 3.0, 4.0, Math.PI/2, false);
+      for (var tp=0; tp<6; tp++){
+        add(g, boxGeo(0.12, 0.9, 0.1), metalMat, 20.2, 2.5, cz - 1.5 + tp*0.6);
+      }
+      for (var ir=0; ir<4; ir++){
+        add(g, boxGeo(0.3, 0.24, 2.4), metalMat, 17.6, 0.32 + ir*0.26, cz + 6.5);
+      }
+      barrel(g, 19.6, cz + 10.0, 0.6, 1.2);
+      woodPile(g, 13.0, cz + 10.0, 2.4, 0);
+      mpPickRoom(9, 21, cz-13, cz+13, 6.5, '鍛冶場 Smithy',
+        '低城の鍛冶工房。炉とふいご、金床、焼入れ桶が並ぶ。武具と馬具の修理を担った。');
+    })();
+
+    // ---- workshop / granary range (row 4, mid): looms, benches, grain
+    (function workshops(){
+      var r = serviceRange(47, LC_Z0 + 178, 22, 56, 13.0, flagMat);
+      var g = r.g, cz = LC_Z0 + 178;
+      // grain bins at the north half
+      for (var b=0;b<4;b++){
+        [-1,1].forEach(function(s){
+          add(g, boxGeo(3.4, 2.6, 3.4), woodMat, 47 + s*6.4, 1.46, cz + 6 + b*5.6);
+          add(g, boxGeo(3.6, 0.2, 3.6), darkWoodMat, 47 + s*6.4, 2.86, cz + 6 + b*5.6);
+        });
+      }
+      // looms + work benches at the south half
+      for (var l=0;l<3;l++){
+        var lz = cz - 20 + l*6.5;
+        [-1,1].forEach(function(s){
+          var lx = 47 + s*5.4;
+          add(g, boxGeo(2.4, 0.24, 0.3), woodMat, lx, 2.5, lz);
+          [-1,1].forEach(function(s2){
+            add(g, boxGeo(0.22, 2.5, 0.22), woodMat, lx + s2*1.1, 1.41, lz - 0.7);
+            add(g, boxGeo(0.22, 2.5, 0.22), woodMat, lx + s2*1.1, 1.41, lz + 0.7);
+          });
+          add(g, boxGeo(2.2, 1.5, 0.16), clothMat, lx, 1.5, lz);
+          benchRun(g, lx, lz + 1.6, 2.2, 0, woodMat);
+        });
+      }
+      sackPile(g, 47, cz + 2.0, 6, 0.2);
+      crateStack(g, 41.5, cz - 24, 0.3);
+      crateStack(g, 52.5, cz - 24, -0.4);
+      mpPickRoom(37, 57, cz-27, cz+27, 13.0, '工房と穀倉 Workshops & Granary',
+        '低城東列の長大な棟。北半分は穀物庫、南半分は織機の並ぶ工房。');
+    })();
+
+    // ---- St Lawrence's chapel interior
+    (function lcChapel(){
+      var g = det(13, 5, CHAPEL_CZ, D_MID);
+      floorSlab(g, tileMat, 7.6, 18.4, CHAPEL_CZ-9.4, CHAPEL_CZ+9.4);
+      dado(g, plasterMat, 7.6, 18.4, CHAPEL_CZ-9.4, CHAPEL_CZ+9.4, 1.2, 0.5);
+      responds(g, plasterMat, 'z',  8.0, CHAPEL_CZ-7, CHAPEL_CZ+7, 4, 8.4);
+      responds(g, plasterMat, 'z', 18.0, CHAPEL_CZ-7, CHAPEL_CZ+7, 4, 8.4);
+      for (var b2=0;b2<4;b2++){
+        var bz = CHAPEL_CZ - 6.6 + b2*4.4;
+        archRib(g, ribMat, 'x', bz, 8.2, 17.8, 8.4, 9.6, 0.13);   // transverse
+      }
+      bar(g, ribMat, 13, 9.6, CHAPEL_CZ-8.6, 13, 9.6, CHAPEL_CZ+8.6, 0.13); // ridge
+      add(g, boxGeo(2.2, 1.1, 0.9), flagMat, 13, 0.72, CHAPEL_CZ + 7.4);
+      add(g, boxGeo(2.4, 2.8, 0.4), goldMat, 13, 1.6, CHAPEL_CZ + 8.4);
+      for (var p=0;p<5;p++){
+        [-1,1].forEach(function(s){
+          benchRun(g, 13 + s*2.4, CHAPEL_CZ - 6 + p*2.6, 3.0, 0, woodMat);
+        });
+      }
+      candleStand(g, 10.6, CHAPEL_CZ + 6.4);
+      candleStand(g, 15.4, CHAPEL_CZ + 6.4);
+    })();
+
+    /* ---- Low Castle open ground: gardens, orchard, yard clutter.
+     * Placed strictly OUTSIDE the farmer wander lanes (x -39..-33,
+     * -9..+1, +25..+35), outside the east-gate square (x 60..68) and
+     * clear of the guard patrol line (the parchams at x = +/-64 and lane
+     * B at x=-4), all of which are documented above the lcSegs table. */
+    (function lowCastleGrounds(){
+      var g = det(10, 2, LC_Z0 + 190, D_FAR);
+      // kitchen garden in the row-3 gap between the workshops and the
+      // chapel (x 5..21 -- clear of lane B at -9..1 and lane C at 25..35)
+      var kz = LC_Z0 + 158;
+      add(g, boxGeo(16.0, 0.24, 34.0), soilMat, 13, 0.28, kz);
+      for (var i=0;i<4;i++){
+        gardenBed(g,  9.4, kz - 12 + i*8.2, 6.0, 6.4, 3, i%2 ? cropMat1 : cropMat2);
+        gardenBed(g, 16.6, kz - 12 + i*8.2, 6.0, 6.4, 3, i%2 ? cropMat2 : cropMat1);
+      }
+      hedgeRun(g, 13, kz - 17.4, 16.0, 0, 1.0);
+      hedgeRun(g, 13, kz + 17.4, 16.0, 0, 1.0);
+      vineRun(g, 21.4, kz, 30, Math.PI/2, 2.3);
+      // herb garden in the row-2 gap at the north end (x -30..-12)
+      var hz = LC_Z0 + 254;
+      add(g, boxGeo(18.0, 0.24, 20.0), soilMat, -21, 0.28, hz);
+      herbPlat(g, -27.0, hz - 5.0, 5.2);
+      herbPlat(g, -27.0, hz + 5.0, 5.2);
+      herbPlat(g, -15.0, hz - 5.0, 5.2);
+      herbPlat(g, -15.0, hz + 5.0, 5.2);
+      hedgeRun(g, -21, hz - 10.4, 18.0, 0, 0.9);
+      hedgeRun(g, -21, hz + 10.4, 18.0, 0, 0.9);
+      // small orchard in the row-4 gap (x 46..58, clear of the east
+      // parcham the patrol walks at x=64)
+      for (var t=0;t<8;t++){
+        gardenTree(g, 47 + (t%2)*8, LC_Z0 + 122 + Math.floor(t/2)*8.5, 1.05, false);
+      }
+      // yard clutter round the lanes: woodpiles, hay, a cart, a well
+      /* Yard clutter. Every position below is checked against BOTH the
+       * lcSegs/cross-range footprints (so nothing stands inside a
+       * building) and the farmer lane bands + patrol line documented
+       * above the lcSegs table. The gaps used are: row 2 z 57-74 and
+       * 100-108, row 3 z 88-96, row 4 z 118-150. */
+      woodPile(g, -14, LC_Z0 + 65, 3.0, 0);        // row 2 gap, east of the cross range
+      woodPile(g, 23.5, LC_Z0 + 92, 3.0, Math.PI/2); // row 3 gap, west of lane C
+      hayPile(g, -28, LC_Z0 + 96, 2.0, 2.4);
+      hayPile(g, 22, LC_Z0 + 230, 1.8, 2.2);
+      cart(g, -30, LC_Z0 + 104, 0.6, true);        // row 2 gap
+      cart(g, 24, LC_Z0 + 196, -0.4, false);
+      // a working well on the east square (x 30, z LC_Z0+126, 30x26)
+      (function lcWell(){
+        var wx = 38, wz = LC_Z0 + 118;
+        add(g, cylGeo(1.1,1.1,1.0,12), stoneDarkMat, wx, 0.66, wz);
+        [-1,1].forEach(function(s){
+          add(g, boxGeo(0.18, 2.6, 0.18), woodMat, wx + s*1.0, 1.46, wz);
+        });
+        lay(g, cylGeo(0.2,0.2,2.2,6), woodMat, wx, 2.66, wz, 0);
+        add(g, boxGeo(2.6, 0.24, 1.2), woodMat, wx, 2.9, wz);
+        add(g, cylGeo(0.26,0.22,0.34,7), woodMat, wx, 1.9, wz);
+        registerPick(pickables, 'structure', wx, 1.6, wz, 3.0, 3.2, 3.0,
+          '低城の井戸 Vorburg Well', '低城の作業広場に置かれた井戸。厩舎・パン焼き所・鍛冶場の水源。');
+      })();
+      registerPick(pickables, 'room', 13, 1.5, kz, 16, 3.0, 34,
+        '低城の菜園 Vorburg Garden', '低城の建物列の隙間に開かれた菜園。畝と葡萄棚、北側には薬草園と果樹園が続く。');
+    })();
+
+    /* ================================================================
+     * D. CHIMNEYS. Hearths inside want flues outside: each one is put in
+     * a ROOF-tier fade group (the gable bundles carry brick colour and
+     * roof:true), so a chimney vanishes together with the roof it stands
+     * on rather than being left hanging over an opened range.
+     * ================================================================ */
+    function chimney(gbl, x, y, z, w, h){
+      var st = mkBox(w, h, w, gbl.brick.mat);
+      place(st, x, y + h/2, z);
+      gbl.brick.group.add(st);
+      var cap = mkBox(w+0.5, 0.3, w+0.5, gbl.trim.mat);
+      place(cap, x, y + h + 0.15, z);
+      gbl.trim.group.add(cap);
+      var vent = mkBox(w*0.4, 0.5, w*0.4, gbl.niche.mat);
+      place(vent, x, y + h + 0.5, z);
+      gbl.niche.group.add(vent);
+    }
+    /* One flue per hearth built above, and no more. Each is placed ON the
+     * ridge line of the range it rises through (or, for the palace, part
+     * way down a hip slope) with its base a few metres BELOW the roof
+     * surface there and its top a couple of metres above it -- placed off
+     * the ridge, a stack either floats over the tiles or is swallowed by
+     * them, and both were happening before these were re-derived from
+     * each range's own eave + mpRange rise (= span * 0.71).
+     *   High Castle wing ridge     22 + 12    = 34
+     *   MC west wing seg 1         19 + 9.2   = 28.2
+     *   Grand Master's Palace hip  24 + 13.5  = 37.5 (32.8 four metres out)
+     *   Infirmary                  19.5 + 12.8 = 32.3
+     *   Bakehouse cross range      9.5 + 9.9  = 19.4
+     *   Smithy                     6.5 + 9.9  = 16.4                     */
+    chimney(gblInner, chX1-2.5, 31.0, -HC_HZ, 1.6, 5.5);           // chapter house
+    chimney(gblInner, -HC_HX,   31.0, 6.0,    1.6, 5.5);           // convent refectory
+    chimney(gblInner, HC_HX,    31.0, 15.0,   1.5, 5.0);           // grand master's chamber
+    chimney(gblOuter, MC_WX,    25.5, RF_CZ + 9.5, 1.9, 5.5);      // Great Refectory
+    chimney(gblOuter, GMP_CX+4, 30.0, GMP_CZ + 5.0, 1.8, 5.5);     // palace
+    chimney(gblOuter, IF_CX,    29.5, IF_CZ + 1.5, 1.6, 5.5);      // infirmary
+    chimney(gblOuter, -8.0,     17.0, LC_Z0 + 146, 1.7, 5.0);      // bakehouse oven 1
+    chimney(gblOuter,  0.0,     17.0, LC_Z0 + 146, 1.7, 5.0);      // bakehouse oven 2
+    chimney(gblOuter, 15.0,     14.0, LC_Z0 + 68,  1.6, 4.6);      // smithy forge
+  })();
+
+  /* ================================================================
    * info payload + always-on labels + resident life data
    * ================================================================ */
   var info = { rooms: [
@@ -1605,7 +2810,11 @@ function buildMalborkPlan(){
      * have farmers strolling through solid brick. Each lane is therefore
      * cut into the three clear z bands between those cross ranges. */
     courtyard: (function(){
-      var boxes = [ { minX:-MC_HX+MC_WD+3, maxX:MC_HX-MC_WD-3, minZ:MC_Z0+4, maxZ:MC_Z1-MC_WD-3 } ]; // 中城中庭
+      /* 中城中庭。東側 x>=11 は菜園・薬草園・果樹園(内装セクションで
+       * 追加)が占めるので、farmer の徘徊範囲を maxX 24 -> 10 に狭めて
+       * ある -- これで住人が畝や生垣の中を歩くことがない。西側と中央は
+       * そのまま空いており、guard の巡回路(x=0)にも干渉しない。 */
+      var boxes = [ { minX:-MC_HX+MC_WD+3, maxX:10, minZ:MC_Z0+4, maxZ:MC_Z1-MC_WD-3 } ]; // 中城中庭
       var lanes = [ [-39,-33], [-9,1], [25,35] ];       // 低城 3本の通路
       var bands = [ [16,56], [78,136], [156,190], [210,235] ]; // 交差棟を避けた z 帯
       lanes.forEach(function(l){
