@@ -73,6 +73,182 @@ function buildVincennes(){
   var chemiseMat = new T.MeshLambertMaterial({ color: STONE_DARK });
   var slateMat = new T.MeshLambertMaterial({ color: ROOF_COL });
 
+  /* ---- interior fit-out + garden palette ---------------------------
+   * Everything below is closure-local (file-header rule: no new top-level
+   * names, so five castle builders can be loaded side by side). */
+  var ribMat       = new T.MeshLambertMaterial({ color: 0xa89d86 }); // dressed stone ribs/pillars
+  var timberMat    = new T.MeshLambertMaterial({ color: 0x7a5a3a }); // plank floors
+  var strawMat     = new T.MeshLambertMaterial({ color: 0xc7ac66 });
+  var clothRedMat  = new T.MeshLambertMaterial({ color: 0x8c2f2a });
+  var clothBlueMat = new T.MeshLambertMaterial({ color: 0x2f4a86 });
+  var clothGoldMat = new T.MeshLambertMaterial({ color: 0xb08a3c });
+  var linenMat     = new T.MeshLambertMaterial({ color: 0xd8cfb4 });
+  var emberMat     = new T.MeshLambertMaterial({ color: 0xd2691e });
+  var sootMat      = new T.MeshLambertMaterial({ color: 0x33302b });
+  var flagstoneMat = new T.MeshLambertMaterial({ color: 0x8f8878 });
+  var soilMat      = new T.MeshLambertMaterial({ color: 0x4b3726 });
+  var leafMat      = new T.MeshLambertMaterial({ color: 0x3f6b32 });
+  var leafMat2     = new T.MeshLambertMaterial({ color: 0x527f39 });
+  var cropMat      = new T.MeshLambertMaterial({ color: 0x6d9640 });
+  var herbMat      = new T.MeshLambertMaterial({ color: 0x87a552 });
+  var hedgeMat     = new T.MeshLambertMaterial({ color: 0x3a5f31 });
+  var trunkMat     = new T.MeshLambertMaterial({ color: 0x5a4430 });
+  var bloomMat     = new T.MeshLambertMaterial({ color: 0xc8607e });
+  var bloom2Mat    = new T.MeshLambertMaterial({ color: 0xd8c25a });
+  var bathWaterMat = new T.MeshLambertMaterial({ color: 0x4d7f8c });
+
+  /* generic placement shorthands -- every interior/garden piece below is
+   * built through these so the fit-out code stays readable. */
+  function boxAt(parent, x,y,z, w,h,d, mat, ry){
+    var m = mkBox(w,h,d,mat); place(m,x,y,z,ry); parent.add(m); return m;
+  }
+  function cylAt(parent, x,y,z, rt,rb,h,seg, mat, ry){
+    var m = mkCyl(rt,rb,h,seg,mat); place(m,x,y,z,ry); parent.add(m); return m;
+  }
+  function mkSphere(r, mat){
+    var m = new T.Mesh(new T.SphereGeometry(r, 7, 5), mat);
+    m.castShadow = true; m.receiveShadow = true;
+    return m;
+  }
+  /* a box stretched along an arbitrary 3D segment -- vault ribs, roof
+   * beams, ladder rails. rotation.order is forced to 'YXZ' so the yaw is
+   * applied outermost: with the default 'XYZ' the pitch would be taken in
+   * world X and diagonal ribs would twist off their corners. */
+  function beamBetween(parent, ax,ay,az, bx,by,bz, w,h, mat){
+    var dx=bx-ax, dy=by-ay, dz=bz-az;
+    var len = Math.hypot(dx,dy,dz) || 0.001;
+    var m = mkBox(w, h, len, mat);
+    m.position.set((ax+bx)/2, (ay+by)/2, (az+bz)/2);
+    m.rotation.order = 'YXZ';
+    m.rotation.y = Math.atan2(dx, dz);
+    m.rotation.x = -Math.asin(Math.max(-1, Math.min(1, dy/len)));
+    parent.add(m);
+    return m;
+  }
+
+  /* ---- reusable furniture ------------------------------------------
+   * All of these take a `ry` yaw and lay their parts out in the rotated
+   * local frame (local +X = right, local +Z = "into the room"), using the
+   * same x+lx*cos+lz*sin / z-lx*sin+lz*cos convention the wall builders
+   * above already use. */
+  function localXZ(x,z,ry,lx,lz){
+    var co=Math.cos(ry||0), si=Math.sin(ry||0);
+    return [x + lx*co + lz*si, z - lx*si + lz*co];
+  }
+  function addTable(parent, x,y,z, w,d, ry, mat){
+    boxAt(parent, x, y+0.78, z, w, 0.13, d, mat, ry);
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+      var p = localXZ(x,z,ry, s[0]*(w/2-0.35), s[1]*(d/2-0.25));
+      boxAt(parent, p[0], y+0.39, p[1], 0.16, 0.78, 0.16, mat, ry);
+    });
+  }
+  function addBench(parent, x,y,z, len, ry, mat){
+    boxAt(parent, x, y+0.46, z, len, 0.11, 0.42, mat, ry);
+    [-1,1].forEach(function(s){
+      var p = localXZ(x,z,ry, s*(len/2-0.3), 0);
+      boxAt(parent, p[0], y+0.23, p[1], 0.13, 0.46, 0.38, mat, ry);
+    });
+  }
+  function addStool(parent, x,y,z, mat){
+    boxAt(parent, x, y+0.46, z, 0.44, 0.09, 0.44, mat);
+    cylAt(parent, x, y+0.23, z, 0.07, 0.09, 0.46, 5, mat);
+  }
+  function addChair(parent, x,y,z, ry, mat){
+    boxAt(parent, x, y+0.46, z, 0.5, 0.1, 0.5, mat, ry);
+    var b = localXZ(x,z,ry, 0, -0.22);
+    boxAt(parent, b[0], y+0.85, b[1], 0.5, 0.9, 0.09, mat, ry);
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+      var p = localXZ(x,z,ry, s[0]*0.2, s[1]*0.2);
+      boxAt(parent, p[0], y+0.23, p[1], 0.08, 0.46, 0.08, mat, ry);
+    });
+  }
+  function addChest(parent, x,y,z, w,d, ry, mat){
+    boxAt(parent, x, y+0.3, z, w, 0.6, d, mat||woodMat, ry);
+    boxAt(parent, x, y+0.68, z, w*0.99, 0.16, d*0.99, darkWoodMat, ry);
+    boxAt(parent, x, y+0.45, z, w*1.03, 0.07, d*0.25, metalMat, ry);
+  }
+  function addBarrel(parent, x,y,z, r,h, lying, ry){
+    var g = new T.Group();
+    var b = mkCyl(r, r*0.94, h, 8, woodMat); g.add(b);
+    var h1 = mkCyl(r*1.06, r*1.06, 0.1, 8, metalMat); h1.position.y =  h*0.3; g.add(h1);
+    var h2 = mkCyl(r*1.06, r*1.06, 0.1, 8, metalMat); h2.position.y = -h*0.3; g.add(h2);
+    if (lying){ g.rotation.z = Math.PI/2; g.rotation.y = ry||0; g.position.set(x, y+r, z); }
+    else g.position.set(x, y+h/2, z);
+    parent.add(g);
+    return g;
+  }
+  function addSack(parent, x,y,z, s, mat){
+    var m = mkSphere(s, mat||strawMat);
+    m.scale.set(1, 1.35, 0.85);
+    place(m, x, y+s*1.25, z);
+    parent.add(m);
+  }
+  function addCandleStand(parent, x,y,z){
+    cylAt(parent, x, y+0.07, z, 0.3, 0.36, 0.14, 8, metalMat);
+    cylAt(parent, x, y+0.7, z, 0.05, 0.07, 1.3, 6, metalMat);
+    cylAt(parent, x, y+1.45, z, 0.24, 0.16, 0.1, 8, metalMat);
+    cylAt(parent, x, y+1.68, z, 0.05, 0.06, 0.36, 6, linenMat);
+    cylAt(parent, x, y+1.92, z, 0.02, 0.09, 0.16, 5, emberMat);
+  }
+  function addTorch(parent, x,y,z, ry){
+    var p = localXZ(x,z,ry, 0, 0.22);
+    boxAt(parent, p[0], y, p[1], 0.16, 0.5, 0.16, metalMat, ry);
+    var q = localXZ(x,z,ry, 0, 0.4);
+    cylAt(parent, q[0], y+0.32, q[1], 0.16, 0.08, 0.34, 6, emberMat);
+  }
+  /* wall fireplace: anchor sits ON the wall's inner face, local +Z points
+   * into the room (ry = 0 north wall / PI south / -PI/2 east / PI/2 west) */
+  function addFireplace(parent, x,y,z, ry, w){
+    function P(lx,lz){ return localXZ(x,z,ry,lx,lz); }
+    var bk = P(0,0.08);  boxAt(parent, bk[0], y+1.1, bk[1], w, 2.2, 0.14, sootMat, ry);
+    [-1,1].forEach(function(s){
+      var j = P(s*(w/2-0.32), 0.36);
+      boxAt(parent, j[0], y+0.9, j[1], 0.62, 1.8, 0.72, ribMat, ry);
+    });
+    var li = P(0,0.36); boxAt(parent, li[0], y+2.0, li[1], w, 0.42, 0.78, ribMat, ry);
+    var hd = P(0,0.3);  boxAt(parent, hd[0], y+3.1, hd[1], w*0.86, 1.9, 0.6, ribMat, ry);
+    var ht = P(0,0.42); boxAt(parent, ht[0], y+0.1, ht[1], w+0.6, 0.2, 1.1, flagstoneMat, ry);
+    var lg = P(0,0.34); boxAt(parent, lg[0], y+0.38, lg[1], w*0.5, 0.24, 0.24, darkWoodMat, ry);
+    var em = P(0,0.34); boxAt(parent, em[0], y+0.26, em[1], w*0.56, 0.16, 0.42, emberMat, ry);
+  }
+  /* four-poster bed with a canopy and side drapes (local +Z = head end) */
+  function addCanopyBed(parent, x,y,z, ry, cloth){
+    var W = 2.4, L = 3.2, PH = 3.0;
+    function P(lx,lz){ return localXZ(x,z,ry,lx,lz); }
+    boxAt(parent, x, y+0.42, z, W, 0.34, L, darkWoodMat, ry);          // frame
+    boxAt(parent, x, y+0.74, z, W-0.24, 0.3, L-0.3, linenMat, ry);      // mattress
+    var pw = P(0, L/2-0.55);
+    boxAt(parent, pw[0], y+0.98, pw[1], W*0.7, 0.22, 0.6, linenMat, ry); // pillow
+    var bl = P(0, -L/2+0.9);
+    boxAt(parent, bl[0], y+0.92, bl[1], W-0.2, 0.14, L*0.5, cloth, ry);  // blanket
+    var hb = P(0, L/2+0.02);
+    boxAt(parent, hb[0], y+1.3, hb[1], W, 1.5, 0.14, darkWoodMat, ry);   // headboard
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+      var p = P(s[0]*(W/2-0.06), s[1]*(L/2-0.06));
+      boxAt(parent, p[0], y+PH/2, p[1], 0.16, PH, 0.16, darkWoodMat, ry);
+    });
+    boxAt(parent, x, y+PH+0.08, z, W+0.2, 0.18, L+0.2, cloth, ry);       // tester
+    [-1,1].forEach(function(s){
+      var d = P(s*(W/2+0.02), 0);
+      boxAt(parent, d[0], y+PH*0.62, d[1], 0.1, PH*0.7, L*0.34, cloth, ry);
+    });
+    var vh = P(0, L/2+0.1);
+    boxAt(parent, vh[0], y+PH*0.62, vh[1], W*0.9, PH*0.7, 0.1, cloth, ry);
+  }
+  function addWallHanging(parent, x,y,z, ry, w,h, cloth){
+    boxAt(parent, x, y, z, w, h, 0.09, cloth, ry);
+    boxAt(parent, x, y+h/2+0.09, z, w+0.24, 0.14, 0.16, darkWoodMat, ry);
+  }
+  function addArmsRack(parent, x,y,z, ry, n){
+    boxAt(parent, x, y+1.75, z, 2.6, 0.14, 0.3, woodMat, ry);
+    boxAt(parent, x, y+0.06, z, 2.6, 0.12, 0.4, woodMat, ry);
+    for (var i=0;i<n;i++){
+      var p = localXZ(x,z,ry, -1.15 + i*(2.3/Math.max(1,n-1)), 0);
+      cylAt(parent, p[0], y+1.15, p[1], 0.045, 0.055, 2.3, 5, woodMat); // spear shaft
+      cylAt(parent, p[0], y+2.35, p[1], 0.02, 0.07, 0.34, 4, metalMat); // spear head
+    }
+  }
+
   /* -------------------------------------------------------------- *
    * outer enceinte: 175m (E-W, short) x 330m (N-S, long) rectangle,
    * 11m wall, 9 rectangular (not round) towers -- 3 each on the short
@@ -429,24 +605,196 @@ function buildVincennes(){
     { y0:31.2, y1:BODY_H, name:'兵士詰所・弾薬庫 Guard Room & Armoury (Upper)', pillar:false,
       desc:'上層階は守備兵の詰所と武具・弾薬の保管に充てられた。' }
   ];
-  donjonFloors.forEach(function(f){
-    var slab = mkBox(DHALF*2-0.6, 0.3, DHALF*2-0.6, floorMat);
+  /* Interior clear span: the 16.5m body less its 0.9m wall faces, and the
+   * four corner turret shafts (r = TURR_R) bite into the corners -- so
+   * furniture stays inside |dx|,|dz| <= ~6.4 and off the diagonals. */
+  var IN_HALF = 7.35;   // where the vault ribs die into the wall head
+
+  /* The keep's single most-photographed interior feature: on each of the
+   * four lower floors a decorated central pillar carries the vault, and
+   * the ribs fan out from its capital to the wall heads and corners. */
+  function donjonVault(y0, y1, rich){
+    var capOff = Math.min(2.8, (y1-y0)*0.42);
+    var capY = y1 - capOff;
+    var ceil = y1 - 0.45;
+    cylAt(interiorGroup, DCX, y0+0.42, DCZ, 1.05, 1.25, 0.55, 10, ribMat);           // moulded base
+    cylAt(interiorGroup, DCX, (y0+0.7+capY)/2, DCZ, 0.62, 0.72, capY-y0-0.7, 10, stubMat); // shaft
+    if (rich){
+      cylAt(interiorGroup, DCX, y0+(capY-y0)*0.5, DCZ, 0.78, 0.78, 0.3, 10, ribMat); // mid annulet
+    }
+    cylAt(interiorGroup, DCX, capY+0.25, DCZ, 1.15, 0.7, 0.85, 10, ribMat);          // capital
+    cylAt(interiorGroup, DCX, capY+0.78, DCZ, 1.25, 1.25, 0.24, 10, ribMat);         // abacus
+    var springY = capY + 0.9;
+    var dirs = [[1,0],[0,1],[-1,0],[0,-1],[1,1],[1,-1],[-1,-1],[-1,1]];
+    dirs.forEach(function(d){
+      beamBetween(interiorGroup, DCX, springY, DCZ,
+        DCX + d[0]*IN_HALF, ceil, DCZ + d[1]*IN_HALF, 0.34, 0.42, ribMat);
+    });
+    // boss where the ribs meet over the pillar
+    cylAt(interiorGroup, DCX, ceil-0.1, DCZ, 0.55, 0.55, 0.3, 8, ribMat);
+  }
+
+  donjonFloors.forEach(function(f, fi){
+    var slabMat = fi===0 ? flagstoneMat : (fi===4 ? timberMat : floorMat);
+    var slab = mkBox(DHALF*2-0.6, 0.3, DHALF*2-0.6, slabMat);
     place(slab, DCX, f.y0+0.15, DCZ);
     interiorGroup.add(slab);
-    if (f.pillar){
-      var pillar = mkCyl(0.6, 0.7, f.y1-f.y0-0.3, 10, stubMat);
-      place(pillar, DCX, (f.y0+f.y1)/2, DCZ);
-      interiorGroup.add(pillar);
+    var y = f.y0 + 0.3;                       // walking surface of this floor
+    var G = interiorGroup;
+    if (f.pillar) donjonVault(f.y0, f.y1, fi===2);
+
+    if (fi === 0){
+      /* 地下 = 貯蔵庫: 樽・穀物袋・氷室 */
+      addBarrel(G, DCX-4.6, y, DCZ-4.4, 0.62, 1.5);
+      addBarrel(G, DCX-4.6, y, DCZ-2.8, 0.62, 1.5);
+      addBarrel(G, DCX-3.2, y, DCZ-3.6, 0.62, 1.5);
+      addBarrel(G, DCX+4.4, y, DCZ-3.4, 0.6, 1.4, true, 0);
+      addBarrel(G, DCX+4.4, y, DCZ-1.9, 0.6, 1.4, true, 0);
+      addBarrel(G, DCX+4.4, y+1.2, DCZ-2.65, 0.6, 1.4, true, 0);
+      addSack(G, DCX-4.2, y, DCZ+3.6, 0.45);
+      addSack(G, DCX-3.1, y, DCZ+4.1, 0.42);
+      addSack(G, DCX-2.2, y, DCZ+3.3, 0.4);
+      addSack(G, DCX-3.6, y+0.9, DCZ+3.8, 0.4);
+      addSack(G, DCX+2.6, y, DCZ+4.3, 0.44);
+      // 氷室: 石枠に藁を敷いた氷の桝
+      boxAt(G, DCX+4.0, y+0.35, DCZ+3.6, 2.6, 0.7, 2.2, flagstoneMat);
+      boxAt(G, DCX+4.0, y+0.78, DCZ+3.6, 2.2, 0.2, 1.8, linenMat);
+      // 棚(木枠)
+      boxAt(G, DCX+0.2, y+1.55, DCZ-6.6, 5.4, 0.1, 0.8, woodMat);
+      boxAt(G, DCX+0.2, y+0.85, DCZ-6.6, 5.4, 0.1, 0.8, woodMat);
+      [-2.5, 0.2, 2.9].forEach(function(sx){
+        boxAt(G, DCX+sx, y+0.9, DCZ-6.6, 0.14, 1.8, 0.8, woodMat);
+      });
+      addBarrel(G, DCX-1.3, y+1.7, DCZ-6.6, 0.28, 0.5);
+      addBarrel(G, DCX+1.6, y+1.7, DCZ-6.6, 0.28, 0.5);
+      boxAt(G, DCX+0.4, y+0.05, DCZ+0.2, 4.0, 0.08, 3.0, strawMat);   // 藁敷き
+    } else if (fi === 1){
+      /* 1階 = 評議の間 */
+      addTable(G, DCX-0.4, y, DCZ+1.2, 5.6, 1.5, 0, woodMat);
+      addBench(G, DCX-0.4, y, DCZ+2.5, 5.0, 0, woodMat);
+      addBench(G, DCX-0.4, y, DCZ-0.1, 5.0, 0, woodMat);
+      // 王の座: 西壁側の壇と背の高い椅子
+      boxAt(G, DCX-5.9, y+0.2, DCZ, 2.6, 0.4, 3.4, ribMat);
+      addChair(G, DCX-5.9, y+0.4, DCZ, Math.PI/2, darkWoodMat);
+      boxAt(G, DCX-6.9, y+2.6, DCZ, 0.12, 2.6, 2.2, clothBlueMat);   // 王旗
+      addFireplace(G, DCX+7.7, y, DCZ-2.6, -Math.PI/2, 2.6);
+      addWallHanging(G, DCX+0.4, y+3.4, DCZ-7.6, 0, 4.4, 3.0, clothRedMat);
+      addCandleStand(G, DCX+3.4, y, DCZ+3.0);
+      addCandleStand(G, DCX-4.2, y, DCZ+3.6);
+      addChest(G, DCX+4.6, y, DCZ+5.2, 1.7, 0.9, 0, woodMat);
+      boxAt(G, DCX+1.4, y+0.02, DCZ+1.2, 6.4, 0.06, 4.4, clothRedMat); // 敷物
+      addTorch(G, DCX-7.7, y+2.6, DCZ-4.6, Math.PI/2);
+      addTorch(G, DCX-7.7, y+2.6, DCZ+4.6, Math.PI/2);
+    } else if (fi === 2){
+      /* 2階 = 王の寝室(この城の白眉): 中央柱・天蓋付き寝台・暖炉・浴室 */
+      addCanopyBed(G, DCX-4.3, y, DCZ+3.4, Math.PI/2, clothRedMat);
+      addFireplace(G, DCX+7.7, y, DCZ+1.2, -Math.PI/2, 3.0);
+      // 浴室の記録: 木桶の風呂と衝立
+      cylAt(G, DCX+4.2, y+0.45, DCZ-5.2, 1.05, 0.95, 0.9, 10, woodMat);
+      cylAt(G, DCX+4.2, y+0.86, DCZ-5.2, 0.95, 0.95, 0.12, 10, bathWaterMat);
+      cylAt(G, DCX+4.2, y+0.95, DCZ-5.2, 1.1, 1.1, 0.1, 10, metalMat);
+      boxAt(G, DCX+2.6, y+1.0, DCZ-5.2, 0.12, 2.0, 2.6, linenMat);
+      // 書見台と椅子
+      boxAt(G, DCX+0.2, y+0.55, DCZ-6.2, 0.24, 1.1, 0.24, darkWoodMat);
+      var lect = mkBox(0.9, 0.1, 0.7, darkWoodMat);
+      place(lect, DCX+0.2, y+1.15, DCZ-6.2); lect.rotation.x = -0.42; G.add(lect);
+      boxAt(G, DCX+0.2, y+1.28, DCZ-6.35, 0.6, 0.07, 0.4, linenMat);
+      addChair(G, DCX+0.2, y, DCZ-5.1, Math.PI, darkWoodMat);
+      addChest(G, DCX-5.6, y, DCZ-4.4, 2.0, 1.0, Math.PI/2, woodMat);
+      addWallHanging(G, DCX-2.0, y+4.0, DCZ-7.6, 0, 5.0, 3.4, clothBlueMat);
+      addWallHanging(G, DCX+1.6, y+4.0, DCZ+7.6, Math.PI, 4.2, 3.0, clothGoldMat);
+      addCandleStand(G, DCX-1.6, y, DCZ+4.4);
+      addCandleStand(G, DCX+3.6, y, DCZ+4.4);
+      addTorch(G, DCX-7.7, y+2.8, DCZ+0.0, Math.PI/2);
+      boxAt(G, DCX-2.6, y+0.02, DCZ+2.0, 6.0, 0.06, 6.0, clothRedMat);
+    } else if (fi === 3){
+      /* 3階 = 賓客の間 */
+      addCanopyBed(G, DCX-4.4, y, DCZ-3.4, 0, clothBlueMat);
+      addFireplace(G, DCX+7.7, y, DCZ-1.0, -Math.PI/2, 2.4);
+      addTable(G, DCX+1.6, y, DCZ+4.0, 2.6, 1.2, 0, woodMat);
+      addStool(G, DCX+0.5, y, DCZ+5.1, woodMat);
+      addStool(G, DCX+2.7, y, DCZ+5.1, woodMat);
+      // 洗面台と水差し
+      boxAt(G, DCX-5.4, y+0.45, DCZ+4.6, 1.0, 0.9, 0.6, woodMat);
+      cylAt(G, DCX-5.4, y+1.02, DCZ+4.6, 0.28, 0.24, 0.24, 8, metalMat);
+      cylAt(G, DCX-4.7, y+1.05, DCZ+4.6, 0.14, 0.19, 0.3, 6, metalMat);
+      // 衣装櫃と衣桁
+      addChest(G, DCX+4.6, y, DCZ+6.2, 1.8, 1.0, 0, woodMat);
+      boxAt(G, DCX-1.4, y+2.1, DCZ-7.4, 2.4, 0.12, 0.12, woodMat);
+      boxAt(G, DCX-1.4, y+1.4, DCZ-7.3, 1.4, 1.4, 0.14, clothGoldMat);
+      addWallHanging(G, DCX+2.6, y+3.6, DCZ+7.6, Math.PI, 4.0, 2.8, clothRedMat);
+      addCandleStand(G, DCX+4.4, y, DCZ+1.6);
+      boxAt(G, DCX-1.0, y+0.02, DCZ+1.0, 5.4, 0.06, 5.0, clothBlueMat);
+    } else {
+      /* 上層 = 兵士詰所 + 中二階の弾薬・武具庫 */
+      var mezY = 39.9;
+      boxAt(G, DCX, mezY, DCZ+2.6, DHALF*2-1.2, 0.26, 9.2, timberMat);
+      // 中二階を支える梁
+      [-4.4, 0.0, 4.4].forEach(function(bx){
+        boxAt(G, DCX+bx, mezY-0.35, DCZ+2.6, 0.3, 0.45, 9.2, woodMat);
+      });
+      // 梯子
+      beamBetween(G, DCX-5.2, y, DCZ-1.6, DCX-5.2, mezY, DCZ-3.4, 0.12, 0.12, woodMat);
+      beamBetween(G, DCX-4.2, y, DCZ-1.6, DCX-4.2, mezY, DCZ-3.4, 0.12, 0.12, woodMat);
+      for (var lr=0; lr<9; lr++){
+        var t = (lr+0.5)/9;
+        boxAt(G, DCX-4.7, y + t*(mezY-y), DCZ-1.6 - t*1.8, 1.2, 0.09, 0.16, woodMat);
+      }
+      // 詰所: 藁のパレット・卓・火鉢
+      [[-5.8,4.6],[-3.6,5.4],[-1.4,4.6]].forEach(function(p){
+        boxAt(G, DCX+p[0], y+0.16, DCZ+p[1], 2.0, 0.32, 1.0, strawMat);
+        boxAt(G, DCX+p[0], y+0.4, DCZ+p[1]-0.2, 1.6, 0.16, 0.7, clothBlueMat);
+      });
+      addTable(G, DCX+3.6, y, DCZ+3.2, 2.4, 1.1, 0, woodMat);
+      addBench(G, DCX+3.6, y, DCZ+4.3, 2.2, 0, woodMat);
+      cylAt(G, DCX+0.6, y+0.5, DCZ-0.6, 0.75, 0.5, 0.9, 8, metalMat);   // 火鉢
+      cylAt(G, DCX+0.6, y+0.98, DCZ-0.6, 0.6, 0.6, 0.18, 8, emberMat);
+      addArmsRack(G, DCX+1.0, y, DCZ-7.2, 0, 7);
+      addArmsRack(G, DCX-3.4, y, DCZ-7.2, 0, 7);
+      // 壁の盾
+      [-2.0, 0.6, 3.2].forEach(function(sx, si){
+        var sh = mkCyl(0.55, 0.42, 0.14, 6, si===1 ? clothRedMat : clothBlueMat);
+        sh.rotation.x = Math.PI/2;
+        place(sh, DCX+sx, y+3.4, DCZ+7.5);
+        G.add(sh);
+      });
+      // 中二階の弾薬庫: 火薬樽・木箱・積み上げた石弾
+      addBarrel(G, DCX-4.2, mezY+0.13, DCZ+4.4, 0.55, 1.3);
+      addBarrel(G, DCX-2.9, mezY+0.13, DCZ+5.2, 0.55, 1.3);
+      addBarrel(G, DCX-4.4, mezY+0.13, DCZ+6.0, 0.55, 1.3);
+      boxAt(G, DCX+1.4, mezY+0.53, DCZ+4.6, 1.8, 0.8, 1.2, woodMat);
+      boxAt(G, DCX+3.6, mezY+0.43, DCZ+5.6, 1.4, 0.6, 1.0, woodMat);
+      [[2.6,2.2],[3.5,2.2],[3.05,3.0],[3.05,2.6]].forEach(function(p, pi){
+        var ball = mkSphere(0.42, flagstoneMat);
+        place(ball, DCX+p[0], mezY+0.55 + (pi===3?0.6:0), DCZ+p[1]);
+        G.add(ball);
+      });
+      addArmsRack(G, DCX-0.6, mezY+0.13, DCZ+7.0, 0, 6);
     }
-    if (f.fireplace){
-      var hearth = mkBox(2.4, 1.3, 0.6, darkWoodMat);
-      place(hearth, DCX+DHALF-1.5, f.y0+0.9, DCZ);
-      interiorGroup.add(hearth);
-    }
-    var fbox = mkBox(1.6, 0.8, 1.0, woodMat);
-    place(fbox, DCX-2.4, f.y0+0.55, DCZ+2.4);
-    interiorGroup.add(fbox);
     registerPick(pickables, 'room', DCX, (f.y0+f.y1)/2, DCZ, DHALF*2-0.8, f.y1-f.y0-0.4, DHALF*2-0.8, f.name, f.desc);
+  });
+
+  /* 北の付属塔の螺旋階段: 各階を結ぶ実物の主動線。塔の躯体(dStair)が
+   * 内側ティアでフェードすると現れる。 */
+  (function(){
+    cylAt(interiorGroup, DCX, 23.4, stairCz, 0.42, 0.42, 46.8, 8, ribMat); // 中心柱
+    var steps = 58, topY = 46.4, rr = 1.28;
+    for (var i=0;i<steps;i++){
+      var a = i*0.46, sy = 0.55 + i*(topY/steps);
+      var tread = mkBox(1.85, 0.2, 0.85, ribMat);
+      place(tread, DCX + Math.cos(a)*rr, sy, stairCz + Math.sin(a)*rr, -a);
+      interiorGroup.add(tread);
+    }
+  })();
+
+  /* 屋根の煙突: 各階の暖炉がひとつの煙道にまとまって鉛のテラスへ抜ける */
+  [[2.9, -1.4], [2.9, 3.4]].forEach(function(c){
+    var st = mkBox(1.5, 3.2, 1.5, dRoof.mat);
+    place(st, DCX+c[0], BODY_H+1.2, DCZ+c[1]);
+    dRoof.group.add(st);
+    var capm = mkBox(1.9, 0.35, 1.9, dRoof.mat);
+    place(capm, DCX+c[0], BODY_H+2.95, DCZ+c[1]);
+    dRoof.group.add(capm);
   });
 
   /* ---- chemise (13m outer skirt wall around the donjon, raised from
@@ -657,129 +1005,216 @@ function buildVincennes(){
    * reality -- begun 1379, completed 1552; noted in the tooltip rather
    * than modelled as a building site.
    * -------------------------------------------------------------- */
-  var chapelMat = new T.MeshLambertMaterial({ color: 0xdbd2bb });
+  /*  3. HOLLOW SHELL. The chapel used to be one solid 40x15x20m box, so
+   *     however far the camera zoomed in there was nothing inside it to
+   *     see. It is now a real shell -- 0.9m flank walls, a west front, a
+   *     seven-sided apse ring -- carried on FIVE fade groups of the same
+   *     'inner' tier the donjon uses, so the enceinte fades first, then
+   *     the chapel opens up on the high nave, the altar and the choir.
+   *     Buttresses, pinnacles, windows, turrets and spires all live in
+   *     the same group as the wall they belong to, so a face and its
+   *     ornament always dissolve together. */
   var CHX = 25, CHZ = 25;
   var CH_W = 15, CH_LEN = 40, CH_EAVE = 20, CH_RIDGE = 36;
   var CH_WEST = CHX - CH_LEN/2, CH_EAST = CHX + CH_LEN/2;
-  var nave = mkBox(CH_LEN, CH_EAVE, CH_W, chapelMat);   // long axis = X (east-west)
-  place(nave, CHX, CH_EAVE/2, CHZ);
-  group.add(nave);
+  var CH_WT = 0.9;                       // wall thickness
+  var CH_IN = CH_W/2 - CH_WT;            // inner face half-width (6.6)
+  var CH_COL = 0xdbd2bb;
+  var chapN = makeFadeGroup('chapelN', {x:0,z:-1}, false, CH_COL, 'inner');
+  var chapS = makeFadeGroup('chapelS', {x:0,z:1},  false, CH_COL, 'inner');
+  var chapW = makeFadeGroup('chapelW', {x:-1,z:0}, false, CH_COL, 'inner');
+  var chapE = makeFadeGroup('chapelE', {x:1,z:0},  false, CH_COL, 'inner');
+  var chapRoof = makeFadeGroup('chapelRoof', null, true, ROOF_COL, 'inner');
+  var chapelGableMat = new T.MeshLambertMaterial({ color: CH_COL, side: T.DoubleSide });
+
+  // ---- flank walls, bay windows, buttresses, pinnacles, balustrade ----
+  var CH_BAYS = 5;
+  [-1, 1].forEach(function(side){
+    var fg = side < 0 ? chapN : chapS;
+    var wz = CHZ + side*(CH_W/2 - CH_WT/2);
+    var wall = mkBox(CH_LEN, CH_EAVE, CH_WT, fg.mat);
+    place(wall, CHX, CH_EAVE/2, wz);
+    fg.group.add(wall);
+    var sill = 4.2, head = CH_EAVE - 2.2;
+    for (var b=0; b<CH_BAYS; b++){
+      var bx = CH_WEST + (CH_LEN/CH_BAYS)*(b+0.5);
+      var win = mkBox(4.4, head-sill, CH_WT*1.15, windowMat);
+      place(win, bx, (sill+head)/2, wz);
+      fg.group.add(win);
+      var arch = mkCone(2.3, 2.6, 3, windowMat);   // pointed head
+      arch.rotation.y = Math.PI/2;
+      place(arch, bx, head+1.0, wz);
+      fg.group.add(arch);
+    }
+    for (var q=0; q<=CH_BAYS; q++){
+      var qx = CH_WEST + (CH_LEN/CH_BAYS)*q;
+      var but = mkBox(1.7, CH_EAVE+0.6, 2.6, fg.mat);
+      place(but, qx, (CH_EAVE+0.6)/2, CHZ + side*(CH_W/2+0.5));
+      fg.group.add(but);
+      var pinBase = mkBox(1.5, 3.2, 1.5, fg.mat);
+      place(pinBase, qx, CH_EAVE+2.2, CHZ + side*(CH_W/2+0.8));
+      fg.group.add(pinBase);
+      var pin = mkCone(1.05, 6.0, 4, fg.mat);
+      place(pin, qx, CH_EAVE+6.8, CHZ + side*(CH_W/2+0.8));
+      fg.group.add(pin);
+    }
+    var bal = mkBox(CH_LEN, 1.0, 0.5, fg.mat);
+    place(bal, CHX, CH_EAVE+0.5, CHZ + side*(CH_W/2+0.4));
+    fg.group.add(bal);
+  });
+
+  // ---- twin pitched roof slabs + both gables --------------------------
   (function(){
-    // twin roof slabs pitched about the east-west ridge line
     var run = CH_W/2, rise = CH_RIDGE-CH_EAVE, slant = Math.hypot(run, rise);
     [1,-1].forEach(function(sign){
-      var geo = new T.BoxGeometry(CH_LEN+1.2, 0.4, slant);
-      var m = new T.Mesh(geo, slateMat);
+      var m = new T.Mesh(new T.BoxGeometry(CH_LEN+1.2, 0.4, slant), chapRoof.mat);
       m.castShadow = true; m.receiveShadow = true;
       m.position.set(CHX, CH_EAVE + rise/2, CHZ + sign*run/2);
       // pitch about X now that the ridge runs east-west: +sign tips the
       // +Z slab down towards its own eave (mirror of the -Z slab).
       m.rotation.x = sign * Math.atan2(rise, run);
-      group.add(m);
+      chapRoof.group.add(m);
+    });
+    [[CH_WEST, chapW], [CH_EAST, chapE]].forEach(function(pair){
+      var shape = new T.Shape();
+      shape.moveTo(-run, 0); shape.lineTo(run, 0); shape.lineTo(0, rise); shape.closePath();
+      var gm = new T.Mesh(new T.ShapeGeometry(shape), chapelGableMat);
+      gm.castShadow = true; gm.receiveShadow = true;
+      gm.rotation.y = Math.PI/2;        // gable plane faces east-west
+      gm.position.set(pair[0], CH_EAVE, CHZ);
+      pair[1].group.add(gm);
     });
   })();
-  // gable infill at both ends of the ridge (west front + apse end)
-  [CH_WEST, CH_EAST].forEach(function(x){
-    var run = CH_W/2, rise = CH_RIDGE-CH_EAVE;
-    var shape = new T.Shape();
-    shape.moveTo(-run, 0);
-    shape.lineTo(run, 0);
-    shape.lineTo(0, rise);
-    shape.closePath();
-    var gm = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshLambertMaterial({ color:0xdbd2bb, side:T.DoubleSide }));
-    gm.castShadow = true; gm.receiveShadow = true;
-    gm.rotation.y = Math.PI/2;          // gable plane now faces east-west
-    gm.position.set(x, CH_EAVE, CHZ);
-    group.add(gm);
-  });
-  // tall bay windows + buttresses + pinnacles down both flanks
-  var CH_BAYS = 5;
+
+  // ---- apse: a ring of five stone facets (the two that would close the
+  // nave arch are omitted, leaving the chancel opening) + conical roof ---
   (function(){
-    var sill = 4.2, head = CH_EAVE - 2.2;
-    for (var side=-1; side<=1; side+=2){
-      var wz = CHZ + side*CH_W/2;
-      for (var b=0; b<CH_BAYS; b++){
-        var bx = CH_WEST + (CH_LEN/CH_BAYS)*(b+0.5);
-        var win = mkBox(4.4, head-sill, 0.3, windowMat);
-        place(win, bx, (sill+head)/2, wz + side*0.06);
-        group.add(win);
-        var arch = mkCone(2.3, 2.6, 3, windowMat);   // pointed head
-        arch.rotation.y = Math.PI/2;
-        place(arch, bx, head+1.0, wz + side*0.06);
-        group.add(arch);
-      }
-      // buttress + pinnacle on every bay division, ends included
-      for (var q=0; q<=CH_BAYS; q++){
-        var qx = CH_WEST + (CH_LEN/CH_BAYS)*q;
-        var but = mkBox(1.7, CH_EAVE+0.6, 2.6, chapelMat);
-        place(but, qx, (CH_EAVE+0.6)/2, wz + side*1.0);
-        group.add(but);
-        var pinBase = mkBox(1.5, 3.2, 1.5, chapelMat);
-        place(pinBase, qx, CH_EAVE+2.2, wz + side*1.3);
-        group.add(pinBase);
-        var pin = mkCone(1.05, 6.0, 4, chapelMat);
-        place(pin, qx, CH_EAVE+3.8+3.0, wz + side*1.3);
-        group.add(pin);
-      }
-      // eaves balustrade running between the pinnacles
-      var bal = mkBox(CH_LEN, 1.0, 0.5, chapelMat);
-      place(bal, CHX, CH_EAVE+0.5, wz + side*0.9);
-      group.add(bal);
-    }
-  })();
-  // polygonal apse closing the east end (with its own conical slate roof)
-  (function(){
-    var apse = mkCyl(CH_W/2, CH_W/2, CH_EAVE, 7, chapelMat);
-    apse.rotation.y = Math.PI/7;
-    place(apse, CH_EAST, CH_EAVE/2, CHZ);
-    group.add(apse);
-    // conical apse roof, kept BELOW the nave ridge so it reads as the end
-    // of the same roof rather than a witch's-hat tower cap
-    var apseRoofH = (CH_RIDGE-CH_EAVE)*0.7;
-    var apseRoof = mkCone(CH_W/2+0.5, apseRoofH, 7, slateMat);
-    apseRoof.rotation.y = Math.PI/7;
-    place(apseRoof, CH_EAST, CH_EAVE+apseRoofH/2, CHZ);
-    group.add(apseRoof);
-    // radiating lancets on the apse facets, set on the 7-gon's own radius
+    var R = CH_W/2, apo = R*Math.cos(Math.PI/7), facetW = 2*R*Math.sin(Math.PI/7);
     for (var a=-2; a<=2; a++){
       var ang = a*(2*Math.PI/7);
-      var ex = CH_EAST + Math.cos(ang)*(CH_W/2*0.97);
-      var ez = CHZ + Math.sin(ang)*(CH_W/2*0.97);
-      var lan = mkBox(0.3, 11.0, 3.0, windowMat);
-      place(lan, ex, 10.5, ez, -ang);
-      group.add(lan);
+      var rx = CH_EAST + Math.cos(ang)*(apo-0.4);
+      var rz = CHZ + Math.sin(ang)*(apo-0.4);
+      var facet = mkBox(0.8, CH_EAVE, facetW+0.35, chapE.mat);
+      place(facet, rx, CH_EAVE/2, rz, -ang);
+      chapE.group.add(facet);
+      var lan = mkBox(0.9, 11.0, 3.0, windowMat);
+      place(lan, rx, 10.5, rz, -ang);
+      chapE.group.add(lan);
+      var but2 = mkBox(1.4, CH_EAVE+0.4, 1.4, chapE.mat);
+      place(but2, CH_EAST + Math.cos(ang+Math.PI/7)*(R+0.3),
+                  (CH_EAVE+0.4)/2,
+                  CHZ + Math.sin(ang+Math.PI/7)*(R+0.3), -ang);
+      chapE.group.add(but2);
     }
+    var apseRoofH = (CH_RIDGE-CH_EAVE)*0.7;
+    var apseRoof = mkCone(R+0.5, apseRoofH, 7, chapRoof.mat);
+    apseRoof.rotation.y = Math.PI/7;
+    place(apseRoof, CH_EAST, CH_EAVE+apseRoofH/2, CHZ);
+    chapRoof.group.add(apseRoof);
   })();
-  // west front: giant traceried window under a steep gable, framed by two
-  // stair turrets that climb past the roofline and finish in spires.
+
+  // ---- west front: great window, portal, stair turrets, spires --------
   (function(){
-    var fx = CH_WEST - 0.12;
-    var greatWin = mkBox(0.3, 12.5, 8.6, windowMat);
+    var fx = CH_WEST + CH_WT/2;
+    var front = mkBox(CH_WT, CH_EAVE, CH_W, chapW.mat);
+    place(front, fx, CH_EAVE/2, CHZ);
+    chapW.group.add(front);
+    var greatWin = mkBox(CH_WT*1.2, 12.5, 8.6, windowMat);
     place(greatWin, fx, 12.4, CHZ);
-    group.add(greatWin);
+    chapW.group.add(greatWin);
     var winHead = mkCone(4.3, 3.4, 3, windowMat);
     winHead.rotation.y = Math.PI/2;
     place(winHead, fx, 20.3, CHZ);
-    group.add(winHead);
-    var portal = mkBox(0.4, 5.4, 3.6, windowMat);
+    chapW.group.add(winHead);
+    var portal = mkBox(CH_WT*1.3, 5.4, 3.6, windowMat);
     place(portal, fx, 2.7, CHZ);
-    group.add(portal);
-    var portalArch = mkCone(2.1, 2.4, 3, chapelMat);
+    chapW.group.add(portal);
+    var portalArch = mkCone(2.1, 2.4, 3, chapW.mat);
     portalArch.rotation.y = Math.PI/2;
-    place(portalArch, fx-0.15, 6.5, CHZ);
-    group.add(portalArch);
+    place(portalArch, CH_WEST-0.27, 6.5, CHZ);
+    chapW.group.add(portalArch);
     [-1,1].forEach(function(side){
-      var turr = mkCyl(2.1, 2.2, CH_RIDGE+2.0, 8, chapelMat);
+      var turr = mkCyl(2.1, 2.2, CH_RIDGE+2.0, 8, chapW.mat);
       place(turr, CH_WEST+0.4, (CH_RIDGE+2.0)/2, CHZ + side*(CH_W/2+0.4));
-      group.add(turr);
-      var spire = mkCone(2.4, 10.0, 8, chapelMat);
+      chapW.group.add(turr);
+      var spire = mkCone(2.4, 10.0, 8, chapW.mat);
       place(spire, CH_WEST+0.4, CH_RIDGE+2.0+5.0, CHZ + side*(CH_W/2+0.4));
-      group.add(spire);
+      chapW.group.add(spire);
     });
-    var apexFinial = mkCone(0.7, 4.2, 4, chapelMat);
+    var apexFinial = mkCone(0.7, 4.2, 4, chapW.mat);
     place(apexFinial, CH_WEST+0.3, CH_RIDGE+2.1, CHZ);
-    group.add(apexFinial);
+    chapW.group.add(apexFinial);
   })();
+
+  /* ---- chapel interior (interiorGroup -- never fades, simply revealed
+   * once the shell above dissolves): tiled floor, engaged shafts carrying
+   * transverse pointed arches the full 31m to the ridge (the vertical
+   * emphasis the real building is built around), nave benches, a stepped
+   * choir and the high altar in the apse. -------------------------- */
+  (function(){
+    var G = interiorGroup;
+    // warm, low-contrast stone checker -- a high-contrast grey/white grid
+    // reads as a transparency swatch rather than a tiled chapel floor
+    var tileTex = makeCheckerTexture('#c6bca4', '#a89d86', 9);
+    var tileMat = new T.MeshLambertMaterial({ map: tileTex });
+    boxAt(G, (CH_WEST+CH_WT+CH_EAST)/2, 0.15, CHZ, CH_EAST-CH_WEST-CH_WT, 0.3, CH_IN*2, tileMat);
+    cylAt(G, CH_EAST, 0.15, CHZ, CH_W/2-0.5, CH_W/2-0.5, 0.3, 7, tileMat, Math.PI/7);
+    // chancel steps + raised sanctuary
+    boxAt(G, 38.4, 0.42, CHZ, 1.6, 0.26, CH_IN*2, flagstoneMat);
+    boxAt(G, 40.0, 0.68, CHZ, 1.6, 0.26, CH_IN*2, flagstoneMat);
+    boxAt(G, 45.0, 0.68, CHZ, 8.4, 0.26, CH_IN*2-1.0, flagstoneMat);
+    // high altar, cloth, retable and cross
+    boxAt(G, 46.4, 1.35, CHZ, 1.5, 1.1, 2.9, flagstoneMat);
+    boxAt(G, 46.4, 1.94, CHZ, 1.9, 0.14, 3.3, linenMat);
+    boxAt(G, 47.3, 2.9, CHZ, 0.3, 1.8, 2.6, clothGoldMat);
+    boxAt(G, 46.4, 2.9, CHZ, 0.16, 1.5, 0.16, clothGoldMat);
+    boxAt(G, 46.4, 3.2, CHZ, 0.16, 0.16, 0.9, clothGoldMat);
+    [-1.2, 1.2].forEach(function(dz){ addCandleStand(G, 45.4, 2.0, CHZ+dz); });
+    [-4.6, 4.6].forEach(function(dz){ addCandleStand(G, 42.0, 0.81, CHZ+dz); });
+    // choir stalls facing each other across the chancel
+    [-1, 1].forEach(function(s){
+      addBench(G, 42.4, 0.81, CHZ + s*3.6, 5.0, Math.PI/2, darkWoodMat);
+      boxAt(G, 42.4, 1.9, CHZ + s*4.4, 5.2, 2.2, 0.2, darkWoodMat);
+    });
+    // engaged shafts + transverse pointed arches on every bay division.
+    // Each arm is a three-segment polyline rather than one straight strut,
+    // so the arch reads as a curve rising to a point instead of an A-frame.
+    var springY = CH_EAVE - 1.6, apexY = springY + 9.6;
+    var shaftZ = CH_IN - 0.35;
+    [13, 21, 29, 37].forEach(function(bx){
+      [-1,1].forEach(function(s){
+        cylAt(G, bx, (springY+0.3)/2, CHZ + s*shaftZ, 0.4, 0.46, springY-0.3, 8, ribMat);
+        cylAt(G, bx, springY+0.2, CHZ + s*shaftZ, 0.58, 0.44, 0.7, 8, ribMat);
+        var pts = [
+          [springY+0.5, shaftZ],
+          [springY+4.4, shaftZ*0.82],
+          [springY+7.6, shaftZ*0.45],
+          [apexY,       0]
+        ];
+        for (var pi=0; pi<pts.length-1; pi++){
+          beamBetween(G, bx, pts[pi][0], CHZ + s*pts[pi][1],
+                         bx, pts[pi+1][0], CHZ + s*pts[pi+1][1], 0.42, 0.46, ribMat);
+        }
+      });
+    });
+    boxAt(G, 25.5, apexY+0.1, CHZ, 34.0, 0.4, 0.44, ribMat);   // ridge rib
+    // nave benches, two blocks either side of a central aisle
+    [21.0, 29.0].forEach(function(bz){
+      [12.0, 15.2, 18.4, 21.6, 24.8, 28.0, 31.2].forEach(function(bx){
+        addBench(G, bx, 0.3, bz, 5.0, Math.PI/2, woodMat);
+      });
+    });
+    // lectern at the chancel step
+    cylAt(G, 36.4, 0.85, CHZ-2.4, 0.16, 0.4, 1.4, 6, darkWoodMat);
+    var desk = mkBox(0.7, 0.1, 0.9, darkWoodMat);
+    place(desk, 36.4, 1.6, CHZ-2.4); desk.rotation.z = 0.45; G.add(desk);
+    boxAt(G, 36.3, 1.72, CHZ-2.4, 0.5, 0.07, 0.6, linenMat);
+    registerPick(pickables, 'room', 22, 9, CHZ, 30, 16, CH_IN*2,
+      '身廊 Nave', 'サント・シャペルの身廊。両側の高い尖頭窓と、束ね柱から立ち上がる横断アーチが垂直性を強調する。');
+    registerPick(pickables, 'room', 44, 6, CHZ, 12, 10, 12,
+      '内陣 Choir & High Altar', '内陣。数段の階段で一段高く、七角形の後陣に主祭壇と聖歌隊席を置く。');
+  })();
+
   registerPick(pickables, 'structure', CHX, CH_EAVE*0.6, CHZ, CH_LEN+2, CH_RIDGE, CH_W+2,
     'サント・シャペル Sainte-Chapelle', 'ドンジョン東側に建つフランボワイヤン・ゴシックの礼拝堂。東西方向に身廊を通し、西正面の大窓と両脇の階段塔、側面を埋める背の高い尖頭窓が特徴。1380年時点ではまだ建設中であった(実際の完成は1552年)。');
 
@@ -887,6 +1322,234 @@ function buildVincennes(){
   bridgeOverOuterMoat('z', 0, MOAT_OHZ-1.0, BAIL_HZ+0.5, 4.5);    // south: Tour du Bois approach
 
   /* -------------------------------------------------------------- *
+   * bailey planting. The enceinte encloses ~5.7 hectares -- far more
+   * ground than the donjon and the chapel use -- and the royal residence
+   * really did farm it: a jardin du roi, a potager, an orchard and a
+   * working farm yard. Four planted quarters are laid out in the four
+   * corners of the open bailey, deliberately OUTSIDE every life.courtyard
+   * rectangle and clear of the guards' patrol lanes at x = +-80 (see the
+   * re-cut courtyard list in the life block at the end of this file), so
+   * nothing here stands where a resident walks.
+   * Everything is scaled to the courtyard, not to the forest outside:
+   * these are 3.2-5m fruit trees, not the 12m+ trees the shared nature
+   * layer plants beyond the moat.
+   * -------------------------------------------------------------- */
+  var GQ = {                       // the four planted quarters (x/z bounds)
+    king:    { x0:-76, x1:-34, z0:-150, z1:-104 },
+    potager: { x0: 34, x1: 76, z0:-150, z1:-104 },
+    orchard: { x0: 34, x1: 76, z0: 104, z1: 150 },
+    farm:    { x0:-76, x1:-34, z0: 104, z1: 150 }
+  };
+  function addCourtTree(x, z, h, rr, lm){
+    cylAt(group, x, h/2, z, 0.16, 0.3, h, 6, trunkMat);
+    var c1 = mkSphere(rr, lm); c1.scale.set(1.05, 0.88, 1.05);
+    place(c1, x, h + rr*0.5, z); group.add(c1);
+    var c2 = mkSphere(rr*0.6, lm);
+    place(c2, x + rr*0.5, h + rr*0.05, z - rr*0.35); group.add(c2);
+  }
+  function addHedge(x, z, len, ry, hh){
+    boxAt(group, x, hh/2, z, len, hh, 0.85, hedgeMat, ry);
+  }
+  function addVegBed(x, z, len, wid, ry, cm){
+    boxAt(group, x, 0.17, z, len, 0.34, wid, soilMat, ry);   // 畝(耕した土)
+    boxAt(group, x, 0.5, z, len*0.94, 0.3, wid*0.5, cm, ry); // 作物の列
+    for (var i=0;i<5;i++){
+      var p = localXZ(x, z, ry, -len/2 + len*(i+0.5)/5, 0);
+      var t = mkSphere(0.46, cm); t.scale.set(1, 0.72, 1);
+      place(t, p[0], 0.62, p[1]); group.add(t);
+    }
+  }
+  function addWell(x, z){
+    cylAt(group, x, 0.55, z, 1.15, 1.25, 1.1, 10, flagstoneMat);
+    cylAt(group, x, 1.12, z, 0.82, 0.82, 0.14, 10, sootMat);
+    [-1,1].forEach(function(s){ boxAt(group, x+s*1.15, 2.0, z, 0.22, 2.6, 0.22, woodMat); });
+    boxAt(group, x, 3.05, z, 3.0, 0.18, 1.7, woodMat);
+    boxAt(group, x, 2.75, z, 2.3, 0.16, 0.16, woodMat);        // 巻き上げ軸
+    boxAt(group, x, 2.15, z, 0.44, 0.5, 0.44, darkWoodMat);    // 釣瓶
+  }
+  function addCart(x, z, ry){
+    var g = new T.Group();
+    var bed = mkBox(3.2, 0.3, 1.9, woodMat); bed.position.y = 1.0; g.add(bed);
+    [-0.95, 0.95].forEach(function(s){
+      var sb = mkBox(3.2, 0.62, 0.12, woodMat); sb.position.set(0, 1.4, s); g.add(sb);
+    });
+    [-1, 1].forEach(function(s){
+      var w = mkCyl(0.72, 0.72, 0.16, 10, darkWoodMat);
+      w.rotation.x = Math.PI/2;
+      w.position.set(0.55, 0.74, s*1.08); g.add(w);
+    });
+    [-0.55, 0.55].forEach(function(s){
+      var sh = mkBox(2.4, 0.13, 0.13, woodMat); sh.position.set(-2.5, 0.95, s); g.add(sh);
+    });
+    var hay = mkBox(2.6, 0.7, 1.6, strawMat); hay.position.y = 1.5; g.add(hay);
+    g.position.set(x, 0, z); g.rotation.y = ry || 0;
+    group.add(g);
+  }
+  // axis-aligned outbuilding (ridge runs along X) -- thatched twin pitch
+  function addShed(x, z, w, d){
+    boxAt(group, x, 1.3, z, w, 2.6, d, woodMat);
+    var rise = 1.6, run = d/2, slant = Math.hypot(run, rise);
+    [1,-1].forEach(function(sg){
+      var m = mkBox(w+0.7, 0.26, slant, strawMat);
+      m.position.set(x, 2.6 + rise/2, z + sg*run/2);
+      m.rotation.x = sg*Math.atan2(rise, run);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    });
+    [1,-1].forEach(function(sg){
+      boxAt(group, x + sg*(w/2-0.1), 3.0, z, 0.2, 1.2, d*0.55, woodMat);
+    });
+    boxAt(group, x, 0.9, z + d/2, 1.1, 1.8, 0.14, darkWoodMat);
+  }
+
+  /* -- 王の庭園: 生垣で縁取った4区画の整形花壇と中央の井戸 -- */
+  (function(){
+    var q = GQ.king, cx = (q.x0+q.x1)/2, cz = (q.z0+q.z1)/2;
+    // 各区画は「芝の中央に四辺の花壇を回した」結び花壇(parterre)。
+    // 一枚の土の四角にすると泥の板に見えるので、土は縁の帯だけにする。
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+      var bx = cx + s[0]*10.5, bz = cz + s[1]*10.5, half = 8.0;
+      addHedge(bx, bz - half, half*2, 0, 0.75);
+      addHedge(bx, bz + half, half*2, 0, 0.75);
+      addHedge(bx - half, bz, half*2, Math.PI/2, 0.75);
+      addHedge(bx + half, bz, half*2, Math.PI/2, 0.75);
+      [[0,-5.2,13,3.0],[0,5.2,13,3.0],[-5.2,0,3.0,13],[5.2,0,3.0,13]].forEach(function(b, bi){
+        boxAt(group, bx+b[0], 0.12, bz+b[1], b[2], 0.24, b[3], soilMat);
+        for (var f=0; f<3; f++){
+          var t = (f+0.5)/3 - 0.5;
+          var fx = bx + b[0] + (b[2] > b[3] ? t*b[2]*0.8 : 0);
+          var fz = bz + b[1] + (b[3] > b[2] ? t*b[3]*0.8 : 0);
+          var bl = mkSphere(0.78, (bi+f) % 2 ? bloomMat : bloom2Mat);
+          bl.scale.set(1, 0.72, 1);
+          place(bl, fx, 0.42, fz); group.add(bl);
+        }
+      });
+      var herb = mkSphere(1.7, hedgeMat); herb.scale.set(1, 0.8, 1);
+      place(herb, bx, 0.9, bz); group.add(herb);         // 中央の刈り込み
+    });
+    addWell(cx, cz);
+    [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(function(s){
+      addCourtTree(cx + s[0]*19.0, cz + s[1]*20.5, 3.6, 2.0, leafMat2);
+    });
+    addHedge(cx, q.z0-1.2, q.x1-q.x0, 0, 0.9);
+    addHedge(cx, q.z1+1.2, q.x1-q.x0, 0, 0.9);
+    registerPick(pickables, 'structure', cx, 1.4, cz, q.x1-q.x0, 3.0, q.z1-q.z0,
+      '王の庭園 Jardin du Roi', '外郭の北西隅に営まれた王の庭園。生垣で縁取った整形花壇と果樹、井戸を備える。');
+  })();
+
+  /* -- 菜園(ポタジェ): 長い畝と豆の支柱、囲いの垣根 -- */
+  (function(){
+    var q = GQ.potager, cx = (q.x0+q.x1)/2;
+    for (var i=0; i<6; i++){
+      var bz = q.z0 + 5.5 + i*7.2;
+      addVegBed(cx, bz, 38, 3.0, 0, i % 2 ? cropMat : herbMat);
+    }
+    // 豆の支柱(3本一組の円錐)
+    [[q.x0+5, q.z1-3.5], [q.x0+15, q.z1-3.5], [q.x0+25, q.z1-3.5], [q.x0+35, q.z1-3.5]].forEach(function(p){
+      for (var k=0;k<3;k++){
+        var a = k*(Math.PI*2/3);
+        beamBetween(group, p[0]+Math.cos(a)*0.8, 0.1, p[1]+Math.sin(a)*0.8,
+                           p[0], 2.6, p[1], 0.1, 0.1, woodMat);
+      }
+      var vine = mkSphere(1.0, cropMat); vine.scale.set(1, 1.25, 1);
+      place(vine, p[0], 1.2, p[1]); group.add(vine);
+    });
+    // 編み垣(ウォトル・フェンス)
+    [[cx, q.z0-1.0, q.x1-q.x0, 0], [cx, q.z1+1.0, q.x1-q.x0, 0],
+     [q.x0-1.0, (q.z0+q.z1)/2, q.z1-q.z0, Math.PI/2], [q.x1+1.0, (q.z0+q.z1)/2, q.z1-q.z0, Math.PI/2]
+    ].forEach(function(f){
+      boxAt(group, f[0], 0.5, f[1], f[2], 1.0, 0.24, woodMat, f[3]);
+    });
+    addWell(q.x1-4.0, q.z0+3.0);
+    addShed(q.x0+4.5, q.z1-5.0, 6.0, 4.5);
+    registerPick(pickables, 'structure', cx, 1.2, (q.z0+q.z1)/2, q.x1-q.x0, 2.6, q.z1-q.z0,
+      '菜園 Potager', '城内の台所をまかなう菜園。畝を切って豆や根菜を育て、井戸と納屋を備えた。');
+  })();
+
+  /* -- 果樹園: 小ぶりな果樹の格子状の植栽 -- */
+  (function(){
+    var q = GQ.orchard;
+    for (var r=0; r<4; r++){
+      for (var c=0; c<4; c++){
+        var tx = q.x0 + 6 + c*10.0, tz = q.z0 + 6 + r*11.5;
+        addCourtTree(tx, tz, 3.2 + ((r+c) % 3)*0.5, 1.9 + ((r*3+c) % 3)*0.25,
+          (r+c) % 2 ? leafMat : leafMat2);
+      }
+    }
+    addHedge((q.x0+q.x1)/2, q.z0-1.2, q.x1-q.x0, 0, 0.85);
+    addHedge((q.x0+q.x1)/2, q.z1+1.2, q.x1-q.x0, 0, 0.85);
+    addHedge(q.x1+1.2, (q.z0+q.z1)/2, q.z1-q.z0, Math.PI/2, 0.85);
+    registerPick(pickables, 'structure', (q.x0+q.x1)/2, 2.0, (q.z0+q.z1)/2,
+      q.x1-q.x0, 4.5, q.z1-q.z0,
+      '果樹園 Verger', '外郭南東の果樹園。城内で消費する林檎や梨を実らせた。');
+  })();
+
+  /* -- 農作業場: ぶどう棚・干し草・薪・荷車・鶏小屋 -- */
+  (function(){
+    var q = GQ.farm;
+    // ぶどう棚(2列)
+    [q.z0+6, q.z0+14].forEach(function(rz){
+      for (var i=0;i<5;i++){
+        var px = q.x0 + 5 + i*8;
+        boxAt(group, px, 1.1, rz, 0.2, 2.2, 0.2, woodMat);
+      }
+      boxAt(group, q.x0+21, 2.25, rz, 34, 0.14, 0.6, woodMat);
+      var vine = mkBox(33, 0.55, 1.5, leafMat);
+      place(vine, q.x0+21, 2.6, rz); group.add(vine);
+    });
+    // 干し草の山
+    [[q.x0+8, q.z1-12], [q.x0+16, q.z1-6], [q.x0+25, q.z1-13]].forEach(function(p){
+      cylAt(group, p[0], 0.8, p[1], 2.2, 2.5, 1.6, 8, strawMat);
+      var top = mkCone(2.3, 2.6, 8, strawMat);
+      place(top, p[0], 2.9, p[1]); group.add(top);
+    });
+    // 薪の山
+    for (var lr=0; lr<3; lr++){
+      for (var lc=0; lc<4; lc++){
+        var lg = mkCyl(0.24, 0.24, 3.0, 6, trunkMat);
+        lg.rotation.z = Math.PI/2;
+        place(lg, q.x1-9, 0.28 + lr*0.5, q.z1-6 + lc*0.55 + (lr%2)*0.27);
+        group.add(lg);
+      }
+    }
+    addCart(q.x1-6, q.z0+22, 0.4);
+    addCart(q.x0+7, q.z0+27, -1.1);
+    addShed(q.x0+6, q.z1-3.5, 7.0, 4.0);
+    addWell(q.x1-4, q.z0+2);
+    addHedge((q.x0+q.x1)/2, q.z1+1.2, q.x1-q.x0, 0, 0.85);
+    addHedge(q.x0-1.2, (q.z0+q.z1)/2, q.z1-q.z0, Math.PI/2, 0.85);
+  })();
+
+  /* -- 城壁沿いの並木(巡回路 x=+-80 と中庭矩形の外側 x=+-83.5) -- */
+  [-1, 1].forEach(function(sx){
+    for (var tz = -132; tz <= 132; tz += 16.5){
+      if (sx < 0 && tz > -30 && tz < 100) continue;    // 西はドンジョンの堀を避ける
+      addCourtTree(sx*83.5, tz, 3.4, 1.7, (tz|0) % 2 ? leafMat : leafMat2);
+    }
+  });
+
+  /* -- 礼拝堂の前庭 --------------------------------------------------
+   * ここだけは中庭の区画(z<=8 の北広場と z>=44 の礼拝堂南前庭)を結ぶ
+   * 住人の横断帯に当たり、直線移動する農民が必ず通り抜ける。したがって
+   * 樹木も背の高い生垣も置かず、膝丈(0.45m)の刈り込み縁取りと低い鉢に
+   * 留め、さらに中央 x=25 に幅8mの通路を開けてある。 */
+  [11.0, 39.0].forEach(function(hz){
+    [-1, 1].forEach(function(s){
+      addHedge(25 + s*13, hz, 14, 0, 0.45);
+    });
+    [10, 16, 34, 40].forEach(function(px){
+      cylAt(group, px, 0.22, hz + (hz < 25 ? -2.2 : 2.2), 0.4, 0.32, 0.44, 8, soilMat);
+      var pot = mkSphere(0.5, herbMat); pot.scale.set(1, 0.72, 1);
+      place(pot, px, 0.62, hz + (hz < 25 ? -2.2 : 2.2)); group.add(pot);
+    });
+  });
+
+  /* -- シェミーズ内の中庭にも小さな果樹を4本 -- */
+  [[-16,-16],[16,-16],[16,16],[-16,16]].forEach(function(s){
+    addCourtTree(DCX + s[0], DCZ + s[1], 3.0, 1.6, leafMat2);
+  });
+
+  /* -------------------------------------------------------------- *
    * info payload + always-on labels (shared helper, see buildLabelGroup
    * in section 0 -- covers both structure and room pickables).
    * -------------------------------------------------------------- */
@@ -910,12 +1573,17 @@ function buildVincennes(){
     // 礼拝堂は東西方向(X 方向)に身廊を通すよう向きを正したので、
     // その躯体(x=4..46 / z=17..33、控え壁と西正面塔を含め x=1..49 / z=14..36)を
     // 避けるように中庭の区画も引き直す。
+    // 中庭に王の庭園・菜園・果樹園・農作業場(四隅、x=±34..76 / z=∓104..∓150)
+    // と城壁沿いの並木(x=±83.5)を入れたので、住人が植栽に埋まらないよう
+    // 区画をその外側へ引き直した。南北の門へは中央の参道(|x|<=30)が通る。
     courtyard: [
-      { minX:-84, maxX:84,  minZ:-160, maxZ:8 },   // 北側の広い区画(シェミーズ・礼拝堂より北)
-      { minX:-84, maxX:84,  minZ:92,   maxZ:160 }, // 南側の広い区画
+      { minX:-78, maxX:78,  minZ:-100, maxZ:8 },   // 北の主要広場(四隅の庭より内側)
+      { minX:-30, maxX:30,  minZ:-158, maxZ:-100 },// 北門(村の塔門)へ続く中央参道
+      { minX:-78, maxX:78,  minZ:92,   maxZ:100 }, // 南側の帯
+      { minX:-30, maxX:30,  minZ:100,  maxZ:158 }, // 南門(木の門塔)へ続く中央参道
       { minX:-58, maxX:-6,  minZ:8,    maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
-      { minX:56,  maxX:84,  minZ:8,    maxZ:92 },  // 礼拝堂と東城壁の間の帯
-      { minX:-6,  maxX:56,  minZ:42,   maxZ:92 }   // 礼拝堂南側の前庭
+      { minX:56,  maxX:78,  minZ:8,    maxZ:92 },  // 礼拝堂と東城壁の間の帯
+      { minX:-6,  maxX:56,  minZ:44,   maxZ:92 }   // 礼拝堂南側の前庭(生垣の南)
     ],
     patrol: [
       [80,0,-158], [80,0,158], [-80,0,158], [-80,0,90],
