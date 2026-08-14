@@ -28,23 +28,31 @@ function buildBodiam(){
     return desc;
   }
 
-  /* ---- palette : Sussex sandstone, warm ochre to grey ------------- */
-  var STONE_WALL   = 0xc7a97c;
-  var STONE_WALL_V = 0xbfa176; // slight variance for towers
+  /* ---- palette : Sussex "honey" sandstone -------------------------
+   * Photo-matched against the classic north-front reference (see the
+   * build notes at the foot of this file): Bodiam's ashlar reads as a
+   * pale golden buff, noticeably lighter and warmer than the previous
+   * mid-tan, with the weathered lower courses a touch greyer. The moat
+   * is a murky grey-green (it is a still, silty pond, not open sea) and
+   * the banks are turf right down to the waterline -- the old sandy
+   * bank colours produced a "beach" ring that Bodiam does not have. */
+  var STONE_WALL   = 0xd8c093;
+  var STONE_WALL_V = 0xd0b78a; // slight variance for towers
   var STONE_DARK   = 0x9c8564;
-  var ROOF_COL     = 0x5b544a;
+  var STONE_BASE   = 0xb6a079; // weathered plinth courses at the waterline (only a shade darker)
+  var ROOF_COL     = 0x5f574c;
   var TIMBER_COL   = 0x5b4530;
   var WINDOW_COL   = 0x1c150e;
   var FLOOR_COL    = 0xa89a80;
   var STUB_COL     = 0x7c6c50;
   var WOOD_COL     = 0x6b4f34;
   var METAL_COL    = 0x2a2925;
-  var WATER_COL    = 0x2e5b66;
+  var WATER_COL    = 0x3d6257;
   var GRASS_COL    = 0x5c7a48;
   var GRASS_COL2   = 0x6c8a52;
-  var BANK_COL     = 0x8a7a58;
-  var BANK_MID_COL = 0x62543a; // bank ramp, mid-slope
-  var BANK_EDGE_COL= 0x2f2617; // bank ramp, wet mud right at the waterline
+  var BANK_COL     = 0x6d8449; // bank ramp, dry turf at the top
+  var BANK_MID_COL = 0x4d5c33; // bank ramp, mid-slope
+  var BANK_EDGE_COL= 0x2b2c1c; // bank ramp, wet silt right at the waterline
   var TILE_COL     = 0x7a5240;
   var COURT_GRASS_COL = 0x6a8d4f; // central lawn, kept distinct from the wing stone floors
 
@@ -61,17 +69,33 @@ function buildBodiam(){
   var bankMat   = new T.MeshLambertMaterial({ color: BANK_COL });
   var wellMat   = new T.MeshBasicMaterial({ color: 0x2e6a7a });
 
-  /* ---- footprint constants (metres) -------------------------------- */
-  var OW = 16.5;      // outer curtain wall half-extent (33m side)
-  var WT = 1.6;        // wall thickness
-  var WH = 10.6;       // wall height to the wall-walk
-  var MER = 1.3;        // merlon height
+  /* ---- footprint constants (metres) --------------------------------
+   * Measured off the published ground plan (scale bar) and the classic
+   * north-front photograph, both listed in the build notes at the foot
+   * of this file. Key real-world proportions the numbers below target:
+   *   curtain square           ~45 m per side  (was modelled at 33 m)
+   *   round corner tower dia.  ~8.2 m  = 0.18 x side (was 0.28 x side)
+   *   gatehouse block width    ~13.7 m = 0.30 x side (was 0.52 x side)
+   *   corner tower parapet     ~1.7 x the curtain parapet height
+   *   gatehouse parapet        TALLER than the corner towers -- Bodiam's
+   *                            twin gate towers are its highest point,
+   *                            which the old numbers had backwards. */
+  var OW = 22.0;       // outer curtain wall half-extent (44m side)
+  var WT = 2.0;        // wall thickness
+  var WH = 10.8;       // wall height to the wall-walk
+  var MER = 1.6;       // merlon height (photo: merlons are tall slabs, ~1.9m)
 
-  var CORNER_R = 4.6, CORNER_H = 17.6, CORNER_ROOF_H = 2.7;
-  var MID_W = 7.2, MID_PROJ = 4.2, MID_H = 13.6, MID_ROOF_H = 2.3;
-  var GATE_W = 6.3, GATE_PROJ = 4.8, GATE_H = 15.4, GATE_ROOF_H = 2.5, GATE_GAP = 4.6;
+  var CORNER_R = 4.3, CORNER_H = 18.0, CORNER_ROOF_H = 1.5;
+  var MID_W = 5.6, MID_PROJ = 4.6, MID_H = 14.6, MID_ROOF_H = 1.4;
+  var GATE_W = 5.3, GATE_PROJ = 5.6, GATE_H = 20.4, GATE_ROOF_H = 2.0, GATE_GAP = 3.6;
 
+  var BATTER_BOT = -1.9; // plinths/batters run below the waterline, as on site
   var INNER = OW - WT; // inner wall face
+  // Range depth / courtyard size are declared up here (rather than down in
+  // the courtyard block where they used to live) because the gate passage
+  // vault, built with the gatehouse above, has to reach the courtyard edge.
+  var ROOM_DEPTH = 8.6;                  // plan: the ranges are 7-12m deep
+  var COURT_HALF = INNER - ROOM_DEPTH;   // half-extent of the central lawn
 
   /* ---- fade group registry ------------------------------------------ */
   var wallN = makeFadeGroup('wallN', {x:0,z:-1}, false, STONE_WALL);
@@ -94,7 +118,10 @@ function buildBodiam(){
   var roofE = makeFadeGroup('roofE', {x:1,z:0},  true, ROOF_COL);
   var roofW = makeFadeGroup('roofW', {x:-1,z:0}, true, ROOF_COL);
   var roofN = makeFadeGroup('roofN', {x:0,z:-1}, true, ROOF_COL);
-  var roofCaps = makeFadeGroup('roofCaps', null, true, ROOF_COL); // conical tower roofs (no direction test)
+  // Tower caps are lead, not tile: kept distinctly lighter than the wing
+  // roofs so that seen from above they read as a low roof tucked inside
+  // the parapet rather than as a hole punched in the tower.
+  var roofCaps = makeFadeGroup('roofCaps', null, true, 0x6d6a60); // tower roofs (no direction test)
 
   function norm(x,z){ var l = Math.hypot(x,z)||1; return {x:x/l, z:z/l}; }
 
@@ -102,7 +129,10 @@ function buildBodiam(){
    * curtain walls with crenellations
    * -------------------------------------------------------------- */
   function addCrenellations(target, mat, cx, cz, length, ry, topY, thickness){
-    var merlonW = 1.15, gapW = 1.05, mt = thickness*0.72;
+    // photo: merlons are wide slabs separated by NARROW embrasures --
+    // the old 1.15/1.05 split read as a chess-board, real Bodiam is
+    // closer to 3:2 merlon:gap.
+    var merlonW = 1.3, gapW = 0.85, mt = thickness*0.72;
     var period = merlonW + gapW;
     var count = Math.max(1, Math.floor(length/period));
     var start = -(count*period)/2 + merlonW/2;
@@ -115,6 +145,30 @@ function buildBodiam(){
       target.add(m);
     }
   }
+  /* Crenellate the RIM of a rectangular tower top rather than laying one
+   * row of merlons as deep as the tower itself. The old build passed the
+   * tower's full projection as `thickness`, so addCrenellations produced
+   * 3-4m deep slabs -- from above the gatehouse and the mid-wall towers
+   * read as solid white caps instead of a parapet with a walk behind it,
+   * which is nothing like the photographs. */
+  function crenellateRect(target, mat, cx, cz, w, d, ry, topY, opt){
+    opt = opt || {};
+    var t = 0.6, mt = t/0.72;   // addCrenellations scales thickness by 0.72
+    var co = Math.cos(ry), si = Math.sin(ry);
+    function wpt(lx, lz){ return { x: cx + lx*co + lz*si, z: cz - lx*si + lz*co }; }
+    var f = wpt(0, -(d/2 - t/2));
+    addCrenellations(target, mat, f.x, f.z, w, ry, topY, mt);
+    if (opt.back !== false){
+      var b = wpt(0, (d/2 - t/2));
+      addCrenellations(target, mat, b.x, b.z, w, ry, topY, mt);
+    }
+    if (opt.ends !== false){
+      var dl = Math.max(0.8, d - 2*t);
+      var l = wpt(-(w/2 - t/2), 0), r = wpt((w/2 - t/2), 0);
+      addCrenellations(target, mat, l.x, l.z, dl, ry + Math.PI/2, topY, mt);
+      addCrenellations(target, mat, r.x, r.z, dl, ry + Math.PI/2, topY, mt);
+    }
+  }
   function addWindows(target, mat, cx, cz, length, ry, midY, thickness, windows){
     var co = Math.cos(ry), si = Math.sin(ry);
     (windows||[]).forEach(function(w){
@@ -124,10 +178,24 @@ function buildBodiam(){
       target.add(win);
     });
   }
+  // Every wall/tower on site stands on a splayed plinth that carries on
+  // down below the waterline -- in the reference photograph the masonry
+  // meets the moat with a dark, wet, slightly wider base course rather
+  // than a clean butt joint against the grass. `batterBox` / the tower
+  // equivalents below add that course everywhere.
+  var batterMat = new T.MeshLambertMaterial({ color: STONE_BASE });
+  function batterBox(target, cx, cz, length, ry, thickness, topY){
+    topY = topY != null ? topY : 1.1;
+    var b = mkBox(length + 0.35, topY - BATTER_BOT, thickness + 0.5, batterMat);
+    place(b, cx, (topY + BATTER_BOT)/2, cz, ry);
+    target.add(b);
+    return b;
+  }
   function buildStraightWall(fg, cx, cz, length, ry, windows){
     var wall = mkBox(length, WH, WT, fg.mat);
     place(wall, cx, WH/2, cz, ry);
     fg.group.add(wall);
+    batterBox(fg.group, cx, cz, length, ry, WT);
     addCrenellations(fg.group, fg.mat, cx, cz, length, ry, WH, WT);
     if (windows) addWindows(fg.group, windowMat, cx, cz, length, ry, WH*0.62, WT, windows);
   }
@@ -139,16 +207,20 @@ function buildBodiam(){
   buildStraightWall(wallN,  (halfGate + nSegLen/2), -OW, nSegLen, 0, [{x:nSegLen*0.25,w:1.5,h:2.6,dy:1.0},{x:-nSegLen*0.15,w:1.3,h:2.2,dy:1.0}]);
 
   // South wall: continuous, postern tower sits proud of it, plus door slot
-  buildStraightWall(wallS, 0, OW, 2*OW, Math.PI, [{x:-9.5,w:2.2,h:3.4,dy:1.4},{x:9.5,w:2.2,h:3.4,dy:1.4}]);
+  // (great-hall windows sit high in the south wall, above the dais end)
+  buildStraightWall(wallS, 0, OW, 2*OW, Math.PI, [
+    {x:-13.0,w:1.5,h:2.6,dy:1.4},{x:4.5,w:1.9,h:3.4,dy:1.4},
+    {x:9.0,w:1.9,h:3.4,dy:1.4},{x:13.5,w:1.9,h:3.4,dy:1.4}
+  ]);
 
   // East wall: has the chapel bulge (built in courtyard section) + windows
   buildStraightWall(wallE, OW, 0, 2*OW, -Math.PI/2, [
-    {x:-8.0,w:1.6,h:3.2,dy:1.2},{x:-3.0,w:1.6,h:3.2,dy:1.2},
-    {x:3.0,w:1.6,h:3.4,dy:1.2},{x:8.0,w:1.8,h:3.6,dy:1.0}
+    {x:-11.0,w:1.4,h:3.0,dy:1.2},{x:-4.5,w:1.4,h:3.0,dy:1.2},
+    {x:4.0,w:1.5,h:3.2,dy:1.2},{x:11.0,w:1.6,h:3.4,dy:1.0}
   ]);
-  // chapel bulge: curtain wall projects 2.7m toward the moat here
+  // chapel bulge: curtain wall projects toward the moat here
   (function(){
-    var bulgeCz = -OW*0.32, bulgeSpan = 6.4, bulgeProj = 2.7;
+    var bulgeCz = -OW*0.32, bulgeSpan = 8.0, bulgeProj = 2.4;
     var bx = OW + bulgeProj/2;
     var b = mkBox(bulgeProj + WT, WH, bulgeSpan, wallE.mat);
     place(b, bx - WT/2, WH/2, bulgeCz, 0);
@@ -168,30 +240,43 @@ function buildBodiam(){
    * round corner towers
    * -------------------------------------------------------------- */
   function buildCornerTower(fg, cx, cz){
-    var shaft = mkCyl(CORNER_R, CORNER_R*1.06, CORNER_H, 16, fg.mat);
+    var shaft = mkCyl(CORNER_R, CORNER_R*1.05, CORNER_H, 20, fg.mat);
     place(shaft, cx, CORNER_H/2, cz);
     fg.group.add(shaft);
-    var plinth = mkCyl(CORNER_R*1.1, CORNER_R*1.22, 1.2, 16, fg.mat);
-    place(plinth, cx, 0.6, cz);
+    // splayed batter running down past the waterline (photo: the towers
+    // visibly widen for the last ~2m before they enter the moat)
+    var plinth = mkCyl(CORNER_R*1.02, CORNER_R*1.13, 1.7 - BATTER_BOT, 20, batterMat);
+    place(plinth, cx, (1.7 + BATTER_BOT)/2, cz);
     fg.group.add(plinth);
-    var n = 14;
+    // corbelled string course carrying the parapet, as on site
+    var corbel = mkCyl(CORNER_R*1.10, CORNER_R*1.02, 0.55, 20, fg.mat);
+    place(corbel, cx, CORNER_H - 0.2, cz);
+    fg.group.add(corbel);
+    // 18 stations round the rim -> 9 merlons: matches the photographed
+    // count far better than the old 7 chunky blocks.
+    var n = 18, rMer = CORNER_R*1.08;
     for (var i=0;i<n;i+=2){
       var a = (i/n)*Math.PI*2;
-      var m = mkBox(CORNER_R*0.32, MER, CORNER_R*0.32, fg.mat);
-      place(m, cx+Math.cos(a)*CORNER_R, CORNER_H+MER/2, cz+Math.sin(a)*CORNER_R, -a);
+      var m = mkBox(rMer*0.42, MER, CORNER_R*0.30, fg.mat);
+      place(m, cx+Math.cos(a)*rMer, CORNER_H+MER/2, cz+Math.sin(a)*rMer, -a);
       fg.group.add(m);
     }
-    // arrow-loop windows, 3 storeys
+    // arrow-loop windows: narrow slits, 3 storeys (real loops are ~0.25m
+    // wide -- the old 0.4x1.6 boxes read as small windows, not loops)
     for (var s=0;s<3;s++){
       for (var k=0;k<4;k++){
         var ang = k*Math.PI/2 + Math.PI/4;
-        var wm = mkBox(0.4, 1.6, 0.5, windowMat);
-        place(wm, cx+Math.cos(ang)*CORNER_R*0.98, 3.2+s*4.6, cz+Math.sin(ang)*CORNER_R*0.98, -ang);
+        var wm = mkBox(0.28, 1.5, 0.5, windowMat);
+        place(wm, cx+Math.cos(ang)*CORNER_R*0.98, 3.6+s*4.9, cz+Math.sin(ang)*CORNER_R*0.98, -ang);
         fg.group.add(wm);
       }
     }
-    var roof = mkCone(CORNER_R*1.18, CORNER_ROOF_H, 16, roofCaps.mat);
-    place(roof, cx, CORNER_H+MER+CORNER_ROOF_H/2, cz);
+    // Low lead-covered cap sitting INSIDE the parapet ring, apex barely
+    // clearing the merlons. The previous build perched a tall cone on
+    // TOP of the crenellations ("witch hat"), which no picture of Bodiam
+    // supports -- its towers read as flat-topped crenellated drums.
+    var roof = mkCone(CORNER_R*0.94, CORNER_ROOF_H, 20, roofCaps.mat);
+    place(roof, cx, CORNER_H + CORNER_ROOF_H/2 - 0.15, cz);
     roofCaps.group.add(roof);
   }
   buildCornerTower(tNE, OW, -OW);
@@ -218,10 +303,13 @@ function buildBodiam(){
     var body = mkBox(w, h, proj, fg.mat);
     place(body, cx, h/2, cz, ry);
     fg.group.add(body);
-    addCrenellations(fg.group, fg.mat, cx, cz, w, ry, h, proj);
-    var roof = mkCone(Math.max(w,proj)*0.72, roofH, 4, roofCaps.mat);
+    batterBox(fg.group, cx, cz, w, ry, proj, 1.4);
+    crenellateRect(fg.group, fg.mat, cx, cz, w, proj, ry, h, {back:false});
+    // same correction as the round towers: the cap sits inside the
+    // parapet, not stacked on top of the merlons
+    var roof = mkCone(Math.min(w,proj)*0.62, roofH, 4, roofCaps.mat);
     roof.rotation.y = Math.PI/4 + ry;
-    place(roof, cx, h+MER+roofH/2, cz);
+    place(roof, cx, h+roofH/2-0.15, cz);
     roofCaps.group.add(roof);
     if (opts.window){
       var win = mkBox(1.6, 2.8, 0.35, windowMat);
@@ -231,12 +319,23 @@ function buildBodiam(){
       fg.group.add(win);
     }
   }
-  // south postern tower: proud of south wall, drawbridge + machicolation implied by a lip
-  buildMidTower(tS, 0, OW+MID_PROJ/2-0.4, Math.PI, {window:{outward:true}});
-  var posternLip = mkBox(MID_W*0.9, 0.5, 0.9, tS.mat);
-  place(posternLip, 0, MID_H+0.2, OW+MID_PROJ-0.3, Math.PI);
+  // South postern tower: this is a second, smaller gatehouse -- on site it
+  // is a tall square tower with its own drawbridge, appreciably bigger
+  // and taller than the two plain mid-wall towers, so it gets its own
+  // dimensions rather than sharing MID_*.
+  var POST_W = 7.0, POST_PROJ = 5.4, POST_H = 17.2;
+  var posternCz = OW + POST_PROJ/2 - 0.6;
+  buildMidTower(tS, 0, posternCz, Math.PI, {window:{outward:true}, w:POST_W, proj:POST_PROJ, h:POST_H, roofH:2.1});
+  var posternLip = mkBox(POST_W*1.06, 0.7, POST_PROJ*1.06, tS.mat);
+  place(posternLip, 0, POST_H-0.55, posternCz, Math.PI);
   tS.group.add(posternLip);
-  registerPick(pickables, 'structure', 0, MID_H/2, OW+MID_PROJ/2-0.4, MID_W*1.5, MID_H, MID_PROJ*2.2,
+  (function posternArch(){
+    // open postern doorway at the foot of the tower, matching the north gate
+    var op = mkBox(2.4, 3.6, 0.5, windowMat);
+    place(op, 0, 1.8, posternCz + POST_PROJ/2 - 0.2, 0);
+    tS.group.add(op);
+  })();
+  registerPick(pickables, 'structure', 0, POST_H/2, posternCz, POST_W*1.4, POST_H, POST_PROJ*1.8,
     'ポスタン塔 Postern Tower', '南壁中央の裏門。跳ね橋と木橋で堀の南岸と結ばれる。');
   // east & west mid towers
   buildMidTower(tE, OW+MID_PROJ/2-0.4, 0, -Math.PI/2, {window:{outward:true}});
@@ -253,18 +352,28 @@ function buildBodiam(){
     var body = mkBox(GATE_W, GATE_H, GATE_PROJ, fg.mat);
     place(body, cx, GATE_H/2, cz, 0);
     fg.group.add(body);
-    // machicolated lip near top (jutting course over the gate)
-    var lip = mkBox(GATE_W*1.08, 0.6, GATE_PROJ*1.1, fg.mat);
-    place(lip, cx, GATE_H-0.5, cz, 0);
+    batterBox(fg.group, cx, cz, GATE_W, 0, GATE_PROJ, 1.6);
+    // corbelled machicolation course carried right round the head of the
+    // tower -- clearly visible in the north-front photograph as a row of
+    // projecting boxes just under the parapet.
+    var lip = mkBox(GATE_W*1.10, 0.7, GATE_PROJ*1.10, fg.mat);
+    place(lip, cx, GATE_H-0.55, cz, 0);
     fg.group.add(lip);
-    addCrenellations(fg.group, fg.mat, cx, cz, GATE_W, 0, GATE_H, GATE_PROJ);
-    var roof = mkCone(GATE_W*0.62, GATE_ROOF_H, 4, roofCaps.mat);
+    for (var mi=-1;mi<=1;mi++){
+      var cb = mkBox(GATE_W*0.20, 1.0, 0.5, fg.mat);
+      place(cb, cx + mi*GATE_W*0.30, GATE_H-1.5, cz-GATE_PROJ*0.55, 0);
+      fg.group.add(cb);
+    }
+    crenellateRect(fg.group, fg.mat, cx, cz, GATE_W, GATE_PROJ, 0, GATE_H, {});
+    var roof = mkCone(GATE_W*0.46, GATE_ROOF_H*0.75, 4, roofCaps.mat);
     roof.rotation.y = Math.PI/4;
-    place(roof, cx, GATE_H+MER+GATE_ROOF_H/2, cz);
+    place(roof, cx, GATE_H+GATE_ROOF_H*0.375-0.15, cz);
     roofCaps.group.add(roof);
-    for (var s=0;s<3;s++){
-      var wm = mkBox(0.5,1.6,0.4, windowMat);
-      place(wm, cx, 3.4+s*4.2, cz-GATE_PROJ/2+0.02, 0);
+    // four storeys of openings up the (much taller) front face: two tall
+    // narrow lights over a pair of loops, as photographed
+    for (var s=0;s<4;s++){
+      var wm = mkBox(0.5, s>=2 ? 2.0 : 1.5, 0.4, windowMat);
+      place(wm, cx, 3.8+s*4.3, cz-GATE_PROJ/2+0.02, 0);
       fg.group.add(wm);
     }
   }
@@ -278,18 +387,79 @@ function buildBodiam(){
   // up into the housing above the passage (was hanging low enough to
   // visually block the walk-through gap between the twin towers -- see
   // life.gates / section 6.5, residents now actually walk this passage).
-  var lintel = mkBox(GATE_GAP+1.2, 1.4, GATE_PROJ*0.9, tG1.mat);
-  place(lintel, 0, GATE_H*0.62, gateCz, 0);
-  tG1.group.add(lintel);
+  // Bodiam's gatehouse is ONE block, not two free-standing towers: above
+  // the entrance arch a solid curtain runs between the twin towers right
+  // up to a shared, machicolated parapet. The previous build left the
+  // whole GATE_GAP open from ground to sky, which is why the gatehouse
+  // read as two thin slabs instead of the castle's dominant mass. The
+  // passage itself (below ARCH_TOP) stays fully open, so residents still
+  // walk through it exactly as before.
+  var ARCH_TOP = 5.8;
+  var SPAN_D = GATE_PROJ*0.40;               // the central bay is SHALLOWER ...
+  var spanCz = gateCz + (GATE_PROJ - SPAN_D)/2;  // ... and set BACK, so the two
+  // towers read as projecting drums with a recessed, shadowed entrance bay
+  // between them -- exactly the massing in the north-front photograph. The
+  // first attempt made the whole front one flush plane, which lost the
+  // gatehouse's depth entirely.
+  (function buildGateFront(){
+    var spanW = GATE_GAP + 1.2;
+    var upper = mkBox(spanW, GATE_H - ARCH_TOP, SPAN_D, tG1.mat);
+    place(upper, 0, (GATE_H + ARCH_TOP)/2, spanCz, 0);
+    tG1.group.add(upper);
+    // machicolated gallery bridging the two towers over the gate: this one
+    // DOES come forward to the tower face, carried on corbels
+    var mach = mkBox(spanW, 1.0, GATE_PROJ*1.02, tG1.mat);
+    place(mach, 0, GATE_H-0.7, gateCz, 0);
+    tG1.group.add(mach);
+    for (var mi=-1;mi<=1;mi++){
+      var cb = mkBox(0.5, 1.2, 0.5, tG1.mat);
+      place(cb, mi*spanW*0.30, GATE_H-1.9, gateCz-GATE_PROJ*0.50, 0);
+      tG1.group.add(cb);
+    }
+    crenellateRect(tG1.group, tG1.mat, 0, gateCz, spanW, GATE_PROJ*1.02, 0, GATE_H, {ends:false});
+    // two lights over the arch (the chamber above the gate passage)
+    [-1,1].forEach(function(s){
+      var w = mkBox(0.7, 1.9, 0.4, windowMat);
+      place(w, s*1.15, ARCH_TOP+3.2, spanCz-SPAN_D/2+0.02, 0);
+      tG1.group.add(w);
+    });
+    // shallow relieving arch under the upper block
+    var arch = mkBox(GATE_GAP+1.6, 0.55, SPAN_D, tG1.mat);
+    place(arch, 0, ARCH_TOP-0.28, spanCz, 0);
+    tG1.group.add(arch);
+  })();
+  // Passage vault + jambs: without these the arch read as a bright green
+  // hole punched in the facade (you saw the sunlit courtyard straight
+  // through it). A dark soffit and dark reveals turn it back into a
+  // tunnel, while leaving the walk-through itself completely clear.
+  (function buildGatePassage(){
+    var passDark = new T.MeshLambertMaterial({ color: 0x6b5c45 });
+    // run the vault the whole way through the north range to the
+    // courtyard, so the view through the arch is a dark tunnel with light
+    // at the far end rather than a bright green rectangle
+    var passZ0 = gateCz - GATE_PROJ/2, passZ1 = -(COURT_HALF - 0.2);
+    var passLen = Math.abs(passZ1 - passZ0), passMid = (passZ0 + passZ1)/2;
+    var vault = mkBox(GATE_GAP+0.3, 0.5, passLen, passDark);
+    place(vault, 0, ARCH_TOP-0.75, passMid, 0);
+    tG1.group.add(vault);
+    [-1,1].forEach(function(s){
+      var jamb = mkBox(0.3, ARCH_TOP-1.0, passLen, passDark);
+      place(jamb, s*(GATE_GAP/2-0.15), (ARCH_TOP-1.0)/2, passMid, 0);
+      tG1.group.add(jamb);
+    });
+    var floorSlab = mkBox(GATE_GAP-0.2, 0.2, passLen, new T.MeshLambertMaterial({color:0x8b7c60}));
+    place(floorSlab, 0, 0.06, passMid, 0);
+    tG1.group.add(floorSlab);
+  })();
   (function buildPortcullis(){
     var pg = new T.Group();
-    var barW = 0.12, gh = GATE_H*0.5, gw = GATE_GAP*0.72;
-    var RAISE = GATE_H - gh - 1.2; // tucks the grid up near the lintel/roof, clear of the passage below
+    var barW = 0.12, gh = 4.4, gw = GATE_GAP*0.80;
+    var RAISE = ARCH_TOP + 0.4; // retracted up into its housing above the arch
     for (var i=-3;i<=3;i++){
-      pg.add(place(mkBox(barW, gh, barW, metalMat), i*(gw/6), gh/2+0.3+RAISE, gateCz+GATE_PROJ*0.32));
+      pg.add(place(mkBox(barW, gh, barW, metalMat), i*(gw/6), gh/2+RAISE, gateCz+GATE_PROJ*0.32));
     }
     for (var j=0;j<4;j++){
-      pg.add(place(mkBox(gw, barW, barW, metalMat), 0, 0.6+j*(gh/3.2)+RAISE, gateCz+GATE_PROJ*0.32));
+      pg.add(place(mkBox(gw, barW, barW, metalMat), 0, 0.3+j*(gh/3.4)+RAISE, gateCz+GATE_PROJ*0.32));
     }
     tG1.group.add(pg);
   })();
@@ -298,11 +468,11 @@ function buildBodiam(){
   // the passage between the twin towers reads as a real walk-through
   // opening, matching the already-open GATE_GAP in wallN (section 1).
   (function buildOpenGateDoors(){
-    var leafH = GATE_H*0.42, leafLen = GATE_GAP*0.46, leafY = GATE_H*0.21;
+    var leafH = ARCH_TOP - 0.7, leafLen = GATE_GAP*0.46, leafY = leafH/2;
     var leafZ = gateCz + GATE_PROJ*0.44;
     [-1,1].forEach(function(side){
       var leaf = mkBox(0.14, leafH, leafLen, woodMat);
-      place(leaf, side*(GATE_GAP/2-0.07), leafY, leafZ - leafLen/2, 0);
+      place(leaf, side*(GATE_GAP/2-0.37), leafY, leafZ - leafLen/2, 0);
       interiorGroup.add(leaf);
     });
   })();
@@ -315,9 +485,12 @@ function buildBodiam(){
    * inside of the curtain wall; only the residual central rectangle is
    * open lawn. The wing floors sit WING_FLOOR_Y above the lawn so the
    * "building footprint" reads clearly even before any walls are drawn. */
-  var ROOM_DEPTH = 7.0;
-  var COURT_HALF = INNER - ROOM_DEPTH;   // half-extent of the central lawn
+  // (ROOM_DEPTH / COURT_HALF are declared with the footprint constants)
   var WING_FLOOR_Y = 0.16;               // top surface of the wing stone floors
+  // Ranges (and therefore their roofs) run right up to the end-cap wall
+  // by each corner tower. At INNER-1.0 the roofs stopped short and the
+  // pale end-cap partitions stuck up over the curtain as bright slabs.
+  var WING_HALF = INNER - 0.3;           // how far a range runs toward each corner tower
 
   var courtyard = mkBox(2*COURT_HALF, 0.32, 2*COURT_HALF, courtGrassMat);
   place(courtyard, 0, -0.16, 0);
@@ -356,18 +529,23 @@ function buildBodiam(){
     return mesh;
   }
 
-  var eaveH = WH - 0.35, ridgeInH = WH - 3.1;
+  // Steeper pitch: at the old WH-3.1 the ranges read as almost flat grey
+  // decks from above once the footprint grew to its true 44m. A ~28
+  // degree mono-pitch, high against the curtain and falling toward the
+  // courtyard, matches the roof creasing still visible on the inner face
+  // of the real curtain wall.
+  var eaveH = WH - 0.35, ridgeInH = WH - 5.0;
   var INNER_N = -INNER, RIDGE_N = -(INNER-ROOM_DEPTH); // north-side coords are negative Z
   var INNER_W = -INNER, RIDGE_W = -(INNER-ROOM_DEPTH); // west-side coords are negative X
-  // South wing roof (Great Hall / pantry / kitchen) -- outer edge at +Z (wall), inner at smaller +Z
-  roofS.group.add(leanToRoof(roofS.mat, 'x', -10.6, 10.6, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
+  // South wing roof (Great Hall / service rooms / kitchen) -- outer edge at +Z (wall), inner at smaller +Z
+  roofS.group.add(leanToRoof(roofS.mat, 'x', -WING_HALF, WING_HALF, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
   // East wing roof (chapel / lord's apartments) -- outer edge at +X (wall), inner at smaller +X
-  roofE.group.add(leanToRoof(roofE.mat, 'z', -10.6, 10.6, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
+  roofE.group.add(leanToRoof(roofE.mat, 'z', -WING_HALF, WING_HALF, INNER, INNER-ROOM_DEPTH, eaveH, ridgeInH));
   // West wing roof (retainers' hall) -- outer edge at -X (wall), inner toward courtyard
-  roofW.group.add(leanToRoof(roofW.mat, 'z', -10.6, 10.6, INNER_W, RIDGE_W, eaveH, ridgeInH));
+  roofW.group.add(leanToRoof(roofW.mat, 'z', -WING_HALF, WING_HALF, INNER_W, RIDGE_W, eaveH, ridgeInH));
   // North wing roof (stores / stable, either side of the gate passage) -- outer edge at -Z
-  roofN.group.add(leanToRoof(roofN.mat, 'x', -10.6, -halfGate+0.4, INNER_N, RIDGE_N, eaveH, ridgeInH));
-  roofN.group.add(leanToRoof(roofN.mat, 'x', halfGate-0.4, 10.6, INNER_N, RIDGE_N, eaveH, ridgeInH));
+  roofN.group.add(leanToRoof(roofN.mat, 'x', -WING_HALF, -halfGate+0.4, INNER_N, RIDGE_N, eaveH, ridgeInH));
+  roofN.group.add(leanToRoof(roofN.mat, 'x', halfGate-0.4, WING_HALF, INNER_N, RIDGE_N, eaveH, ridgeInH));
 
   /* -------------------------------------------------------------- *
    * chimneys (Great Hall, kitchen, lord's chambers, NW tower)
@@ -380,10 +558,12 @@ function buildBodiam(){
     place(cap, x, h+0.15, z);
     (parentGroup||interiorGroup).add(cap);
   }
-  chimney(6.4, INNER-1.5, WH+2.6, roofS.group, roofS.mat);   // great hall
-  chimney(-9.0, INNER-1.2, WH+2.4, roofS.group, roofS.mat);  // kitchen
-  chimney(INNER-1.4, 8.0, WH+2.4, roofE.group, roofE.mat);   // lord's apartments
-  chimney(-OW+2.6, -OW+2.6, CORNER_H+2.6, tNW.group, tNW.mat); // NW tower
+  chimney(9.5, INNER-1.8, WH+2.6, roofS.group, roofS.mat);   // great hall
+  chimney(-12.5, INNER-1.5, WH+2.4, roofS.group, roofS.mat); // kitchen
+  chimney(-15.5, INNER-1.5, WH+2.2, roofS.group, roofS.mat); // kitchen, second hearth
+  chimney(INNER-1.8, 10.5, WH+2.4, roofE.group, roofE.mat);  // lord's apartments
+  chimney(INNER-1.8, 2.0, WH+2.2, roofE.group, roofE.mat);   // solar
+  chimney(-OW+3.0, -OW+3.0, CORNER_H+2.4, tNW.group, tNW.mat); // NW tower
 
   /* -------------------------------------------------------------- *
    * interior partition walls (ruin-height stubs marking room-to-room
@@ -422,83 +602,122 @@ function buildBodiam(){
     registerPick(pickables, 'room', (x0+x1)/2, WING_FLOOR_Y+h/2, (z0+z1)/2, Math.abs(x1-x0), h, Math.abs(z1-z0), name, desc);
   }
 
-  // ---- South wing: Great Hall (east), screens passage, kitchen (west)
-  var hallX0=-0.4, hallX1=10.4, wingZ0=INNER-ROOM_DEPTH, wingZ1=INNER;
+  /* Room divisions are laid out against the published ground plan (see
+   * build notes): with the curtain now at its true ~44m side the ranges
+   * are long enough to carry the plan's real room count, so the south
+   * range gains the buttery/pantry pair and the SE stair block, and the
+   * east range separates the solar from the lord's apartments -- all of
+   * which the old 33m footprint had no room for. */
+  var WEND = INNER - 0.3;   // where a range butts against the corner tower
+
+  // ---- South wing: kitchen (W) - buttery/pantry - screens - Great Hall (E)
+  var wingZ0=INNER-ROOM_DEPTH, wingZ1=INNER;
+  var sZmid = (wingZ0+wingZ1)/2;
   facadeStub(0, COURT_HALF, 2*INNER, 0);                        // courtyard-facing corridor line
-  partitionWall(-INNER+0.3, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // west end-cap (near SW tower)
-  partitionWall( INNER-0.3, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // east end-cap (near SE tower)
-  stub(-2.0, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // divides hall / passage
-  stub(-3.6, (wingZ0+wingZ1)/2, ROOM_DEPTH, Math.PI/2); // divides passage / kitchen
-  var dais = furnitureBox(8.6, 0, (wingZ0+wingZ1)/2, 3.0, 0.4, 5.4, woodMat);
-  furnitureBox(3.4, 0, (wingZ0+wingZ1)/2-0.6, 4.4, 0.7, 1.0, woodMat);
-  furnitureBox(0.6, 0, (wingZ0+wingZ1)/2+0.6, 3.4, 0.7, 0.9, woodMat);
-  var hearthHall = furnitureBox(8.2, 0, wingZ1-0.35, 2.2, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
-  var hearthGlow = new T.PointLight(0xff7a33, 1.1, 6, 2);
-  hearthGlow.position.set(8.2, WING_FLOOR_Y+1.0, wingZ1-0.7);
+  partitionWall(-WEND, sZmid, ROOM_DEPTH, Math.PI/2);  // west end-cap (near SW tower)
+  partitionWall( WEND, sZmid, ROOM_DEPTH, Math.PI/2);  // east end-cap (near SE tower)
+  stub(-8.0, sZmid, ROOM_DEPTH, Math.PI/2);  // kitchen / buttery
+  stub(-5.2, sZmid, ROOM_DEPTH, Math.PI/2);  // buttery / pantry
+  stub(-2.5, sZmid, ROOM_DEPTH, Math.PI/2);  // pantry / screens passage
+  stub( 1.0, sZmid, ROOM_DEPTH, Math.PI/2);  // screens passage / hall
+  stub(14.0, sZmid, ROOM_DEPTH, Math.PI/2);  // hall / SE stair block
+  var dais = furnitureBox(12.4, 0, sZmid, 2.6, 0.4, 6.4, woodMat);
+  furnitureBox(5.0, 0, sZmid-1.1, 6.4, 0.7, 1.0, woodMat);
+  furnitureBox(5.0, 0, sZmid+1.1, 6.4, 0.7, 1.0, woodMat);
+  furnitureBox(9.6, 0, sZmid-1.1, 4.6, 0.7, 1.0, woodMat);
+  furnitureBox(9.6, 0, sZmid+1.1, 4.6, 0.7, 1.0, woodMat);
+  var hearthHall = furnitureBox(7.5, 0, wingZ1-0.35, 2.6, 1.2, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  var hearthGlow = new T.PointLight(0xff7a33, 1.1, 7, 2);
+  hearthGlow.position.set(7.5, WING_FLOOR_Y+1.0, wingZ1-0.8);
   interiorGroup.add(hearthGlow);
-  pickRoom(-2.0, INNER-0.3, wingZ0, wingZ1, 6.0, '大広間 Great Hall',
-    '領主一家が食事した、幅7m・奥行12mの2階分吹き抜けの広間。東端に領主の台座(ディス)があった。');
-  pickRoom(-3.6, -2.0, wingZ0, wingZ1, 4.0, 'スクリーンズパッセージ Screens Passage',
-    '大広間と厨房を仕切る配膳通路。奥にパントリーとバトリーが続く。');
-  furnitureBox(-7.4, 0, wingZ0+0.9, 2.6, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
-  furnitureBox(-7.4, 0, wingZ1-0.9, 2.6, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
-  furnitureBox(-8.0, 0, (wingZ0+wingZ1)/2, 3.2, 0.75, 1.2, woodMat);
-  pickRoom(-INNER+0.3, -3.6, wingZ0, wingZ1, 4.0, '厨房 Kitchen',
+  pickRoom(1.0, 14.0, wingZ0, wingZ1, 6.0, '大広間 Great Hall',
+    '領主一家が食事した、幅約8m・長さ約13mの2階分吹き抜けの広間。東端に領主の台座(ディス)があった。');
+  pickRoom(14.0, WEND, wingZ0, wingZ1, 4.0, '階段室・地下貯蔵 Stair & Undercroft',
+    '南東隅、大広間から領主居室と城壁歩廊へ上がる螺旋階段。下は貯蔵室。');
+  pickRoom(-2.5, 1.0, wingZ0, wingZ1, 4.0, 'スクリーンズパッセージ Screens Passage',
+    '大広間と厨房を仕切る配膳通路。ここから中庭とポスタン門の双方へ抜けられる。');
+  furnitureBox(-3.9, 0, sZmid, 2.2, 0.8, 1.2, woodMat);
+  furnitureBox(-6.6, 0, sZmid, 2.2, 0.8, 1.2, woodMat);
+  pickRoom(-8.0, -2.5, wingZ0, wingZ1, 3.5, 'パントリー・バトリー Pantry & Buttery',
+    'スクリーンズパッセージ奥の配膳室。パンと酒をそれぞれ管理した一対の小部屋。');
+  furnitureBox(-14.0, 0, wingZ0+0.9, 3.0, 1.2, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(-14.0, 0, wingZ1-0.9, 3.0, 1.2, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(-11.5, 0, sZmid, 3.6, 0.8, 1.4, woodMat);
+  furnitureBox(-17.0, 0, sZmid, 3.0, 0.8, 1.4, woodMat);
+  pickRoom(-WEND, -8.0, wingZ0, wingZ1, 4.0, '厨房 Kitchen',
     '南棟西端。南北両壁に大きな炉を備えた調理場。');
 
-  // ---- East wing: chapel (north), lord's/lady's apartments (south)
-  var eWingX0=INNER-ROOM_DEPTH, eWingX1=INNER, eZ0=-10.4, eZ1=10.4;
+  // ---- East wing: chapel (N), lord's apartments, solar / lady's bower (S)
+  var eWingX0=INNER-ROOM_DEPTH, eWingX1=INNER;
+  var eXmid = (eWingX0+eWingX1)/2;
   facadeStub(COURT_HALF, 0, 2*INNER, Math.PI/2);                        // courtyard-facing corridor line
-  partitionWall((eWingX0+eWingX1)/2, -INNER+0.3, ROOM_DEPTH, 0);         // north end-cap (near NE tower)
-  partitionWall((eWingX0+eWingX1)/2,  INNER-0.3, ROOM_DEPTH, 0);         // south end-cap (near SE tower)
-  stub((eWingX0+eWingX1)/2, -0.6, ROOM_DEPTH, 0);
+  partitionWall(eXmid, -WEND, ROOM_DEPTH, 0);         // north end-cap (near NE tower)
+  partitionWall(eXmid,  WEND, ROOM_DEPTH, 0);         // south end-cap (near SE tower)
+  stub(eXmid, -8.5, ROOM_DEPTH, 0);                   // chapel / lord's apartments
+  stub(eXmid,  4.0, ROOM_DEPTH, 0);                   // apartments / solar
   // chapel floor: two-colour Flemish-tile checker (canvas texture, repeat-tiled)
   var chapelCheckerTex = makeCheckerTexture('#8f5a3c', '#ddd0a8', 6);
   var chapelFloorMat = new T.MeshLambertMaterial({ map: chapelCheckerTex });
-  var chapelFloor = mkBox(ROOM_DEPTH-0.6, 0.08, 9.0, chapelFloorMat);
-  place(chapelFloor, (eWingX0+eWingX1)/2, WING_FLOOR_Y+0.04, -5.0);
+  var chapelFloor = mkBox(ROOM_DEPTH-0.6, 0.08, 10.4, chapelFloorMat);
+  place(chapelFloor, eXmid, WING_FLOOR_Y+0.04, -14.0);
   interiorGroup.add(chapelFloor);
-  furnitureBox(eWingX1-0.8, 0, -8.6, 0.9, 1.1, 1.6, new T.MeshLambertMaterial({color:0xd8d0b8}));
-  furnitureBox(eWingX0+1.3, 0, -6.0, 2.2, 0.6, 0.7, woodMat);
-  furnitureBox(eWingX0+1.3, 0, -4.0, 2.2, 0.6, 0.7, woodMat);
-  furnitureBox(eWingX0+1.3, 0, -2.0, 2.2, 0.6, 0.7, woodMat);
-  pickRoom(eWingX0, eWingX1, -INNER+0.3, -0.6, 4.5, '礼拝堂 Chapel',
+  furnitureBox(eWingX1-0.9, 0, -18.2, 1.0, 1.1, 1.8, new T.MeshLambertMaterial({color:0xd8d0b8})); // altar, east end
+  for (var pw=0;pw<4;pw++){
+    furnitureBox(eXmid-1.4, 0, -16.2+pw*2.2, 2.6, 0.6, 0.7, woodMat);   // pews
+  }
+  pickRoom(eWingX0, eWingX1, -WEND, -8.5, 4.5, '礼拝堂 Chapel',
     '東棟北寄り。フランドル風タイルの床。堀側の東壁はここで張り出している。');
-  furnitureBox(eWingX0+1.8, 0, 4.0, 2.6, 0.7, 3.6, woodMat);
-  furnitureBox(eWingX1-0.7, 0, 8.6, 2.0, 1.1, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
-  furnitureBox(eWingX0+0.9, 0, 8.4, 1.0, 0.8, 0.6, new T.MeshLambertMaterial({color:0x3a2a1a}));
-  pickRoom(eWingX0, eWingX1, -0.6, INNER-0.3, 4.5, "領主居室 Lord's / Lady's Apartments",
-    '東棟南寄り。東向きの窓と各階の暖炉を備えた領主一家の私室。');
+  furnitureBox(eXmid-0.6, 0, -3.0, 2.6, 0.7, 4.0, woodMat);             // lord's bed
+  furnitureBox(eWingX1-0.8, 0, -6.4, 2.2, 1.2, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(eWingX0+1.0, 0, 1.6, 1.2, 0.9, 0.7, new T.MeshLambertMaterial({color:0x3a2a1a}));
+  pickRoom(eWingX0, eWingX1, -8.5, 4.0, 4.5, "領主居室 Lord's Apartments",
+    '東棟中央。東向きの窓と各階の暖炉を備えた領主一家の私室。');
+  furnitureBox(eXmid-0.6, 0, 9.0, 2.4, 0.7, 3.4, woodMat);
+  furnitureBox(eWingX1-0.8, 0, 14.5, 2.0, 1.2, 0.5, new T.MeshLambertMaterial({color:0x2a1c14}));
+  furnitureBox(eWingX0+1.0, 0, 16.5, 1.6, 0.8, 1.6, woodMat);
+  pickRoom(eWingX0, eWingX1, 4.0, WEND, 4.5, "私室 Lady's Bower",
+    '東棟南寄り。大広間の上手に接する奥方の私室(ソーラー)。');
 
   // ---- West wing: retainers' hall (blind outer wall, no hearth)
-  var wWingX0=-INNER, wWingX1=-(INNER-ROOM_DEPTH), wZ0=-10.4, wZ1=10.4;
+  var wWingX0=-INNER, wWingX1=-(INNER-ROOM_DEPTH);
+  var wXmid = (wWingX0+wWingX1)/2;
   facadeStub(-COURT_HALF, 0, 2*INNER, Math.PI/2);                       // courtyard-facing corridor line
-  partitionWall((wWingX0+wWingX1)/2, -INNER+0.3, ROOM_DEPTH, 0);        // north end-cap (near NW tower)
-  partitionWall((wWingX0+wWingX1)/2,  INNER-0.3, ROOM_DEPTH, 0);        // south end-cap (near SW tower)
-  partitionWall((wWingX0+wWingX1)/2, 6.3, ROOM_DEPTH, 0);               // divides hall / servants' kitchen
-  furnitureBox((wWingX0+wWingX1)/2, 0, -5.0, 5.0, 0.7, 1.0, woodMat);
-  furnitureBox((wWingX0+wWingX1)/2, 0, 0.0, 5.0, 0.7, 1.0, woodMat);
-  furnitureBox((wWingX0+wWingX1)/2, 0, 5.0, 5.0, 0.7, 1.0, woodMat);
-  pickRoom(wWingX0, wWingX1, -INNER+0.3, 6.3, 4.0, "従者ホール Retainers' Hall",
+  partitionWall(wXmid, -WEND, ROOM_DEPTH, 0);        // north end-cap (near NW tower)
+  partitionWall(wXmid,  WEND, ROOM_DEPTH, 0);        // south end-cap (near SW tower)
+  partitionWall(wXmid, 8.0, ROOM_DEPTH, 0);          // divides hall / servants' kitchen
+  for (var wt=0;wt<5;wt++){
+    furnitureBox(wXmid, 0, -15.0+wt*5.6, 5.6, 0.7, 1.0, woodMat);
+  }
+  pickRoom(wWingX0, wWingX1, -WEND, 8.0, 4.0, "従者ホール Retainers' Hall",
     '西棟。外壁側には窓も暖炉もない、使用人たちの広間。');
-  furnitureBox(wWingX1-1.0, 0, 8.0, 1.6, 0.9, 1.6, woodMat); // small servants' kitchen corner
-  pickRoom(wWingX0, wWingX1, 6.3, INNER-0.3, 3.5, "従者厨房 Servants' Kitchen",
+  furnitureBox(wWingX1-1.2, 0, 12.0, 1.8, 0.9, 1.8, woodMat); // small servants' kitchen corner
+  furnitureBox(wWingX0+1.2, 0, 15.5, 1.4, 1.0, 1.4, woodMat);
+  pickRoom(wWingX0, wWingX1, 8.0, WEND, 3.5, "従者厨房 Servants' Kitchen",
     '従者ホール南端の小さな調理場。');
 
   // ---- North wing: stores (east of gate) & stable (west of gate)
   var nWingZ0=-INNER, nWingZ1=-(INNER-ROOM_DEPTH);
-  facadeStub(0, -COURT_HALF, 2*INNER, 0);                               // courtyard-facing corridor line
-  partitionWall(-INNER+0.3, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2); // west end-cap (near NW tower)
-  partitionWall( INNER-0.3, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2); // east end-cap (near NE tower)
-  partitionWall(0, (nWingZ0+nWingZ1)/2, ROOM_DEPTH, Math.PI/2);          // divides stores / stable, centred on the gate passage
-  for (var b=0;b<3;b++){
-    furnitureBox(3.0+b*2.0, 0, (nWingZ0+nWingZ1)/2, 1.0, 1.2, 1.0, woodMat);
+  var nZmid = (nWingZ0+nWingZ1)/2;
+  // the gate passage runs straight through this range: leave a corridor
+  // the width of the gatehouse arch, walled on both sides (residents in
+  // section 6.5 walk exactly this line, so it must stay clear)
+  var PASS_HALF = GATE_GAP/2 + 0.5;
+  var nFacadeLen = INNER - PASS_HALF;
+  facadeStub(-(PASS_HALF + nFacadeLen/2), -COURT_HALF, nFacadeLen, 0);   // courtyard-facing corridor line, W of the gate
+  facadeStub( (PASS_HALF + nFacadeLen/2), -COURT_HALF, nFacadeLen, 0);   // ... and E of the gate
+  partitionWall(-WEND, nZmid, ROOM_DEPTH, Math.PI/2); // west end-cap (near NW tower)
+  partitionWall( WEND, nZmid, ROOM_DEPTH, Math.PI/2); // east end-cap (near NE tower)
+  partitionWall(-PASS_HALF, nZmid, ROOM_DEPTH, Math.PI/2); // stable side of the gate passage
+  partitionWall( PASS_HALF, nZmid, ROOM_DEPTH, Math.PI/2); // stores side of the gate passage
+  for (var b=0;b<6;b++){
+    furnitureBox(5.6+b*2.4, 0, nZmid, 1.1, 1.3, 1.1, woodMat);
   }
-  pickRoom(0, INNER-0.3, nWingZ0, nWingZ1, 3.5, '倉庫・宿舎 Stores',
+  pickRoom(PASS_HALF, WEND, nWingZ0, nWingZ1, 3.5, '倉庫・宿舎 Stores',
     '北棟東側、ゲートハウスの東隣に位置する倉庫兼宿舎。');
-  furnitureBox(-6.5, 0, (nWingZ0+nWingZ1)/2, 3.4, 0.5, 1.0, new T.MeshLambertMaterial({color:0x4a3a1e}));
-  furnitureBox(-4.0, 0, (nWingZ0+nWingZ1)/2, 0.6, 0.9, 0.6, new T.MeshLambertMaterial({color:0xc8b878}));
-  pickRoom(-INNER+0.3, 0, nWingZ0, nWingZ1, 3.5, '厩舎 Stable',
+  furnitureBox(-8.0, 0, nZmid, 4.0, 0.5, 1.0, new T.MeshLambertMaterial({color:0x4a3a1e}));
+  furnitureBox(-14.0, 0, nZmid, 4.0, 0.5, 1.0, new T.MeshLambertMaterial({color:0x4a3a1e}));
+  furnitureBox(-5.2, 0, nZmid, 0.7, 1.0, 0.7, new T.MeshLambertMaterial({color:0xc8b878}));
+  pickRoom(-WEND, -PASS_HALF, nWingZ0, nWingZ1, 3.5, '厩舎 Stable',
     '北棟西側、ゲートハウスの西隣に位置する厩舎。');
 
   // ---- Well, at the foot of the SW tower (on the south-wing stone floor
@@ -535,8 +754,13 @@ function buildBodiam(){
    * bridges still run from the *top* of the outer bank (still at
    * MOAT_OUTER, GROUND_Y) to the island, just as before; only the water
    * itself, and the ground it's cut into, moved. */
-  var ISLAND_HALF = OW + 3.2;
-  var MOAT_WIDTH = 27;
+  // Bodiam's moat is huge -- in the aerial reference the open water on
+  // each side is very nearly as wide as the castle itself, and the walls
+  // rise almost straight out of it (there is no apron of dry land round
+  // the island, which the old ISLAND_HALF = OW+3.2 produced as a very
+  // visible sandy ledge). Hence: much wider water, much tighter island.
+  var ISLAND_HALF = OW + 0.8;
+  var MOAT_WIDTH = 38;
   var MOAT_OUTER = ISLAND_HALF + MOAT_WIDTH;
   var GROUND_Y = -0.55;
   var WATER_Y = GROUND_Y - 1.0; // 1.0m below the field -- within the 0.8-1.2m spec
@@ -546,7 +770,7 @@ function buildBodiam(){
     groundY: GROUND_Y, waterY: WATER_Y,
     islandHalf: ISLAND_HALF, islandY: 0.02,
     moatOuterHalf: MOAT_OUTER,
-    bankWidthOut: 4.2, bankWidthIn: 3.0,
+    bankWidthOut: 4.5, bankWidthIn: 1.4,
     groundMat: grassMat, islandMat: grassMat2,
     waterColor: WATER_COL,
     bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL
@@ -554,7 +778,7 @@ function buildBodiam(){
   var waterMat = moatSys.waterMat;
 
   // north approach: bank -> timber bridge -> octagon island -> drawbridge -> gatehouse
-  var octR = 3.3, octZ = -(ISLAND_HALF + MOAT_WIDTH*0.42);
+  var octR = 4.0, octZ = -(ISLAND_HALF + MOAT_WIDTH*0.46);
   var oct = new T.Mesh(new T.CircleGeometry(octR, 8), bankMat);
   oct.rotation.x = -Math.PI/2; oct.rotation.y = Math.PI/8;
   place(oct, 0, 0.02, octZ);
@@ -564,6 +788,23 @@ function buildBodiam(){
   var octSkirt = buildCircularSkirt(0, octZ, octR, octR+1.8, 0.02, WATER_Y,
     new T.Color(BANK_COL), new T.Color(BANK_MID_COL), new T.Color(BANK_EDGE_COL));
   group.add(octSkirt);
+
+  /* buildBankRamp (section 0.5) builds its material with
+   *   vertexColors: T.VertexColors
+   * -- a constant that three.js removed in r125, and index.html loads
+   * r128, so it evaluates to `undefined` and vertex colouring silently
+   * stays OFF. The graded turf->silt banks therefore rendered as a flat
+   * near-white ring round the whole moat, which is the single most
+   * obviously wrong thing in a wide shot of Bodiam. Re-enable it here on
+   * the meshes the helper handed back -- these material instances are
+   * created per call, so this is local to this castle and touches no
+   * shared file. (The shared helper should be fixed to pass `true`.) */
+  [moatSys.bankOuter, moatSys.bankInner, octSkirt].forEach(function(m){
+    if (m && m.material && m.material.vertexColors !== true){
+      m.material.vertexColors = true;
+      m.material.needsUpdate = true;
+    }
+  });
 
   var b1z0 = -MOAT_OUTER+1.0, b1z1 = octZ-octR;
   var bridge1 = mkBox(2.6, 0.35, Math.abs(b1z1-b1z0), woodMat);
@@ -575,7 +816,7 @@ function buildBodiam(){
   group.add(bridge2);
 
   // south approach: straight bridge from bank to postern tower
-  var s0 = MOAT_OUTER-1.0, s1 = OW+MID_PROJ-0.4;
+  var s0 = MOAT_OUTER-1.0, s1 = OW+POST_PROJ-0.8;
   var bridgeS = mkBox(3.0, 0.3, Math.abs(s0-s1), woodMat);
   place(bridgeS, 0, -0.02, (s0+s1)/2);
   group.add(bridgeS);
@@ -606,10 +847,13 @@ function buildBodiam(){
   var info = {
     rooms: [
       { name:'大広間 (Great Hall)', desc:'南棟東側。2階分の吹き抜け、東端に領主の台座。' },
-      { name:'スクリーンズパッセージ', desc:'大広間と厨房を隔てる通路、配膳室を兼ねる。' },
+      { name:'スクリーンズパッセージ', desc:'大広間と厨房を隔てる配膳通路。' },
+      { name:'パントリー・バトリー', desc:'配膳通路奥の一対の小部屋。パンと酒を管理。' },
       { name:'厨房 (Kitchen)', desc:'南棟西端。南北両壁に大きな炉。' },
+      { name:'階段室・地下貯蔵', desc:'南東隅。大広間から歩廊へ上がる螺旋階段。' },
       { name:'礼拝堂 (Chapel)', desc:'東棟北寄り。フランドルタイルの床、2階に領主用オラトリー。' },
-      { name:"領主居室 (Lord's/Lady's Apartments)", desc:'東棟南寄り。東向きの窓、各階に暖炉。' },
+      { name:"領主居室 (Lord's Apartments)", desc:'東棟中央。東向きの窓、各階に暖炉。' },
+      { name:"私室 (Lady's Bower)", desc:'東棟南寄り。大広間の上手に接する奥方の私室。' },
       { name:"従者ホール (Retainers' Hall)", desc:'西棟。外壁側は窓なし、暖炉なし。' },
       { name:'倉庫・宿舎', desc:'北棟東側、ゲートハウスの東隣。' },
       { name:'厩舎 (Stable)', desc:'北棟西側、ゲートハウスの西隣。' },
@@ -657,7 +901,12 @@ registerCastle({
   // camera / fog / shadow tuning for this castle's scale (section 5 /
   // section 3 read these via applyCastle). These are exactly the values
   // that were previously hardcoded, so Bodiam's behaviour is unchanged.
-  view: { targetY: 6.0, zMin: 20, zMax: 150, initDist: 105,
-    fogNear: 90, fogFar: 320, shadowExtent: 60, shadowFar: 220,
-    camFar: 1000, panLimit: 40 }
+  // Scaled with the corrected 44m footprint + 38m moat (island+moat is
+  // now ~123m across, was ~93m). The zMin/zMax/initDist triple keeps the
+  // SAME initial reveal value as before -- (zMax-initDist)/(zMax-zMin)
+  // = 0.345 either way -- so the castle still opens in the 外観 state and
+  // the cutaway crosses its thresholds at the same relative zoom.
+  view: { targetY: 6.5, zMin: 26, zMax: 200, initDist: 140,
+    fogNear: 120, fogFar: 430, shadowExtent: 80, shadowFar: 290,
+    camFar: 1300, panLimit: 55 }
 });

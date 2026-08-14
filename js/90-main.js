@@ -85,6 +85,10 @@ function applyCastle(idx){
   // 城切替のたびに前の城の住人を破棄し、この城の `life` データから作り
   // 直す(トグルOFF中は regenerateResidents 内で何もしない)。
   regenerateResidents();
+  // 城切替のたびに自然物(雲・鳥・木・林・湖)も破棄して作り直す。城の
+  // 占有範囲とスケールは 15-nature.js が pickables / group から自動導出
+  // するので、城ファイル側の設定追加は不要。
+  regenerateNature();
 }
 var currentIdx = 0;
 
@@ -202,6 +206,7 @@ function frame(now){
   updateRevealUI(reveal);
   updateLabelVisibility();
   updateResidents(dt);
+  updateNature(dt);
   stepTransitions(dt);
   applyEnvironment();
   updateMountains();
