@@ -317,8 +317,12 @@ function buildVincennes(){
   var tReine = makeFadeGroup('towerReine', {x:0,z:1}, false, STONE_WALL_V);
   var roofCaps = makeFadeGroup('roofCaps', null, true, ROOF_COL); // outer-tier tower roofs
 
-  // west wall gap (donjon + chemise bulge through here -- see section below)
-  var W_GAP0 = 10, W_GAP1 = 90;
+  // west wall gap (donjon + chemise bulge through here -- see section below).
+  // Widened from 10..90 to 3..97 because the donjon's ditch is now the real
+  // 18m-wide, 7m-deep fossé sec instead of a 7m ribbon: the complex it
+  // encloses is 91.6m across, so the old gap left two curtain stubs standing
+  // in mid-air over the new ditch's north and south arms.
+  var W_GAP0 = 3, W_GAP1 = 97;
   // north/south walls: split either side of the gate tower's own footprint
   // (GATE_W / GATE2_W) rather than one continuous box -- the gate tower
   // below now carves a real through-opening (see buildTower's opts.gate
@@ -936,42 +940,198 @@ function buildVincennes(){
   registerPick(pickables, 'structure', DCX, CHEM_H*0.5, DCZ-CHEM_HALF, CHEM_HALF*2, CHEM_H, 2,
     'シェミーズ Chemise Wall', '高さ13mでドンジョンを囲む方形の防壁。隅の物見(バルティザン)と専用の堀を伴い、大塔だけの独立した防御線を成す。');
 
-  // buildWaterMoatSystem builds its ShapeGeometry pieces centred on local
-  // (0,0) and only ever sets their Y position -- so it needs its own
-  // child group, positioned at the donjon's centre, rather than being
-  // added straight into `group` (which would leave it sitting at world
-  // origin instead of around the donjon).
-  var donjonMoatGroup = new T.Group();
-  donjonMoatGroup.position.set(DCX, 0, DCZ);
-  group.add(donjonMoatGroup);
-  var donjonMoat = buildWaterMoatSystem({
-    group: donjonMoatGroup,
-    groundY: 0.04, waterY: 0.04 - 1.3,
-    islandHalf: CHEM_HALF, islandY: 0.06,
-    moatOuterHalf: CHEM_HALF + 7,
-    bankWidthOut: 2.2, bankWidthIn: 1.6,
-    // buildWaterMoatSystem's collar is forced out to moatOuterHalf+30m, so
-    // this system paints a 122m square of ground around the keep. Painting
-    // it in the bailey's own grass makes that square disappear inside the
-    // walls instead of reading as a bright rectangle on the lawn; only the
-    // part outside the west curtain still shows, where it correctly reads
-    // as the raised terrace the donjon complex stands on.
-    groundMat: grassMat2, islandMat: courtGrassMat,
-    waterColor: WATER_COL,
-    bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL,
-    groundSize: 96, groundSegs: 24
-  });
-  registerPick(pickables, 'structure', DCX, 0.0, DCZ-CHEM_HALF-4, 6, 1.5, CHEM_HALF*2+8,
-    'ドンジョンの堀 Donjon Moat', '主郭の堀とは別に、シェミーズ壁を囲んで大塔単独を守る専用の堀。西壁の外側へ張り出す。');
+  /* ================================================================== *
+   * ドンジョンの堀 -- le fossé sec du donjon
+   * ------------------------------------------------------------------
+   * REBUILT FROM PHOTOGRAPHS. The previous version called the shared
+   * buildWaterMoatSystem() helper, which is the *Bodiam* idiom: an open
+   * WATER surface with smoothly graded EARTH banks on both sides. Every
+   * reference below shows that Vincennes' keep ditch is the exact
+   * opposite kind of object, and at a completely different scale:
+   *
+   *   [1] commons.wikimedia.org/wiki/File:Donjon_Château_Vincennes_-_
+   *       Vincennes_(FR94)_-_2020-10-04_-_2.jpg
+   *       The decisive shot. A DRY ditch with a flat GRASS floor, walled
+   *       on BOTH sides by vertical ashlar: a counterscarp on the outside
+   *       finished with a flat stone coping level with the bailey, and a
+   *       scarp on the inside which is simply the chemise wall carried on
+   *       down -- the wall does not stand on the ground, it stands on the
+   *       ditch FLOOR, roughly a further storey and a half below grade.
+   *   [2] commons.wikimedia.org/wiki/File:Château_de_Vincennes_le_21_
+   *       avril_2015_-_07.jpg
+   *       Shot from inside the ditch looking up: bare stone/earth floor
+   *       (no water anywhere), a row of tall narrow archères raking the
+   *       ditch floor along the foot of the chemise, and a small arched
+   *       postern opening straight onto the ditch bottom.
+   *   [3] commons.wikimedia.org/wiki/File:Donjon_du_château_de_Vincennes,
+   *       _vu_de_sous_le_pont_du_châtelet.jpg
+   *       From under the châtelet bridge -- the bridge is carried across
+   *       the ditch on masonry piers standing on the floor, not laid flat
+   *       on a bank.
+   *   [4] commons.wikimedia.org/wiki/File:Bastiments_v1_(Gregg_1972_p29)_
+   *       -_Vincennes_general_plan.jpg  (Du Cerceau's plan)
+   *       The ditch is drawn as a WIDE uniform band all four sides of the
+   *       chemise -- the whole donjon complex reads about twice the
+   *       chemise's own width, i.e. the ditch is of the order of 20m, not
+   *       the 7m ribbon modelled before. Crossings are on the E-W axis,
+   *       each carried on a pair of piers standing in the ditch.
+   *
+   * So the four things that were wrong, and what replaces them:
+   *   water  -> dry (no water plane, no waterMat, no ducks in it)
+   *   earth banks (smoothstep slopes) -> vertical ashlar revetments
+   *   7m wide, 3.2m of it open  -> 20m wide, ~18.6m of it open floor
+   *   1.3m deep -> 7m deep, and the chemise now stands on the floor
+   * ================================================================== */
+  var DITCH_W     = 18.0;                 // scarp face to counterscarp face
+  var DITCH_D     = 7.0;                  // grade to ditch floor
+  var TERR_Y      = 0.04;                 // the terrace the complex stands on
+  var DITCH_FLR   = TERR_Y - DITCH_D;     // ditch floor level
+  var SCARP_T     = 2.8;                  // scarp thickness (proud of the 1.4m chemise above)
+  var DITCH_IN    = CHEM_HALF + SCARP_T/2;      // 25.4 -- scarp outer face
+  var DITCH_OUT   = DITCH_IN + DITCH_W;         // 43.4 -- counterscarp inner face
+  var CSCARP_T    = 2.4;                  // counterscarp thickness
+  var CPLX_HALF   = DITCH_OUT + CSCARP_T;       // 45.8 -- outside face of the counterscarp
+  var TERR_HALF   = CPLX_HALF + 6;              // terrace plate half-extent
+  /* The whole complex therefore occupies x -140.8..-49.2 / z 4.2..95.8. That
+   * square lands squarely on top of the main enceinte moat, whose water sits
+   * at y=-2.6 and whose ground collar sits at y=-1.2 -- both well ABOVE a
+   * 7m-deep ditch floor, so without intervention the main moat's own planes
+   * simply fill the new ditch in (which is exactly what the first attempt
+   * rendered: grass right up to the chemise). Du Cerceau's plan shows the
+   * main ditch detouring AROUND the keep complex, so the main moat system is
+   * given this rectangle as a keepout -- see DONJON_KEEPOUT below. */
+  var DONJON_KEEPOUT = { minX: DCX-CPLX_HALF, maxX: DCX+CPLX_HALF,
+                         minZ: DCZ-CPLX_HALF, maxZ: DCZ+CPLX_HALF };
 
+  /* Colours are chosen for how they land AFTER lighting: a daylit
+   * horizontal up-face picks up about x1.95, so anything that reads as a
+   * top surface has to stay near 120/channel or it blows out. The sunken
+   * revetments are near-vertical so they keep the chemise's own limestone
+   * family, only greyed a little to separate "wall standing in a ditch"
+   * from "wall in the sun"; the coping and the ditch floor are up-faces
+   * and are picked well down accordingly. */
+  var ditchStoneMat = new T.MeshLambertMaterial({ color: 0xb6ac92 }); // 堀の石積み(垂直面)
+  var ditchCopeMat  = new T.MeshLambertMaterial({ color: 0x6d6659 }); // 逆壁の天端石(上向き面 x1.95 -> 214,199,173)
+  var ditchFloorMat = new T.MeshLambertMaterial({ color: 0x4a6438 }); // 堀底の草(上向き面 x1.95 -> 144,195,109)
+
+  (function buildDonjonDryDitch(){
+    /* -- 1. terrace plate: the flat apron the whole complex stands on,
+     *      with a square hole punched for the ditch. Same material and
+     *      level as before, so nothing downstream sees a change; only the
+     *      hole is now the full 90.8m ditch square instead of a 62m one. */
+    var terrShape = new T.Shape();
+    terrShape.moveTo(-TERR_HALF,-TERR_HALF); terrShape.lineTo(TERR_HALF,-TERR_HALF);
+    terrShape.lineTo(TERR_HALF,TERR_HALF); terrShape.lineTo(-TERR_HALF,TERR_HALF); terrShape.closePath();
+    var terrHole = new T.Path();
+    var TH = CPLX_HALF;
+    terrHole.moveTo(-TH,-TH); terrHole.lineTo(-TH,TH); terrHole.lineTo(TH,TH); terrHole.lineTo(TH,-TH); terrHole.closePath();
+    terrShape.holes.push(terrHole);
+    var terrGeo = new T.ShapeGeometry(terrShape);
+    terrGeo.rotateX(-Math.PI/2);
+    var terr = new T.Mesh(terrGeo, grassMat2);
+    terr.position.set(DCX, TERR_Y, DCZ); terr.receiveShadow = true;
+    group.add(terr);
+    // the terrace stands proud of the field west of the curtain and the main
+    // moat is cut away beneath it, so face its rim with a revetment deep
+    // enough to reach below the main moat's water line -- otherwise a
+    // ground-level camera outside the west wall looks under the single-sided
+    // plate and sees straight into the void.
+    // Tucked just INSIDE and just BELOW the plate's edge on purpose: a rim
+    // sitting proud of it shows its own up-face, and an up-face in this stone
+    // takes the x1.95 daylight multiplier straight to ~(222,211,178), which
+    // renders as a hard white outline drawn round the whole keep.
+    [[0,-1],[0,1],[-1,0],[1,0]].forEach(function(d){
+      var horiz = d[0] === 0;
+      var rimH = 4.2, rimT = 1.6;
+      var rim = mkBox(horiz ? TERR_HALF*2 : rimT, rimH, horiz ? rimT : TERR_HALF*2, ditchStoneMat);
+      place(rim, DCX + d[0]*(TERR_HALF-rimT/2), TERR_Y - 0.06 - rimH/2, DCZ + d[1]*(TERR_HALF-rimT/2));
+      group.add(rim);
+    });
+
+    /* -- 2. ditch floor: flat grass pan across the whole ditch square.
+     *      The middle of it is sealed off by the scarp ring below, so it
+     *      only ever shows as the 18.6m walk around the chemise. */
+    var flrGeo = new T.PlaneGeometry(DITCH_OUT*2, DITCH_OUT*2);
+    flrGeo.rotateX(-Math.PI/2);
+    var flr = new T.Mesh(flrGeo, ditchFloorMat);
+    flr.position.set(DCX, DITCH_FLR, DCZ); flr.receiveShadow = true;
+    group.add(flr);
+
+    /* -- 3. counterscarp: vertical ashlar ring at the outer edge, from the
+     *      floor up to grade, finished with the flat coping course that
+     *      reads as the hard lip of the ditch in [1]. */
+    [[0,-1],[0,1],[-1,0],[1,0]].forEach(function(d){
+      var horiz = d[0] === 0;
+      var len = (DITCH_OUT + CSCARP_T)*2;
+      var cx = DCX + d[0]*(DITCH_OUT + CSCARP_T/2);
+      var cz = DCZ + d[1]*(DITCH_OUT + CSCARP_T/2);
+      var w = mkBox(horiz ? len : CSCARP_T, DITCH_D, horiz ? CSCARP_T : len, ditchStoneMat);
+      place(w, cx, DITCH_FLR + DITCH_D/2, cz);
+      group.add(w);
+      var cope = mkBox(horiz ? len : CSCARP_T+1.0, 0.45, horiz ? CSCARP_T+1.0 : len, ditchCopeMat);
+      place(cope, cx, TERR_Y + 0.22, cz);
+      group.add(cope);
+    });
+
+    /* -- 4. scarp: the chemise carried down to the ditch floor. Slightly
+     *      thicker than the 1.4m wall above so it reads as the battered
+     *      base course the photographs show, with the raking archères of
+     *      [2] near its head and a postern onto the floor under the
+     *      châtelet. */
+    [[0,-1],[0,1],[-1,0],[1,0]].forEach(function(d){
+      var horiz = d[0] === 0;
+      var len = CHEM_HALF*2 + SCARP_T;
+      var cx = DCX + d[0]*CHEM_HALF, cz = DCZ + d[1]*CHEM_HALF;
+      var w = mkBox(horiz ? len : SCARP_T, DITCH_D + 0.1, horiz ? SCARP_T : len, ditchStoneMat);
+      place(w, cx, DITCH_FLR + (DITCH_D + 0.1)/2, cz);
+      group.add(w);
+      // archères raking the ditch floor, set just under the lip
+      for (var s=-3; s<=3; s++){
+        var ox = horiz ? s*6.4 : 0, oz = horiz ? 0 : s*6.4;
+        var sl = mkBox(horiz ? 0.55 : 0.3, 2.1, horiz ? 0.3 : 0.55, windowMat);
+        place(sl, cx + ox + d[0]*(SCARP_T/2), DITCH_FLR + DITCH_D - 2.0, cz + oz + d[1]*(SCARP_T/2));
+        group.add(sl);
+      }
+      // postern at floor level on the bailey (east) face only
+      if (d[0] === 1){
+        var post = mkBox(0.34, 2.4, 1.8, windowMat);
+        place(post, cx + SCARP_T/2, DITCH_FLR + 1.2, cz);
+        group.add(post);
+      }
+    });
+
+    /* -- 5. chemise courtyard floor, previously the moat helper's island. */
+    var isGeo = new T.PlaneGeometry(CHEM_HALF*2, CHEM_HALF*2);
+    isGeo.rotateX(-Math.PI/2);
+    var isl = new T.Mesh(isGeo, courtGrassMat);
+    isl.position.set(DCX, 0.06, DCZ); isl.receiveShadow = true;
+    group.add(isl);
+  })();
+
+  registerPick(pickables, 'structure', DCX, DITCH_FLR + 2.0, DCZ - (DITCH_IN+DITCH_OUT)/2,
+    CHEM_HALF*2, 4.0, DITCH_W*0.85,
+    'ドンジョンの堀 Donjon Moat (fossé sec)',
+    '主郭の水堀とは別に、シェミーズ壁を囲んで大塔単独を守る専用の堀。幅約20m・深さ約7mの「乾堀」で、両側とも切石積みの垂直な壁。シェミーズは地面ではなく堀底から立ち上がり、その足元には堀底を薙ぎ払う矢狭間と通用門が開く。');
+
+  /* crossings: a plank deck carried on two masonry piers standing on the
+   * ditch floor, per [3]/[4] -- a flat plank laid across a 20m void would
+   * read as a bug. */
   function bridgeAcrossMoat(axis, fixedCoord, outerCoord, innerCoord, w){
     var len = Math.abs(outerCoord-innerCoord), mid = (outerCoord+innerCoord)/2;
-    var br = axis==='z' ? mkBox(w, 0.3, len, woodMat) : mkBox(len, 0.3, w, woodMat);
-    if (axis==='z') place(br, fixedCoord, 0.05, mid); else place(br, mid, 0.05, fixedCoord);
+    var br = axis==='z' ? mkBox(w, 0.35, len, woodMat) : mkBox(len, 0.35, w, woodMat);
+    if (axis==='z') place(br, fixedCoord, TERR_Y+0.18, mid); else place(br, mid, TERR_Y+0.18, fixedCoord);
     group.add(br);
+    [1/3, 2/3].forEach(function(t){
+      var c = outerCoord + (innerCoord-outerCoord)*t;
+      var pierH = DITCH_D - 0.1;
+      var pier = mkBox(w*0.8, pierH, w*0.8, ditchStoneMat);
+      if (axis==='z') place(pier, fixedCoord, DITCH_FLR + pierH/2, c);
+      else place(pier, c, DITCH_FLR + pierH/2, fixedCoord);
+      group.add(pier);
+    });
   }
-  bridgeAcrossMoat('z', DCX, DCZ-(CHEM_HALF+7)+1.0, DCZ-CHEM_HALF-0.5, 3.0); // north drawbridge (main approach)
-  bridgeAcrossMoat('x', DCZ, DCX+(CHEM_HALF+7)-1.0, DCX+CHEM_HALF+0.5, 2.6); // east drawbridge (secondary)
+  bridgeAcrossMoat('z', DCX, DCZ-DITCH_OUT, DCZ-DITCH_IN, 3.0); // north crossing
+  bridgeAcrossMoat('x', DCZ, DCX+DITCH_OUT, DCX+DITCH_IN, 3.4); // east crossing, out of the chatelet
 
   // raised entrance: the real door sits at first-floor "terrace" level,
   // not grade, reached by a short timber stair from the chemise courtyard
@@ -1242,11 +1402,35 @@ function buildVincennes(){
     ground.position.y = groundY;
     g.add(ground);
 
+    /* opts.keepout = {minX,maxX,minZ,maxZ}: a rectangle on the WEST side that
+     * this moat must not enter, because the donjon complex physically stands
+     * there (its ditch floor is 7m down, i.e. below every plane this system
+     * would otherwise lay across it). Du Cerceau's plan shows the main ditch
+     * detouring around the keep exactly like this. The keepout is assumed to
+     * open through the west edge of the bailey island and to sit clear of all
+     * four corners, which is what makes the notched polygons below simple.
+     *
+     * CAREFUL with the sign: every Shape here is authored in XY and then put
+     * flat with geometry.rotateX(-PI/2), which maps shape-Y to world MINUS Z.
+     * Every existing outline is symmetric in Y so it never mattered, but a
+     * one-sided notch written with raw world Z comes out mirrored to the far
+     * side of the castle. Hence kz0/kz1 below, in shape-Y, not world Z. */
+    var ko = opts.keepout || null;
+    var kz0 = ko ? -ko.maxZ : 0, kz1 = ko ? -ko.minZ : 0;   // shape-Y span of the keepout
+
     var collarShape = new T.Shape();
     collarShape.moveTo(-cutHalf,-cutHalf); collarShape.lineTo(cutHalf,-cutHalf);
     collarShape.lineTo(cutHalf,cutHalf); collarShape.lineTo(-cutHalf,cutHalf); collarShape.closePath();
     var collarHole = new T.Path();
-    collarHole.moveTo(-moatOHX,-moatOHZ); collarHole.lineTo(-moatOHX,moatOHZ);
+    collarHole.moveTo(-moatOHX,-moatOHZ);
+    if (ko){
+      // walk the hole's west edge upward in shape-Y, bulging out around the keep
+      collarHole.lineTo(-moatOHX, kz0);
+      collarHole.lineTo(ko.minX,  kz0);
+      collarHole.lineTo(ko.minX,  kz1);
+      collarHole.lineTo(-moatOHX, kz1);
+    }
+    collarHole.lineTo(-moatOHX,moatOHZ);
     collarHole.lineTo(moatOHX,moatOHZ); collarHole.lineTo(moatOHX,-moatOHZ); collarHole.closePath();
     collarShape.holes.push(collarHole);
     var collarGeo = new T.ShapeGeometry(collarShape);
@@ -1257,7 +1441,15 @@ function buildVincennes(){
 
     var islandShape = new T.Shape();
     islandShape.moveTo(-bailHX,-bailHZ); islandShape.lineTo(bailHX,-bailHZ);
-    islandShape.lineTo(bailHX,bailHZ); islandShape.lineTo(-bailHX,bailHZ); islandShape.closePath();
+    islandShape.lineTo(bailHX,bailHZ); islandShape.lineTo(-bailHX,bailHZ);
+    if (ko){
+      // same notch bitten out of the bailey lawn's west edge (shape-Y again)
+      islandShape.lineTo(-bailHX, kz1);
+      islandShape.lineTo(ko.maxX, kz1);
+      islandShape.lineTo(ko.maxX, kz0);
+      islandShape.lineTo(-bailHX, kz0);
+    }
+    islandShape.closePath();
     var islandGeo = new T.ShapeGeometry(islandShape);
     islandGeo.rotateX(-Math.PI/2);
     var island = new T.Mesh(islandGeo, opts.islandMat);
@@ -1268,23 +1460,56 @@ function buildVincennes(){
     var colMid = new T.Color(opts.bankColorMid!=null?opts.bankColorMid:0x6e5c3e);
     var colEdge = new T.Color(opts.bankColorEdge!=null?opts.bankColorEdge:0x332818);
 
-    var bankOuter = buildBankRamp('rect', moatOHX, waterHX, groundY, waterY, colTop, colMid, colEdge, 64, 6, moatOHZ, waterHZ);
+    /* The two graded banks are continuous rings, so instead of reshaping them
+     * their triangles are simply dropped where they enter the keepout. Any
+     * triangle with a vertex inside goes, which over-cuts by at most one ring
+     * segment -- hence the segment count is raised from 64 to 256 (≈4.7m a
+     * segment) so the over-cut stays comfortably under the donjon terrace
+     * plate that covers it. */
+    function cutByKeepout(mesh){
+      if (!ko) return mesh;
+      var geo = mesh.geometry, pos = geo.attributes.position, idx = geo.index.array, keep = [], i, k;
+      for (i=0;i<idx.length;i+=3){
+        var hit = false;
+        for (k=0;k<3 && !hit;k++){
+          var v = idx[i+k], x = pos.getX(v), z = pos.getZ(v);
+          if (x > ko.minX && x < ko.maxX && z > ko.minZ && z < ko.maxZ) hit = true;
+        }
+        if (!hit) keep.push(idx[i], idx[i+1], idx[i+2]);
+      }
+      geo.setIndex(keep);
+      return mesh;
+    }
+    var rampSegs = ko ? 256 : 64;
+    var bankOuter = cutByKeepout(buildBankRamp('rect', moatOHX, waterHX, groundY, waterY, colTop, colMid, colEdge, rampSegs, 6, moatOHZ, waterHZ));
     g.add(bankOuter);
-    var bankInner = buildBankRamp('rect', bailHX, waterInHX, islandY, waterY, colTop, colMid, colEdge, 64, 6, bailHZ, waterInHZ);
+    var bankInner = cutByKeepout(buildBankRamp('rect', bailHX, waterInHX, islandY, waterY, colTop, colMid, colEdge, rampSegs, 6, bailHZ, waterInHZ));
     g.add(bankInner);
 
-    var moatShape = new T.Shape();
-    moatShape.moveTo(-waterHX,-waterHZ); moatShape.lineTo(waterHX,-waterHZ);
-    moatShape.lineTo(waterHX,waterHZ); moatShape.lineTo(-waterHX,waterHZ); moatShape.closePath();
-    var hole = new T.Path();
-    hole.moveTo(-waterInHX,-waterInHZ); hole.lineTo(-waterInHX,waterInHZ);
-    hole.lineTo(waterInHX,waterInHZ); hole.lineTo(waterInHX,-waterInHZ); hole.closePath();
-    moatShape.holes.push(hole);
-    var moatGeo = new T.ShapeGeometry(moatShape);
-    moatGeo.rotateX(-Math.PI/2);
+    /* Open water. Laid as four side slabs rather than one ShapeGeometry
+     * annulus (they tile the annulus exactly) so the west slab can simply be
+     * split in two around the keepout without asking earcut to resolve two
+     * overlapping holes. */
     var waterMat = new T.MeshPhongMaterial({ color: opts.waterColor||0x2e5b66,
       transparent:true, opacity:opts.waterOpacity!=null?opts.waterOpacity:0.82, shininess:90, specular:0x9fd4e0 });
-    var moatWater = new T.Mesh(moatGeo, waterMat);
+    var moatWater = new T.Group();
+    function waterSlab(x0,x1,z0,z1){
+      if (x1-x0 < 0.01 || z1-z0 < 0.01) return;
+      var wg = new T.PlaneGeometry(x1-x0, z1-z0);
+      wg.rotateX(-Math.PI/2);
+      var wm = new T.Mesh(wg, waterMat);
+      wm.position.set((x0+x1)/2, 0, (z0+z1)/2);
+      moatWater.add(wm);
+    }
+    waterSlab(-waterHX, waterHX, -waterHZ, -waterInHZ);   // north
+    waterSlab(-waterHX, waterHX,  waterInHZ, waterHZ);    // south
+    waterSlab( waterInHX, waterHX, -waterInHZ, waterInHZ);// east
+    if (ko){
+      waterSlab(-waterHX, -waterInHX, -waterInHZ, ko.minZ);
+      waterSlab(-waterHX, -waterInHX,  ko.maxZ,   waterInHZ);
+    } else {
+      waterSlab(-waterHX, -waterInHX, -waterInHZ, waterInHZ);
+    }
     moatWater.position.y = waterY;
     g.add(moatWater);
 
@@ -1303,6 +1528,7 @@ function buildVincennes(){
     bailHalfX: BAIL_HX, bailHalfZ: BAIL_HZ, islandY: 0.02,
     moatOuterHalfX: MOAT_OHX, moatOuterHalfZ: MOAT_OHZ,
     bankWidthOut: 5.5, bankWidthIn: 3.5,
+    keepout: DONJON_KEEPOUT,
     groundMat: grassMat, islandMat: grassMat2,
     waterColor: WATER_COL,
     bankColorTop: BANK_COL, bankColorMid: BANK_MID_COL, bankColorEdge: BANK_EDGE_COL,
@@ -1996,13 +2222,9 @@ function buildVincennes(){
       });
       registerPick(pickables, 'structure', midX, WATER_Y + 0.6, -30, 8.0, 1.6, 60,
         '白鳥 Swans', '堀に浮かぶ白鳥。王家の水鳥として保護され、祝宴の一皿にもなった。堀では家鴨も飼われた。');
-      // ドンジョンの堀(シェミーズを巡る内堀。水面は島半径 25.6〜28.8 の帯)。
-      // 西側は主郭の島の外へ出てしまうので、外郭の内側に収まる北・東・南の
-      // 3辺だけに置く。
-      var dwy = 0.04 - 1.3 + 0.02, dmid = CHEM_HALF + 3.2;
-      swimmer(group, DCX + 12, dwy, DCZ - dmid, 1.6, DUCK);
-      swimmer(group, DCX + dmid, dwy, DCZ + 6.0, -1.9, DUCK);
-      swimmer(group, DCX + 8, dwy, DCZ + dmid, 0.7, DUCK);
+      // ドンジョンの堀には水鳥を置かない。実物は水堀ではなく乾堀(fossé
+      // sec)で、切石積みの垂直な壁に囲まれた草地の堀底なので、泳ぐ鳥が
+      // 浮く水面がそもそも存在しない(上の「ドンジョンの堀」節を参照)。
     })();
 
     /* ================================================================
@@ -2055,24 +2277,28 @@ function buildVincennes(){
     // 中庭に王の庭園・菜園・果樹園・農作業場(四隅、x=±34..76 / z=∓104..∓150)
     // と城壁沿いの並木(x=±83.5)を入れたので、住人が植栽に埋まらないよう
     // 区画をその外側へ引き直した。南北の門へは中央の参道(|x|<=30)が通る。
+    // ドンジョンの堀を実物どおりの幅20m・深さ7mの乾堀に作り直したので、
+    // 堀の外縁(逆壁の外面)は x -140..-50 / z 5..95 まで広がった。住人が
+    // 7m下の堀底へ落ちないよう、西側に掛かる区画と巡回路をすべてその外へ
+    // 引き直す(旧値は x -58 / -60 で、いまや堀の中)。
     courtyard: [
-      { minX:-78, maxX:78,  minZ:-100, maxZ:8 },   // 北の主要広場(四隅の庭より内側)
+      { minX:-78, maxX:78,  minZ:-100, maxZ:2 },   // 北の主要広場(四隅の庭より内側、堀の北縁 z=5 の手前で止める)
       { minX:-30, maxX:30,  minZ:-158, maxZ:-100 },// 北門(村の塔門)へ続く中央参道
-      { minX:-78, maxX:78,  minZ:92,   maxZ:100 }, // 南側の帯
+      { minX:-46, maxX:78,  minZ:92,   maxZ:100 }, // 南側の帯(堀の東縁 x=-50 より東だけ)
       { minX:-30, maxX:30,  minZ:100,  maxZ:158 }, // 南門(木の門塔)へ続く中央参道
-      { minX:-58, maxX:-6,  minZ:8,    maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
+      { minX:-46, maxX:-6,  minZ:8,    maxZ:92 },  // ドンジョン(シェミーズ)と礼拝堂の間の帯
       { minX:56,  maxX:78,  minZ:8,    maxZ:92 },  // 礼拝堂と東城壁の間の帯
       { minX:-6,  maxX:56,  minZ:44,   maxZ:92 }   // 礼拝堂南側の前庭(生垣の南)
     ],
     patrol: [
-      [80,0,-158], [80,0,158], [-80,0,158], [-80,0,90],
-      [-60,0,90], [-60,0,10], [-80,0,10], [-80,0,-158]
+      [80,0,-158], [80,0,158], [-80,0,158], [-80,0,100],
+      [-46,0,100], [-46,0,0], [-80,0,0], [-80,0,-158]
     ],
     population: { farmers: 24, guards: 6 }
   };
 
   return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
-    pickables: pickables, windowMat: windowMat, waterMats: [waterMat, donjonMoat.waterMat], labelGroup: labelGroup, life: life };
+    pickables: pickables, windowMat: windowMat, waterMats: [waterMat], labelGroup: labelGroup, life: life };
 }
 
 registerCastle({
