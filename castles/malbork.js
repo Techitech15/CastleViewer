@@ -632,6 +632,140 @@ function buildMalborkPlan(){
     registerPick(pickables, 'room', (x0+x1)/2, h/2, (z0+z1)/2, Math.abs(x1-x0), h, Math.abs(z1-z0), name, desc);
   }
 
+  /* --------------------------------------------------------------
+   * BOX SOUP -- accumulate any number of axis-aligned boxes into ONE
+   * BufferGeometry / ONE draw call.
+   *
+   * Why this exists: this castle is by far the heaviest in the viewer
+   * (5.5k draw calls before this pass) and the single worst offender is
+   * per-merlon geometry -- mpAddCrenellations emits one Mesh per merlon,
+   * so a 270m curtain alone costs ~110 draw calls. The new river-terrace
+   * walls, the outer enceinte and the Vorburg garden beds together would
+   * have added another ~600 that way. Welded into one geometry each they
+   * cost one apiece, which is what buys the budget for the terraces and
+   * the widened Nogat without making an already-heavy castle heavier.
+   *
+   * Faces are wound CCW-from-outside and normals are written explicitly
+   * (no computeVertexNormals pass), so a welded run lights identically to
+   * the individual mkBox() meshes it replaces.
+   * -------------------------------------------------------------- */
+  function mpBoxSoup(){
+    var pos = [], nor = [], idx = [], base = 0;
+    var NRM = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+    return {
+      box: function(cx,cy,cz,w,h,d){
+        var x0=cx-w/2, x1=cx+w/2, y0=cy-h/2, y1=cy+h/2, z0=cz-d/2, z1=cz+d/2;
+        var v = [ x1,y0,z1, x1,y0,z0, x1,y1,z0, x1,y1,z1,      // +x
+                  x0,y0,z0, x0,y0,z1, x0,y1,z1, x0,y1,z0,      // -x
+                  x0,y1,z1, x1,y1,z1, x1,y1,z0, x0,y1,z0,      // +y
+                  x0,y0,z0, x1,y0,z0, x1,y0,z1, x0,y0,z1,      // -y
+                  x0,y0,z1, x1,y0,z1, x1,y1,z1, x0,y1,z1,      // +z
+                  x1,y0,z0, x0,y0,z0, x0,y1,z0, x1,y1,z0 ];    // -z
+        for (var i=0;i<24;i++){
+          pos.push(v[i*3], v[i*3+1], v[i*3+2]);
+          var n = NRM[(i/4)|0]; nor.push(n[0],n[1],n[2]);
+        }
+        for (var f=0;f<6;f++){ var o = base + f*4; idx.push(o,o+1,o+2, o,o+2,o+3); }
+        base += 24;
+        return this;
+      },
+      empty: function(){ return base === 0; },
+      finish: function(target, mat){
+        if (!base) return null;
+        var g = new T.BufferGeometry();
+        g.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+        g.setAttribute('normal',   new T.Float32BufferAttribute(nor, 3));
+        g.setIndex(idx);
+        g.computeBoundingSphere();
+        var m = new T.Mesh(g, mat);
+        m.castShadow = true; m.receiveShadow = true;
+        target.add(m);
+        return m;
+      }
+    };
+  }
+
+  /* Non-fading pseudo fade-group: same { group, mat } duck type every
+   * mp* helper above consumes, but NOT pushed into `fadeGroups`, so its
+   * contents never dissolve during the cutaway. Used for the town outside
+   * the walls (St Lawrence's church + its neighbours) -- buildings that
+   * are not part of the castle have no business melting away when the
+   * camera zooms into the castle's interior. */
+  function mpPlainGroup(colorHex){
+    var g = new T.Group();
+    root.add(g);
+    return { group: g, mat: new T.MeshLambertMaterial({ color: colorHex }), op: 1 };
+  }
+
+  /* --------------------------------------------------------------
+   * TERRAIN STRIP -- a cross-section profile [[x,y],...] extruded along
+   * the whole Z length of the world. One geometry, one draw call, and it
+   * is what turns the Nogat from a painted-on ribbon into a real valley:
+   * the castle stands on the top terrace, two stepped terraces fall away
+   * to a riverside promenade, then the bank drops to the riverbed.
+   * -------------------------------------------------------------- */
+  function mpTerrainStrip(profile, z0, z1, mat){
+    var pos = [], nor = [], idx = [], n = profile.length, segN = [], i;
+    // per-segment up-normal, tilted by that segment's own slope. The
+    // profile runs EAST -> WEST (x decreasing), so -dx is the "up" side.
+    for (i=0;i<n-1;i++){
+      var dx = profile[i+1][0]-profile[i][0], dy = profile[i+1][1]-profile[i][1];
+      var l = Math.hypot(dx,dy) || 1;
+      segN.push([dy/l, -dx/l]);
+    }
+    for (i=0;i<n;i++){
+      pos.push(profile[i][0], profile[i][1], z0);
+      pos.push(profile[i][0], profile[i][1], z1);
+      // vertex normal = average of the segments meeting at it, so the
+      // terrace treads and the bank slopes shade as one continuous ground
+      var na = segN[Math.max(0, i-1)], nb = segN[Math.min(n-2, i)];
+      var ax = (na[0]+nb[0])/2, ay = (na[1]+nb[1])/2, al = Math.hypot(ax,ay) || 1;
+      nor.push(ax/al, ay/al, 0);
+      nor.push(ax/al, ay/al, 0);
+    }
+    for (i=0;i<n-1;i++){
+      var a = i*2, b = i*2+1, c = i*2+2, d = i*2+3;
+      idx.push(a, c, b,  b, c, d);
+    }
+    var geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(pos,3));
+    geo.setAttribute('normal',   new T.Float32BufferAttribute(nor,3));
+    geo.setIndex(idx);
+    geo.computeBoundingSphere();
+    var mesh = new T.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  /* Long straight curtain wall standing on an arbitrary base level, with
+   * merlons + a stone coping, all welded into two draw calls. `axis` is
+   * the direction the wall runs ('x' or 'z'). */
+  function mpLongWall(fg, axis, fixed, a0, a1, baseY, topY, th, opts){
+    opts = opts || {};
+    var soup = mpBoxSoup(), trimSoup = mpBoxSoup();
+    var len = Math.abs(a1-a0), mid = (a0+a1)/2, h = topY - baseY;
+    if (axis === 'z') soup.box(fixed, baseY+h/2, mid, th, h, len);
+    else              soup.box(mid, baseY+h/2, fixed, len, h, th);
+    // stone coping just under the wall head
+    if (opts.trim !== false){
+      if (axis === 'z') trimSoup.box(fixed, topY-0.4, mid, th*1.16, 0.3, len);
+      else              trimSoup.box(mid, topY-0.4, fixed, len, 0.3, th*1.16);
+    }
+    if (opts.merlons !== false){
+      var mw = 1.4, gap = 1.25, period = mw+gap, mh = opts.merlonH || 1.15;
+      var count = Math.max(1, Math.floor(len/period));
+      var start = Math.min(a0,a1) + (len - count*period)/2 + mw/2;
+      for (var i=0;i<count;i++){
+        var s = start + i*period;
+        if (opts.skip && opts.skip(s)) continue;
+        if (axis === 'z') soup.box(fixed, topY+mh/2, s, th*0.74, mh, mw);
+        else              soup.box(s, topY+mh/2, fixed, mw, mh, th*0.74);
+      }
+    }
+    soup.finish(fg.group, fg.mat);
+    trimSoup.finish(fg.group, trimMat);
+  }
+
   /* ================================================================
    * GROUND + NOGAT RIVER -- one large undulating plane under the whole
    * ~470m-long complex (origin = High Castle courtyard centre, so the
@@ -641,9 +775,79 @@ function buildMalborkPlan(){
    * undulation ceiling, no bank grading needed).
    * ================================================================ */
   var GROUND_Y = -0.6;
+
+  /* ---- NOGAT VALLEY SECTION ------------------------------------------
+   * The single biggest error in the previous build. It drew the Nogat as
+   * a 60m ribbon 14m clear of the west wall, sitting FLAT on the same
+   * ground plane as the castle -- so from the air the river read as a
+   * drainage canal running past a castle that stood on a billiard table.
+   * Both the user's oblique aerial and the Google satellite view show
+   * something completely different:
+   *   - the river is enormous. Measured off the satellite frame against
+   *     the High Castle's known 51x61m footprint it runs roughly 190-200m
+   *     bank to bank, i.e. as wide as the whole castle complex.
+   *   - it comes right up to the castle. Between the outermost wall and
+   *     the water there is only an embankment, a promenade and a strip of
+   *     grass -- of the order of 40-50m, not a field.
+   *   - the ground FALLS to it in steps. In the aerial you can count the
+   *     wall lines marching down the slope: the castle's own curtain on
+   *     the top level, an outer enceinte on a middle terrace, and a low
+   *     riverside wall with conical-roofed towers on the bank below that.
+   * So the west side is no longer flat ground with a blue rectangle on
+   * it: the shared undulating ground plane is CUT AWAY west of the castle
+   * and replaced by a real cross-section -- glacis, two terraces, the
+   * riverside promenade, the bank, the bed, then the far shore.
+   * X ordinates below are absolute sheet coordinates; the profile is
+   * uniform along Z (it is a river terrace, and the aerial shows it
+   * running the full length of the site and well past both ends).
+   * ------------------------------------------------------------------ */
+  var W_GLACIS_X = -86;   // outer edge of the top (castle) level
+  var TER_MID_Y  = -5.0;  // middle terrace: the outer enceinte stands here
+  var TER_MID_X  = -101;
+  var PROM_Y     = -8.6;  // riverside promenade
+  var PROM_X     = -116;
+  var BED_Y      = -11.5;
+  var WATER_Y    = -9.6;
+  var WATER_X0   = -114, WATER_X1 = -318;  // 204m of open water
+  var GROUND_CUT_X = -72; // faces entirely west of this are dropped
+
   var ground = buildUndulatingGround(520, 2100, 92, grassMat, null);
+  (function cutGroundForRiverValley(){
+    /* Drop every face lying wholly west of GROUND_CUT_X. The plane's own
+     * grid is coarse (2100/92 = 22.8m), so the surviving edge lands at
+     * about x = -68; the terrace strip below starts at -60 and overlaps
+     * it by a few metres, 0.08m proud, so there is no seam and no
+     * coplanar z-fight. Everything the castle stands on is east of -68
+     * apart from the Low Castle's own west curtain, which the terrace
+     * strip carries. */
+    var geo = ground.geometry, pos = geo.attributes.position;
+    var src = geo.getIndex().array, kept = [];
+    for (var i=0;i<src.length;i+=3){
+      var a=src[i], b=src[i+1], c=src[i+2];
+      if (pos.getX(a) < GROUND_CUT_X && pos.getX(b) < GROUND_CUT_X && pos.getX(c) < GROUND_CUT_X) continue;
+      kept.push(a,b,c);
+    }
+    geo.setIndex(kept);
+  })();
   ground.position.y = GROUND_Y;
   group.add(ground);
+
+  /* The valley itself. Three strips, three draw calls: the terraced near
+   * side (grass), the bed (silt, seen only through the water), and the
+   * far shore. They live in `group`, not `root` -- they are terrain, they
+   * are uniform along Z, and like the ground plane they must not take the
+   * castle's ZOFF re-centring shift. */
+  var siltMat = new T.MeshLambertMaterial({ color: 0x4a4534 });
+  var ZTERR0 = -1080, ZTERR1 = 1080;
+  group.add(mpTerrainStrip([
+    [-60, GROUND_Y+0.08], [W_GLACIS_X, GROUND_Y+0.08],   // castle glacis
+    [W_GLACIS_X-2, TER_MID_Y], [TER_MID_X, TER_MID_Y],   // middle terrace
+    [TER_MID_X-2, PROM_Y],     [PROM_X, PROM_Y],         // riverside promenade
+    [PROM_X-4, BED_Y]                                    // bank into the water
+  ], ZTERR0, ZTERR1, grassMat));
+  group.add(mpTerrainStrip([[PROM_X-4, BED_Y], [-314, BED_Y]], ZTERR0, ZTERR1, siltMat));
+  group.add(mpTerrainStrip([[-314, BED_Y], [-320, GROUND_Y], [-1060, GROUND_Y]],
+    ZTERR0, ZTERR1, grassMat));
 
   /* ================================================================
    * GABLE-DECORATION FADE BUNDLES
@@ -1407,179 +1611,413 @@ function buildMalborkPlan(){
   });
 
   /* ---- LOW CASTLE / VORBURG BUILDING FABRIC ---------------------------
-   * THE headline problem with the previous build. It emitted 16 segments
-   * from a 4-row table where every segment in a row shared one width, one
-   * eave height and one shallow ridge, all gabled the same way along Z --
-   * so the outer bailey rendered as a stamped grid of identical prisms
-   * and read as a barracks camp or a warehouse district, not as Malbork.
-   * The reference aerial and the view north from the main tower show
-   * something quite different: ranges of visibly different heights and
-   * depths, some running ACROSS the ward instead of along it, stepped
-   * gables terminating almost every one of them, hipped roofs mixed in
-   * among the gabled ones, dormers along the long slopes, and real open
-   * yards and small squares left between the blocks.
+   * REBUILT against the user's aerial and satellite photographs, which
+   * contradict the "buildings in four north-south rows" reading the
+   * previous table was built on.
    *
-   * So the four documented north-south rows [MH]○ survive as the
-   * organising grid -- the surveyed fact -- but each entry now specifies
-   * its own width, height, roof form (gabled / hipped), which ends get a
-   * stepped gable, and how many dormers, and a set of CROSS RANGES on the
-   * X axis is threaded between them to break the stripes. Widths and
-   * heights are all △ 推定 (no survey table exists for the outer-ward
-   * ranges); only the Karwan's 20x45m footprint is measured.
-   * `z` values are offsets from LC_Z0; `x` is the row centreline.
+   * What the previous build did: 18 row segments + 4 cross ranges + the
+   * Karwan, packed four abreast across the full 140m width with 8m
+   * service lanes between them. From above that is a warehouse district
+   * -- roofs edge to edge over practically the whole ward.
    *
-   * The 140m width is divided into fixed BANDS so that the ranges, the
-   * service lanes the residents walk, and the wall-side parcham the guard
-   * patrol follows can never overlap:
-   *   parcham W  -70..-62 | row 1 -62..-40 | lane A -40..-32
-   *   row 2      -32..-10 | lane B -10..+2 | row 3   +2..+24
-   *   lane C     +24..+36 | row 4 +36..+58 | parcham E +58..+70
-   * Every segment below keeps |x| +/- w/2 inside its band, so no farmer
-   * wander-box and no patrol waypoint ever falls inside a building.
+   * What the photographs actually show: the Vorburg is a LARGE OPEN
+   * WALLED SPACE. Its buildings stand in a ring AGAINST THE CURTAIN --
+   * a long range down the river (west) side, another down the east side
+   * either side of the gate, a block across the north end -- and the
+   * whole middle of the ward is grass: mown lawn, a formal garden laid
+   * out in rectangular beds, an orchard, and open working yards. Roofs
+   * cover maybe a quarter of the enclosure, not three quarters.
+   *
+   * So the layout is now a PERIMETER RING, and the 140m width divides
+   * into far simpler bands:
+   *   west range -68.5..-46.5 | open ward -46..+46 | east range +46.5..+68.5
+   * with a north range across z LC_Z1-20..LC_Z1-4 and the south and
+   * south-east corners left open. Nothing stands in the middle: every
+   * farmer wander box, the guard patrol and all the planting live in the
+   * open ward, and by construction none of them can intersect a building.
+   *
+   * Range widths/heights remain △ 推定 (no survey table exists for the
+   * outer-ward ranges); only the Karwan's 20x45m footprint is measured.
+   * `z` values are offsets from LC_Z0; `x` is the range centreline.
+   *
+   * The seven ranges that carry furnished interiors (Karwan, storehouse,
+   * stables, bakehouse, workshops/granary, smithy, and -- until it moved
+   * out of the castle entirely -- St Lawrence's) are called out in the
+   * table so the fit-out section further down can be shifted to match in
+   * one place instead of re-authoring every prop coordinate.
    * ------------------------------------------------------------------ */
+  var LC_WROW = -57.5, LC_EROW = 57.5;   // range centrelines, hard against the curtain
+  var KARWAN_CZ = LC_Z0 + 34.5;          // 20x45m [measured]○, south end of the west range
   function lcFg(x){ return x < 0 ? lcBuildW : lcBuildE; }
   function lcRoof(i){ return (i % 2) ? lcRoofFg2 : lcRoofFg; }
   var lcSegs = [
-    // --- row 1 (west band, centre -51): tall storehouses behind the river wall
-    { x:-51, w:22, z0:12,  z1:62,  h:12.5, gable:'both', dormers:3 },
-    { x:-52, w:18, z0:70,  z1:104, h:8.5,  hip:true },
-    { x:-50, w:20, z0:112, z1:158, h:11.0, gable:'a',   dormers:2 },
-    { x:-53, w:15, z0:166, z1:196, h:7.5,  gable:'both', steps:3 },
-    { x:-51, w:22, z0:206, z1:258, h:13.5, gable:'both', dormers:3, steps:5 },
-    // --- row 2 (centre -21): Karwan at the south end (built separately),
-    //     then low service sheds around a yard
-    { x:-20, w:15, z0:74,  z1:100, h:7.0,  hip:true },
-    { x:-21, w:20, z0:108, z1:150, h:10.5, gable:'both', dormers:2 },
-    { x:-19, w:14, z0:158, z1:180, h:6.5,  hip:true },
-    { x:-22, w:18, z0:196, z1:240, h:9.5,  gable:'b',   dormers:2 },
-    // --- row 3 (centre 13): mixed workshops; chapel slots in at z 178-198
-    { x: 13, w:18, z0:12,  z1:52,  h:9.0,  gable:'both', dormers:2 },
-    { x: 15, w:14, z0:60,  z1:88,  h:6.5,  hip:true },
-    { x: 13, w:21, z0:96,  z1:140, h:12.0, gable:'both', dormers:2, steps:5 },
-    { x: 14, w:16, z0:206, z1:236, h:8.0,  gable:'a' },
-    { x: 13, w:19, z0:244, z1:262, h:10.0, gable:'both', steps:3 },
-    // --- row 4 (east band, centre 47): the long gabled range along the
-    //     east wall that dominates the aerial photograph
-    { x: 47, w:22, z0:12,  z1:60,  h:11.5, gable:'both', dormers:3 },
-    { x: 48, w:18, z0:68,  z1:118, h:9.0,  gable:'b',   dormers:3 },
-    { x: 47, w:22, z0:150, z1:206, h:13.0, gable:'both', dormers:3, steps:5 },
-    { x: 49, w:17, z0:214, z1:258, h:8.5,  hip:true }
+    // --- WEST RANGE, against the river curtain ------------------------
+    { x:LC_WROW, w:20, z0:12,  z1:57,  h:13.0, gable:'both', dormers:3, steps:5 }, // Karwan
+    { x:LC_WROW, w:22, z0:66,  z1:116, h:12.5, gable:'both', dormers:3 },          // storehouse
+    { x:LC_WROW, w:20, z0:124, z1:170, h:11.0, gable:'a',    dormers:2 },          // stables
+    { x:-58.5,   w:18, z0:202, z1:246, h:9.5,  hip:true },
+    // --- EAST RANGE, either side of the main gate (gap z 124..148) -----
+    { x:LC_EROW, w:20, z0:12,  z1:60,  h:11.5, gable:'both', dormers:3 },
+    { x:LC_EROW, w:22, z0:68,  z1:124, h:13.0, gable:'both', dormers:3, steps:5 }, // workshops/granary
+    { x:58.5,    w:14, z0:148, z1:176, h:6.5,  gable:'both', steps:3 },            // smithy
+    { x:LC_EROW, w:20, z0:184, z1:236, h:10.0, gable:'both', dormers:3 }
   ];
   lcSegs.forEach(function(s, i){
     var z0 = LC_Z0 + s.z0, z1 = LC_Z0 + s.z1;
     mpRange(lcFg(s.x), lcRoof(i), gblOuter, s.x, (z0+z1)/2, s.w, z1-z0, s.h, 'z',
       { gable: s.gable, hip: s.hip, dormers: s.dormers, steps: s.steps });
   });
-  /* CROSS RANGES -- short blocks running EAST-WEST across the lanes.
-   * Without these the ward still reads as four parallel stripes however
-   * much the individual segments vary; in the aerial the Vorburg's
-   * buildings clearly turn corners and enclose small yards. */
-  [ { z:66,  x:-36, w:30, d:15, h:8.0,  gable:'both' },
-    { z:146, x: -4, w:26, d:14, h:9.5,  hip:true },
-    { z:200, x:-36, w:28, d:13, h:7.5,  gable:'both', steps:3 },
-    { z:246, x: 30, w:24, d:16, h:10.5, gable:'both' }
-  ].forEach(function(c, i){
-    mpRange(lcFg(c.x), lcRoof(i+1), gblOuter, c.x, LC_Z0 + c.z, c.w, c.d, c.h, 'x',
-      { gable: c.gable, hip: c.hip, steps: c.steps });
-  });
+  /* NORTH RANGE + the bakehouse, both running EAST-WEST. The north block
+   * closes the top of the ward (clearly a single long roof in the
+   * satellite frame); the bakehouse is a short spur projecting inward off
+   * the west range, which is what keeps the middle of the ward clear
+   * while still giving the ovens a wall to back on to. */
+  mpRange(lcBuildE, lcRoofFg, gblOuter, 4, LC_Z1 - 12, 58, 16, 10.5, 'x',
+    { gable:'both', dormers:3, steps:4 });
+  mpRange(lcBuildW, lcRoofFg2, gblOuter, -55, LC_Z0 + 186, 26, 14, 9.5, 'x',
+    { hip:true });                                                                 // bakehouse
 
-  // Karwan (armoury/coach house), 20x45m [spec measured value]○ -- the
-  // south end of row 2. Tall, with big cart doors and stepped gables.
-  var KARWAN_CZ = LC_Z0 + 12 + 45/2;
-  mpRange(lcBuildW, lcRoofFg, gblOuter, -20, KARWAN_CZ, 20, 45, 13.0, 'z',
-    { gable:'both', dormers:3, steps:5 });
+  // Karwan cart doors (the range shell itself is the first lcSegs entry)
   [-1,1].forEach(function(sg){
     var door = mkBox(0.5, 5.4, 3.4, windowMat);
-    place(door, -20 + sg*10.1, 2.7, KARWAN_CZ - 8);
+    place(door, LC_WROW + sg*10.1, 2.7, KARWAN_CZ - 8);
     interiorGroup.add(door);
     var door2 = mkBox(0.5, 5.4, 3.4, windowMat);
-    place(door2, -20 + sg*10.1, 2.7, KARWAN_CZ + 8);
+    place(door2, LC_WROW + sg*10.1, 2.7, KARWAN_CZ + 8);
     interiorGroup.add(door2);
   });
-  registerPick(pickables, 'structure', -20, 6.5, KARWAN_CZ, 20, 13.0, 45,
-    'カルワン Karwan', '武器庫兼車庫、20x45m。低城内の軍需・輸送を支えた実務施設。');
+  registerPick(pickables, 'structure', LC_WROW, 6.5, KARWAN_CZ, 20, 13.0, 45,
+    'カルワン Karwan', '武器庫兼車庫、20x45m。低城内の軍需・輸送を支えた実務施設。西列の南端、川側の城壁に接して建つ。');
 
-  // St Lawrence chapel -- taller, buttressed, with a stepped west gable
-  // and a slim flèche, so it reads as a church rather than a shed
-  var CHAPEL_CZ = LC_Z0 + 188;
+  /* ---- ST LAWRENCE'S CHURCH -- moved OUT of the castle -------------
+   * The previous build stood it in the middle of the Vorburg. It is not
+   * in the castle at all: on the satellite frame the Church of St
+   * Lawrence is labelled out in the TOWN, north-north-east of the
+   * complex, on the far side of the road that runs past the Low Castle's
+   * north front. It is rebuilt here at that position together with a
+   * handful of townhouses, so the north end of the site reads as castle
+   * -> road -> town rather than as more castle.
+   *
+   * Being outside the walls, the church and its neighbours go into
+   * NON-FADING plain groups (mpPlainGroup): the cutaway opens the castle,
+   * and the town has no business dissolving with it.
+   * ------------------------------------------------------------------ */
+  var CHAPEL_CX = 34, CHAPEL_CZ = LC_Z1 + 52;
   var CHAPEL_H = 12.5;
-  var chapelBody = mkBox(12, CHAPEL_H, 20, lcBuildE.mat);
-  place(chapelBody, 13, CHAPEL_H/2, CHAPEL_CZ);
-  lcBuildE.group.add(chapelBody);
+  var townBrick = mpPlainGroup(BRICK_WALL_V);
+  var townRoof  = mpPlainGroup(ROOF_COL);
+  var townGbl   = { brick: mpPlainGroup(BRICK_WALL_V), trim: mpPlainGroup(WHITE_TRIM),
+                    niche: mpPlainGroup(NICHE_COL) };
+  var chapelBody = mkBox(12, CHAPEL_H, 20, townBrick.mat);
+  place(chapelBody, CHAPEL_CX, CHAPEL_H/2, CHAPEL_CZ);
+  townBrick.group.add(chapelBody);
   for (var cb=0; cb<4; cb++){
     var cbz = CHAPEL_CZ - 7.5 + cb*5;
     [-1,1].forEach(function(sg3){
-      var but = mkBox(1.9, CHAPEL_H-1.5, 1.1, lcBuildE.mat);
-      place(but, 13 + sg3*6.6, (CHAPEL_H-1.5)/2, cbz);
-      lcBuildE.group.add(but);
+      var but = mkBox(1.9, CHAPEL_H-1.5, 1.1, townBrick.mat);
+      place(but, CHAPEL_CX + sg3*6.6, (CHAPEL_H-1.5)/2, cbz);
+      townBrick.group.add(but);
       var bc = mkBox(2.2, 0.28, 1.4, trimMat);
-      place(bc, 13 + sg3*6.6, CHAPEL_H-1.5, cbz);
-      lcBuildE.group.add(bc);
+      place(bc, CHAPEL_CX + sg3*6.6, CHAPEL_H-1.5, cbz);
+      townBrick.group.add(bc);
     });
   }
   ['x-','x+'].forEach(function(nrm){
-    mpLancetRow(lcBuildE.group, windowMat, nrm, 13, CHAPEL_CZ, 6.1, 4, 14, 4.2, 5.0, 0.95);
+    mpLancetRow(townBrick.group, windowMat, nrm, CHAPEL_CX, CHAPEL_CZ, 6.1, 4, 14, 4.2, 5.0, 0.95);
   });
-  mpGableRoof(lcRoofFg.group, lcRoofFg.mat, 'z', 13, CHAPEL_CZ, CHAPEL_CZ-10, CHAPEL_CZ+10, 6.3, CHAPEL_H, 9.0, false);
+  mpGableRoof(townRoof.group, townRoof.mat, 'z', CHAPEL_CX, CHAPEL_CZ, CHAPEL_CZ-10, CHAPEL_CZ+10, 6.3, CHAPEL_H, 9.0, false);
   [-1,1].forEach(function(sg4){
-    mpSteppedGable(gblOuter.brick, gblOuter.trim, gblOuter.niche, 'z',
-      13, CHAPEL_CZ + sg4*10, 6.0, CHAPEL_H, 9.0, 5, 1.0);
+    mpSteppedGable(townGbl.brick, townGbl.trim, townGbl.niche, 'z',
+      CHAPEL_CX, CHAPEL_CZ + sg4*10, 6.0, CHAPEL_H, 9.0, 5, 1.0);
   });
-  var spire = mkCone(1.2, 6.5, 8, lcRoofFg.mat);
-  place(spire, 13, CHAPEL_H + 9.0 + 3.0, CHAPEL_CZ);
-  lcRoofFg.group.add(spire);
+  var spire = mkCone(1.2, 6.5, 8, townRoof.mat);
+  place(spire, CHAPEL_CX, CHAPEL_H + 9.0 + 3.0, CHAPEL_CZ);
+  townRoof.group.add(spire);
   var cross = mkBox(0.16, 1.6, 0.16, goldMat);
-  place(cross, 13, CHAPEL_H + 9.0 + 6.3 + 0.8, CHAPEL_CZ);
-  lcRoofFg.group.add(cross);
-  registerPick(pickables, 'structure', 13, CHAPEL_H*0.5, CHAPEL_CZ, 12, CHAPEL_H, 20,
-    '聖ラウレンティウス礼拝堂 St Lawrence Chapel', '低城内の小礼拝堂。位置・外形は概略復元。');
+  place(cross, CHAPEL_CX, CHAPEL_H + 9.0 + 6.3 + 0.8, CHAPEL_CZ);
+  townRoof.group.add(cross);
+  registerPick(pickables, 'structure', CHAPEL_CX, CHAPEL_H*0.5, CHAPEL_CZ, 12, CHAPEL_H, 20,
+    '聖ラウレンティウス教会 Church of St Lawrence', '城内ではなく、低城の北の道路を挟んだ市街地に建つ教区教会。衛星写真の位置に合わせて城外へ出した。');
 
-  // cobble service lanes between the 4 rows + the east-gate cross lane +
-  // two open squares, always-visible ground detail
-  [-36, -4, 30].forEach(function(lx){   // lane band centres A / B / C
-    var lane = mkBox(5.0, 0.22, LC_Z1-LC_Z0-18, cobbleMat);
-    place(lane, lx, 0.13, (LC_Z0+LC_Z1)/2);
-    interiorGroup.add(lane);
+  /* the townhouses flanking it -- a short row of gabled burgher houses
+   * along the road, enough to read as "the town starts here" */
+  [ { x: 8, z: LC_Z1 + 42, w:13, d:10, h:8.0 },
+    { x: 8, z: LC_Z1 + 62, w:12, d:11, h:7.0 },
+    { x: 60, z: LC_Z1 + 40, w:14, d:11, h:8.5 },
+    { x: 62, z: LC_Z1 + 64, w:12, d:10, h:7.5 },
+    { x: 34, z: LC_Z1 + 78, w:16, d:11, h:9.0 }
+  ].forEach(function(h, i){
+    mpRange(townBrick, townRoof, townGbl, h.x, h.z, h.w, h.d, h.h, i%2 ? 'x' : 'z',
+      { gable:'both', steps:3, pilasters:false });
   });
-  [ {x:-36, z:178, w:26, d:22}, {x:30, z:126, w:30, d:26} ].forEach(function(sq){
-    var s = mkBox(sq.w, 0.2, sq.d, cobbleMat);
-    place(s, sq.x, 0.12, LC_Z0 + sq.z);
-    interiorGroup.add(s);
-  });
-  (function gateLane(){
-    var lane = mkBox(LC_HX+44, 0.22, 6.0, cobbleMat);
-    place(lane, LC_HX - (LC_HX+44)/2, 0.13, LC_GATE_Z);
-    interiorGroup.add(lane);
+  // the road itself, running east-west between castle and town
+  (function townRoad(){
+    var road = mkBox(210, 0.24, 9.0, cobbleMat);
+    place(road, -6, 0.13, LC_Z1 + 24);
+    root.add(road);
+  })();
+
+  /* ---- LOW CASTLE OPEN WARD ----------------------------------------
+   * One broad lawn filling everything the perimeter ranges do not, with
+   * a cobbled service lane running just inside each range, the gate lane
+   * crossing from the east gate, and a working square in front of the
+   * gate. This is the "large open walled space" the aerial shows, and it
+   * is what the four rows of sheds used to bury.
+   * ------------------------------------------------------------------ */
+  (function lowCastleWard(){
+    /* Mown-lawn tone. GRASS_COL2 (0x6c8a52, the High Castle garth's grass)
+     * was tried first and, multiplied by the ~1.95 a day-lit horizontal
+     * face gets, a 92 x 230m slab of it came back as a blown-out lime
+     * sports pitch that hijacked the whole frame. Pulled down to just
+     * above the surrounding meadow so it still reads as kept ground. */
+    var lawnMat = new T.MeshLambertMaterial({ color: 0x627f4a });
+    var lawn = mkBox(92, 0.22, LC_Z1-LC_Z0-24, lawnMat);
+    place(lawn, 0, 0.11, (LC_Z0+LC_Z1)/2 - 4);
+    interiorGroup.add(lawn);
+    [-42, 42].forEach(function(lx){          // service lanes inside each range
+      var lane = mkBox(5.0, 0.24, LC_Z1-LC_Z0-30, cobbleMat);
+      place(lane, lx, 0.13, (LC_Z0+LC_Z1)/2 - 4);
+      interiorGroup.add(lane);
+    });
+    var spine = mkBox(4.0, 0.24, LC_Z1-LC_Z0-40, cobbleMat);   // north-south spine path
+    place(spine, 0, 0.13, (LC_Z0+LC_Z1)/2 - 4);
+    interiorGroup.add(spine);
+    var lane2 = mkBox(LC_HX+46, 0.24, 6.0, cobbleMat);         // east gate lane
+    place(lane2, LC_HX - (LC_HX+46)/2, 0.13, LC_GATE_Z);
+    interiorGroup.add(lane2);
+    var sq = mkBox(24, 0.26, 22, cobbleMat);                   // working square inside the gate
+    place(sq, 34, 0.14, LC_GATE_Z);
+    interiorGroup.add(sq);
   })();
 
   /* ================================================================
-   * Nogat river -- west side of the ENTIRE complex, spanning from south
-   * of the High Castle to north of the Low Castle. Distance from the
-   * wall / terrace grading is not modelled (river sits flat above the
-   * ground noise ceiling, same simplification castles/malbork.js uses);
-   * the sheet's "川面から10-15m高い段丘上" fact is noted here but not
-   * separately terraced.
+   * NOGAT RIVER + the terraced west front
+   * ================================================================
+   * The water plane now fills the valley section cut above: ~204m bank
+   * to bank, its east shore only ~45m from the Low Castle's west curtain
+   * and ~9m below it. Sized off the user's satellite frame, where the
+   * river measures out at roughly the width of the whole complex and the
+   * strip between wall and water is a promenade, not a field.
+   *
+   * The plane deliberately runs far past both ends of the castle (the
+   * Nogat does not stop at the walls) and stays in `root` so it takes the
+   * same ZOFF re-centring as everything else authored in sheet
+   * coordinates. Its east and west edges tuck UNDER the bank slopes of
+   * the terrain strip, so the shoreline is drawn by the terrain, not by
+   * the rectangle -- no hard blue edge anywhere.
    * ================================================================ */
-  // RIVER_CX is already the band's CENTRE (it folds in RIVER_W/2), so it
-  // is used directly in place() -- the previous code subtracted RIVER_W/2
-  // a second time and pushed the Nogat 35m further west than the
-  // RIVER_GAP it was supposedly derived from.
-  var RIVER_W = 60, RIVER_GAP = 14;
-  var RIVER_CX = -(LC_HX + RIVER_GAP + RIVER_W/2); // pinned off the widest (Low Castle) footprint
-  var RIVER_Z_SPAN = (LC_Z1 - (GD_CZ-20)) ; // covers south of Gdanisko up to north of the Low Castle
-  var riverCZ = (LC_Z1 + (GD_CZ-20))/2;
-  var river = new T.Mesh(new T.PlaneGeometry(RIVER_W, RIVER_Z_SPAN+140), riverMat);
+  var RIVER_W = WATER_X1 - WATER_X0;                   // -204 (signed, west-ward)
+  var RIVER_CX = (WATER_X0 + WATER_X1)/2;              // -216
+  var RIVER_Z0 = -920, RIVER_Z1 = 1260;
+  var river = new T.Mesh(new T.PlaneGeometry(Math.abs(RIVER_W), RIVER_Z1-RIVER_Z0), riverMat);
   river.rotation.x = -Math.PI/2;
-  place(river, RIVER_CX, GROUND_Y+2.6, riverCZ);
+  place(river, RIVER_CX, WATER_Y, (RIVER_Z0+RIVER_Z1)/2);
   root.add(river);
-  registerPick(pickables, 'structure', RIVER_CX, GROUND_Y+2.6, riverCZ, RIVER_W*0.7, 1.0, RIVER_Z_SPAN*0.7,
-    'ノガト川 Nogat River', '城の西側を流れる川。城は川面から10〜15m高い段丘上に立つ [MH]。舟運により建材や食料を運んだ生命線。');
+  registerPick(pickables, 'structure', RIVER_CX, WATER_Y, (LC_Z1 + GD_CZ)/2,
+    Math.abs(RIVER_W)*0.8, 1.0, (LC_Z1 - GD_CZ)*0.9,
+    'ノガト川 Nogat River', '城のすぐ西を流れる幅約200mの大河。城は川面から約9m高い段丘の上に立ち、段状の壁が川へ向かって降りる [MH]。舟運により建材や食料を運んだ生命線。');
+
+  /* ---- the stepped wall lines falling to the river ------------------
+   * Read straight off the user's oblique aerial: from the water up, a low
+   * RIVERSIDE WALL studded with round towers under tall conical red
+   * roofs; above and behind it, on the middle terrace, the OUTER
+   * ENCEINTE with square towers under pyramid roofs; above that again the
+   * castle's own curtain. Three wall heads at three levels is what gives
+   * Malbork's river front its stepped silhouette, and it was completely
+   * absent before -- the old build had exactly one wall line and flat
+   * ground.
+   *
+   * Both runs are welded (mpBoxSoup / mpLongWall): ~590m of crenellated
+   * curtain apiece costs 2 draw calls instead of ~250.
+   * ------------------------------------------------------------------ */
+  var TERR_Z0 = -150, TERR_Z1 = LC_Z1 + 6;
+  var RIVWALL_X = -102, OUTWALL_X = -87;
+  var rivWallFg = mpMakeFadeGroup('riverWall',  {x:-1,z:0}, false, BRICK_WALL);
+  var outWallFg = mpMakeFadeGroup('outerWall',  {x:-1,z:0}, false, BRICK_WALL_V);
+  var terrRoofFg= mpMakeFadeGroup('terraceRoofs', null, true, ROOF_COL);
+  mpLongWall(rivWallFg, 'z', RIVWALL_X, TERR_Z0, TERR_Z1, PROM_Y-0.6, -1.4, 1.5, { merlonH: 1.0 });
+  mpLongWall(outWallFg, 'z', OUTWALL_X, TERR_Z0, TERR_Z1, TER_MID_Y-0.6, 2.4, 1.9, { merlonH: 1.2 });
+
+  /* tower on a terrace: body from an arbitrary base level, tall steep cap.
+   * mpSmallTower always stands its body on y=0, which is exactly what the
+   * terraces cannot do. */
+  function mpTerraceTower(fg, roofFg, cx, cz, round, r, baseY, topY, roofH){
+    var h = topY - baseY;
+    var body = round ? mkCyl(r, r*1.06, h, 12, fg.mat) : mkBox(r*1.85, h, r*1.85, fg.mat);
+    place(body, cx, baseY + h/2, cz);
+    fg.group.add(body);
+    var cap = round ? mkCone(r*1.3, roofH, 12, roofFg.mat) : mkCone(r*1.38, roofH, 4, roofFg.mat);
+    if (!round) cap.rotation.y = Math.PI/4;
+    place(cap, cx, topY + roofH/2, cz);
+    roofFg.group.add(cap);
+  }
+  /* Round riverside towers. Their CAPS are the point: in the reference
+   * river photograph the two towers on the bank are read almost entirely
+   * by their enormously tall, steep conical red roofs, which stand about
+   * as high again as the tower below them. A 9.5m cap on a 4m tower came
+   * back off the renderer as a pair of traffic cones, so the roof is now
+   * 15m on a wider 4.4m drum -- the proportion the photograph shows. */
+  [-118, -34, 52, 148, 244, 340, 424].forEach(function(tz){
+    mpTerraceTower(rivWallFg, terrRoofFg, RIVWALL_X, tz, true, 4.4, PROM_Y-0.6, 3.4, 15.0);
+  });
+  // square towers on the outer enceinte, one level up
+  [-100, 130, 250, 366].forEach(function(tz){
+    mpTerraceTower(outWallFg, terrRoofFg, OUTWALL_X, tz, false, 3.3, TER_MID_Y-0.6, 6.4, 8.5);
+  });
+  /* the big square tower on the terrace enceinte opposite the Middle
+   * Castle -- the one landmark on the west front after the palace and the
+   * main tower, and unmistakable in the user's aerial (a tall block under
+   * a very large red pyramid roof, standing clear of the wall head) */
+  mpTerraceTower(outWallFg, terrRoofFg, OUTWALL_X, 10, false, 5.6, TER_MID_Y-0.8, 17.0, 13.0);
+  registerPick(pickables, 'structure', RIVWALL_X, -3.0, (TERR_Z0+TERR_Z1)/2, 8, 12, (TERR_Z1-TERR_Z0)*0.9,
+    '川岸の外壁 Riverside Wall', 'ノガト川の岸に沿う最外郭の低い壁。円錐屋根の円塔が並び、その内側に段を上げて外郭壁・城壁が続く。');
+  registerPick(pickables, 'structure', OUTWALL_X, 0.0, (TERR_Z0+TERR_Z1)/2, 8, 14, (TERR_Z1-TERR_Z0)*0.9,
+    '段丘の外郭壁 Terrace Enceinte', '川へ降りる中段の段丘に立つ外郭壁。角錐屋根の方塔を持ち、城壁と川岸壁の中間の高さを受け持つ。');
+
+  /* ================================================================
+   * SOUTHERN + EASTERN OUTER BAILEY -- the great walled lawn
+   * ================================================================
+   * The other structural thing missing from the previous build. It
+   * modelled the castle as three blocks in a line and stopped at the
+   * masonry, so south of the Gdanisko and east of the High Castle there
+   * was simply open field. In the user's oblique aerial the entire
+   * FOREGROUND is a huge brick-walled enclosure -- mown grass, a few
+   * paths and some low ruined foundations, with a wall-walk running the
+   * whole way round and towers at the corners -- and the satellite shows
+   * the same enclosure continuing up the east side as parkland between
+   * the castle and the town. That enclosure is the reason Malbork reads
+   * as 21 hectares rather than as a 470m building.
+   *
+   * The west side of the ring is already built: it IS the terrace
+   * enceinte above. This closes the other three sides, stepping down
+   * across the terraces at the south-west corner.
+   * ================================================================ */
+  var OB_SZ = -150, OB_EX = 100;   // south wall Z, east wall X (both △ 推定)
+  var OB_BASE = GROUND_Y - 0.8, OB_TOP = 5.6;
+  var obFg = mpMakeFadeGroup('outerBailey', {x:0,z:-1}, false, BRICK_WALL);
+  // south wall: a low stretch dropping across the river terraces, then the
+  // main run at castle level
+  mpLongWall(obFg, 'x', OB_SZ, RIVWALL_X, -84, PROM_Y-0.8, 2.4, 1.7, { merlonH: 1.0 });
+  mpLongWall(obFg, 'x', OB_SZ, -84, OB_EX, OB_BASE, OB_TOP, 1.7, { merlonH: 1.2 });
+  // east wall, running north to meet the Low Castle's own south-east corner
+  mpLongWall(obFg, 'z', OB_EX, OB_SZ, LC_Z0, OB_BASE, OB_TOP, 1.7, { merlonH: 1.2 });
+  mpLongWall(obFg, 'x', LC_Z0, LC_HX, OB_EX, OB_BASE, OB_TOP, 1.7, { merlonH: 1.2 });
+  /* An internal cross wall splits the enclosure into two courts, as the
+   * aerial shows -- without it 187 x 320m of unbroken lawn reads as a
+   * playing field rather than as a defended outer ward. */
+  mpLongWall(obFg, 'x', -46, -84, OB_EX, OB_BASE, OB_TOP - 1.0, 1.5, { merlonH: 1.0,
+    skip: function(s){ return Math.abs(s - 40) < 6; } });   // postern gap at x=40
+  [ {x:-84, z:OB_SZ}, {x:-20, z:OB_SZ}, {x:52, z:OB_SZ}, {x:OB_EX, z:OB_SZ},
+    {x:OB_EX, z:-60}, {x:OB_EX, z:30}, {x:OB_EX, z:120}, {x:OB_EX, z:LC_Z0},
+    {x:-84, z:-46}, {x:20, z:-46}
+  ].forEach(function(p){
+    mpTerraceTower(obFg, terrRoofFg, p.x, p.z, false, 3.2, OB_BASE, OB_TOP + 3.4, 6.6);
+  });
+  /* the outer bailey's own south gatehouse: a taller twin-pier block
+   * astride the road that runs in from the south */
+  (function baileyGate(){
+    var gx = -4, gh = 13.0, gw = 5.0;
+    [-1,1].forEach(function(s){
+      var pier = mkBox(6.0, gh, 6.4, obFg.mat);
+      place(pier, gx + s*(gw/2 + 3.0), OB_BASE + gh/2, OB_SZ);
+      obFg.group.add(pier);
+    });
+    var lintel = mkBox(gw, gh - 6.0, 6.4, obFg.mat);
+    place(lintel, gx, OB_BASE + 6.0 + (gh-6.0)/2, OB_SZ);
+    obFg.group.add(lintel);
+    var cap = mkCone(8.4, 6.0, 4, terrRoofFg.mat);
+    cap.rotation.y = Math.PI/4;
+    place(cap, gx, OB_BASE + gh + 3.0, OB_SZ);
+    terrRoofFg.group.add(cap);
+    registerPick(pickables, 'structure', gx, OB_BASE + gh*0.5, OB_SZ, 18, gh, 8,
+      '外郭の南門 Outer Bailey South Gate', '最外郭の南門。城下から芝の広がる外郭へ入る道がここを抜ける。');
+  })();
+  /* Pick volume deliberately covers only the SOUTHERN LAWN, not the whole
+   * ring. A box spanning the full enclosure would have enclosed the dry
+   * ditch's and the Gdanisko bridge's own pick volumes -- the ditch's box
+   * is only 1m tall and would have been shadowed by this one on every
+   * ray from above -- and would have parked the 外郭 label right on top of
+   * the High Castle. Sitting on the empty lawn it labels the thing it
+   * actually names and competes with nothing. */
+  registerPick(pickables, 'structure', 8, 2.0, OB_SZ + 34, 150, 5.0, 56,
+    '外郭 Outer Bailey', '高城・中城を大きく取り巻く最外周の郭。内部の大半は芝の開けた広場で、南側と東側に広大な緑地が広がる。壁天端には歩廊が回る。');
+
+  /* ---- the terrace garden below the Grand Master's Palace -----------
+   * Clearly visible in the user's aerial: on the terrace between the
+   * palace's west front and the outer enceinte, one level DOWN from the
+   * castle, a rectangular parterre of beds with a path down the middle.
+   * Welded into two draw calls and laid on the middle terrace level, so
+   * it sits where the photograph puts it -- below the palace, not beside
+   * it. ---------------------------------------------------------- */
+  (function terraceGarden(){
+    var gx = -94, gz0 = MC_Z0 + 8, gz1 = MC_Z1 - 4, gy = TER_MID_Y;
+    var soil = mpBoxSoup();
+    soil.box(gx, gy + 0.12, (gz0+gz1)/2, 13, 0.24, gz1-gz0);
+    soil.finish(interiorGroup, new T.MeshLambertMaterial({ color: 0x4c3a2b }));
+    var beds = mpBoxSoup();
+    for (var i=0;i<6;i++){
+      var bz = gz0 + 6 + i*((gz1-gz0-12)/5);
+      [-1,1].forEach(function(s){
+        beds.box(gx + s*3.4, gy + 0.36, bz, 5.0, 0.5, 7.0);
+      });
+    }
+    beds.finish(interiorGroup, new T.MeshLambertMaterial({ color: 0x44632c }));
+    var walk = mkBox(2.2, 0.26, gz1-gz0, cobbleMat);
+    place(walk, gx, gy + 0.13, (gz0+gz1)/2);
+    interiorGroup.add(walk);
+    registerPick(pickables, 'room', gx, gy + 1.0, (gz0+gz1)/2, 14, 2.0, gz1-gz0,
+      '段丘の庭園 Terrace Garden', '大団長宮殿の西、一段下がった段丘に開かれた整形庭園。矩形の花壇が中央の小径を挟んで並ぶ。');
+  })();
+
+  /* the low ruined foundation walls and the paths that pattern the
+   * southern lawn in the reference aerial -- welded, 2 draw calls */
+  (function baileyGround(){
+    var ruin = mpBoxSoup();
+    [ {x:-58, z:-132, w:26, d:1.1}, {x:-46, z:-122, w:1.1, d:22},
+      {x:-58, z:-112, w:26, d:1.1}, {x:-70, z:-122, w:1.1, d:22},
+      {x: 24, z:-136, w:34, d:1.1}, {x: 41, z:-124, w:1.1, d:26},
+      {x: 24, z:-112, w:34, d:1.1}, {x:  7, z:-124, w:1.1, d:26}
+    ].forEach(function(r){ ruin.box(r.x, 0.55, r.z, r.w, 1.5, r.d); });
+    ruin.finish(root, stoneDarkMat);
+    var paths = mpBoxSoup();
+    paths.box(-4, 0.12, -120, 3.5, 0.22, 60);            // south approach
+    paths.box(-4, 0.12, OB_SZ+8, 150, 0.22, 3.5);        // along the south wall
+    paths.box(70, 0.12, (OB_SZ+LC_Z0)/2, 3.5, 0.22, LC_Z0-OB_SZ-30); // east park walk
+    paths.finish(interiorGroup, cobbleMat);
+  })();
+
+  /* ---- the road bridge north of the castle. Prominent in the user's
+   * aerial (top of frame) and on the satellite. A level deck on piers
+   * standing in the riverbed, crossing all 204m of water plus both
+   * banks. Piers and railings are welded -- 3 draw calls for the lot. */
+  (function nogatBridge(){
+    var bz = LC_Z1 + 58, deckY = 1.6, dw = 9.0;
+    var x0 = -58, x1 = -332;
+    var deck = mkBox(Math.abs(x1-x0), 0.7, dw, stubMat);
+    place(deck, (x0+x1)/2, deckY, bz);
+    root.add(deck);
+    var soup = mpBoxSoup();
+    for (var px = -122; px > -316; px -= 27){
+      soup.box(px, (BED_Y + deckY)/2, bz - dw*0.32, 2.4, deckY - BED_Y, 2.4);
+      soup.box(px, (BED_Y + deckY)/2, bz + dw*0.32, 2.4, deckY - BED_Y, 2.4);
+    }
+    soup.box(-100, (PROM_Y + deckY)/2, bz, 3.0, deckY - PROM_Y, dw*0.8);
+    soup.box(-70,  (GROUND_Y + deckY)/2, bz, 3.0, deckY - GROUND_Y, dw*0.8);
+    soup.finish(root, stoneDarkMat);
+    var rails = mpBoxSoup();
+    [-1,1].forEach(function(s){
+      rails.box((x0+x1)/2, deckY + 1.0, bz + s*dw/2, Math.abs(x1-x0), 1.3, 0.35);
+    });
+    rails.finish(root, metalMat);
+    registerPick(pickables, 'structure', (x0+x1)/2, deckY, bz, Math.abs(x1-x0)*0.9, 3.0, dw*1.6,
+      'ノガト川の橋 Nogat Bridge', '城の北でノガト川を渡る橋。対岸の市街と城下を結ぶ。');
+  })();
 
   /* ---- low-poly trees along the riverbank + fields, scaled up in count
    * (but kept modest) for the much longer complex. ------------------ */
   (function scatterTrees(){
     function trand(a,b){ return a + Math.random()*(b-a); }
-    function addTree(x,z,scale,species){
+    function addTree(x,y,z,scale,species){
       var g = new T.Group();
       var trunkH = 2.1*scale;
       var trunk = mkCyl(0.15*scale, 0.22*scale, trunkH, 6, treeTrunkMat);
@@ -1595,23 +2033,34 @@ function buildMalborkPlan(){
         ball.position.y = trunkH + 1.35*scale;
         g.add(ball);
       }
-      g.position.set(x, GROUND_Y, z);
+      g.position.set(x, y, z);
       root.add(g);
     }
     var zStart = GD_CZ-15, zEnd = LC_Z1+10, zLen = zEnd-zStart;
-    var riverbankCount = 22;
-    for (var i=0;i<riverbankCount;i++){
-      var z = zStart + i*(zLen/riverbankCount);
-      addTree(-LC_HX-6+trand(-2,2), z+trand(-5,5), trand(0.85,1.25), i%2);
-    }
+    /* Trees on the river terraces. The bank is no longer flat, so each
+     * row is planted ON its own terrace level rather than all of them at
+     * GROUND_Y (which, now that the ground falls away to the west, would
+     * have left a line of trees standing on air over the promenade).
+     * Rows: the glacis inside the outer wall, the middle terrace between
+     * the two wall lines, and the promenade along the water. */
+    [ { x:-78,  y:GROUND_Y,  n:16, jitter:3 },
+      { x:-94,  y:TER_MID_Y, n:13, jitter:3 },
+      { x:-110, y:PROM_Y,    n:11, jitter:3 } ].forEach(function(row, ri){
+      for (var i=0;i<row.n;i++){
+        var z = zStart + (i+0.5)*(zLen/row.n);
+        addTree(row.x + trand(-row.jitter, row.jitter), row.y,
+                z + trand(-8,8), trand(0.85,1.25), (i+ri)%2);
+      }
+    });
     var eastCount = 16;
     for (var j=0;j<eastCount;j++){
       var z2 = zStart + j*(zLen/eastCount);
       if (Math.abs(z2-LC_GATE_Z) < 16) continue;
-      addTree(LC_HX+12+trand(0,16), z2+trand(-5,5), trand(0.8,1.15), j%2);
+      if (z2 > LC_Z1 + 18 && z2 < LC_Z1 + 42) continue;   // keep the town road clear
+      addTree(LC_HX+12+trand(0,16), GROUND_Y, z2+trand(-5,5), trand(0.8,1.15), j%2);
     }
     for (var k=0;k<6;k++){
-      addTree(trand(-30,30), GD_CZ-24-trand(0,16), trand(0.8,1.1), k%2);
+      addTree(trand(-30,30), GROUND_Y, GD_CZ-24-trand(0,16), trand(0.8,1.1), k%2);
     }
   })();
 
@@ -1719,6 +2168,20 @@ function buildMalborkPlan(){
       lod.addLevel(new T.Group(), dist);
       lod.position.set(cx, cy, cz);
       interiorGroup.add(lod);
+      return g;
+    }
+    /* Rigidly move a finished det() block. The Low Castle's ranges were
+     * re-sited when the Vorburg was rebuilt as a perimeter ring round an
+     * open ward (see the lcSegs table), and each of these fit-outs is
+     * 40-120 props authored in absolute sheet coordinates. Re-typing every
+     * one of those coordinates is exactly the sort of edit that silently
+     * leaves a barrel standing outside its own wall, so instead the whole
+     * LOD node is translated -- one shift per range, contents untouched.
+     * (The registerPick/mpPickRoom volumes inside each fit-out live
+     * outside the group in world space and so are moved by hand.) */
+    function detShift(g, dx, dz){
+      var t = (g.parent && g.parent.isLOD) ? g.parent : g;
+      t.position.x += dx; t.position.z += dz;
       return g;
     }
     // three cutaway-matched gate distances. orbDist = 820 - zoom*750, so
@@ -2482,9 +2945,11 @@ function buildMalborkPlan(){
     }
 
     // ---- Karwan: armoury + coach house, 20x45m [measured]
+    // authored on the old row-2 centreline x=-20; the range now stands
+    // against the west curtain at x=LC_WROW, so the whole block shifts.
     (function karwan(){
       var r = serviceRange(-20, KARWAN_CZ, 20, 45, 13.0, earthMat);
-      var g = r.g;
+      var g = detShift(r.g, LC_WROW + 20, 0);
       cart(g, -24, KARWAN_CZ - 14, 0.1, false);
       cart(g, -16, KARWAN_CZ - 14, Math.PI + 0.1, true);
       cart(g, -24, KARWAN_CZ + 6, 0.0, true);
@@ -2507,10 +2972,10 @@ function buildMalborkPlan(){
       woodPile(g, -20, KARWAN_CZ + 19, 3.4, 0);
     })();
 
-    // ---- storehouse (row 1 south): barrels, sacks, a hoist
+    // ---- storehouse (west range, 2nd block): barrels, sacks, a hoist
     (function storehouse(){
       var r = serviceRange(-51, LC_Z0 + 37, 22, 50, 12.5, flagMat);
-      var g = r.g, cz = LC_Z0 + 37;
+      var g = detShift(r.g, LC_WROW + 51, 54), cz = LC_Z0 + 37;
       for (var row=0; row<2; row++){
         for (var b=0;b<9;b++){
           barrel(g, -57.5 + row*13.0, cz - 18 + b*4.3, 0.7, 1.5);
@@ -2528,7 +2993,7 @@ function buildMalborkPlan(){
     // ---- stables (row 1, mid): stalls, hay, troughs, tack
     (function stables(){
       var r = serviceRange(-50, LC_Z0 + 135, 20, 46, 11.0, strawMat);
-      var g = r.g, cz = LC_Z0 + 135;
+      var g = detShift(r.g, LC_WROW + 50, 12), cz = LC_Z0 + 135;
       for (var i=0;i<9;i++){
         var sz = cz - 19 + i*4.6;
         [-1,1].forEach(function(s){
@@ -2547,7 +3012,7 @@ function buildMalborkPlan(){
           add(g, boxGeo(0.5, 0.8, 0.7), darkWoodMat, -50 + s*8.6, 2.2, cz - 12 + t*8);
         }
       });
-      mpPickRoom(-60, -40, cz-23, cz+23, 11.0, '厩舎 Stables',
+      mpPickRoom(LC_WROW-10, LC_WROW+10, cz+12-23, cz+12+23, 11.0, '厩舎 Stables',
         '低城西列の厩舎。中央通路の両側に馬房が並び、飼葉桶と干し草が置かれる。');
     })();
 
@@ -2556,7 +3021,7 @@ function buildMalborkPlan(){
       // this one is a CROSS range -- its ridge runs east-west, so the
       // trusses have to span the 14m depth, not the 26m frontage
       var r = serviceRange(-4, LC_Z0 + 146, 26, 14, 9.5, flagMat, 'x');
-      var g = r.g, cz = LC_Z0 + 146;
+      var g = detShift(r.g, -51, 40), cz = LC_Z0 + 146;
       [-1,1].forEach(function(s){
         var ox = -4 + s*8.0;
         add(g, cylGeo(2.3, 2.6, 1.6, 10), stoneDarkMat, ox, 0.96, cz - 3.4);
@@ -2576,14 +3041,14 @@ function buildMalborkPlan(){
       [-1,1].forEach(function(s){
         bar(g, woodMat, -4 + s*4.6, 0.2, cz-2.0, -4 + s*4.0, 2.9, cz-1.0, 0.1);
       });
-      mpPickRoom(-17, 9, cz-7, cz+7, 9.5, 'パン焼き所 Bakehouse',
+      mpPickRoom(-68, -42, cz+40-7, cz+40+7, 9.5, 'パン焼き所 Bakehouse',
         '低城のパン焼き窯。ドーム状の窯2基と練り台が並び、修道会全体のパンを焼いた。');
     })();
 
     // ---- smithy (row 3, south): forge, anvil, bellows, quench trough
     (function smithy(){
       var r = serviceRange(15, LC_Z0 + 74, 14, 28, 6.5, earthMat);
-      var g = r.g, cz = LC_Z0 + 74;
+      var g = detShift(r.g, 43.5, 88), cz = LC_Z0 + 74;
       add(g, boxGeo(3.2, 1.1, 2.4), stoneDarkMat, 19.4, 0.71, cz - 8);      // forge bed
       add(g, boxGeo(2.4, 0.4, 1.7), emberMat, 19.4, 1.46, cz - 8);
       add(g, boxGeo(2.0, 3.6, 2.0), stoneDarkMat, 19.4, 3.4, cz - 10.0);    // hood + flue
@@ -2600,14 +3065,14 @@ function buildMalborkPlan(){
       }
       barrel(g, 19.6, cz + 10.0, 0.6, 1.2);
       woodPile(g, 13.0, cz + 10.0, 2.4, 0);
-      mpPickRoom(9, 21, cz-13, cz+13, 6.5, '鍛冶場 Smithy',
+      mpPickRoom(52.5, 64.5, cz+88-13, cz+88+13, 6.5, '鍛冶場 Smithy',
         '低城の鍛冶工房。炉とふいご、金床、焼入れ桶が並ぶ。武具と馬具の修理を担った。');
     })();
 
     // ---- workshop / granary range (row 4, mid): looms, benches, grain
     (function workshops(){
       var r = serviceRange(47, LC_Z0 + 178, 22, 56, 13.0, flagMat);
-      var g = r.g, cz = LC_Z0 + 178;
+      var g = detShift(r.g, LC_EROW - 47, -82), cz = LC_Z0 + 178;
       // grain bins at the north half
       for (var b=0;b<4;b++){
         [-1,1].forEach(function(s){
@@ -2632,13 +3097,13 @@ function buildMalborkPlan(){
       sackPile(g, 47, cz + 2.0, 6, 0.2);
       crateStack(g, 41.5, cz - 24, 0.3);
       crateStack(g, 52.5, cz - 24, -0.4);
-      mpPickRoom(37, 57, cz-27, cz+27, 13.0, '工房と穀倉 Workshops & Granary',
+      mpPickRoom(LC_EROW-10, LC_EROW+10, cz-82-27, cz-82+27, 13.0, '工房と穀倉 Workshops & Granary',
         '低城東列の長大な棟。北半分は穀物庫、南半分は織機の並ぶ工房。');
     })();
 
-    // ---- St Lawrence's chapel interior
+    // ---- St Lawrence's church interior (now outside the walls, north)
     (function lcChapel(){
-      var g = det(13, 5, CHAPEL_CZ, D_MID);
+      var g = detShift(det(13, 5, CHAPEL_CZ, D_MID), CHAPEL_CX - 13, 0);
       floorSlab(g, tileMat, 7.6, 18.4, CHAPEL_CZ-9.4, CHAPEL_CZ+9.4);
       dado(g, plasterMat, 7.6, 18.4, CHAPEL_CZ-9.4, CHAPEL_CZ+9.4, 1.2, 0.5);
       responds(g, plasterMat, 'z',  8.0, CHAPEL_CZ-7, CHAPEL_CZ+7, 4, 8.4);
@@ -2659,53 +3124,77 @@ function buildMalborkPlan(){
       candleStand(g, 15.4, CHAPEL_CZ + 6.4);
     })();
 
-    /* ---- Low Castle open ground: gardens, orchard, yard clutter.
-     * Placed strictly OUTSIDE the farmer wander lanes (x -39..-33,
-     * -9..+1, +25..+35), outside the east-gate square (x 60..68) and
-     * clear of the guard patrol line (the parchams at x = +/-64 and lane
-     * B at x=-4), all of which are documented above the lcSegs table. */
+    /* ---- Low Castle open ward: the FORMAL GARDEN, the orchard, the herb
+     * plats and the yard clutter that now fill the middle of the Vorburg.
+     *
+     * This is the other half of the Low Castle rebuild. With the ranges
+     * pulled back against the curtain there is a 92 x 230m open ward in
+     * the middle, and both reference photographs show what belongs in it:
+     * a formal garden laid out in neat rectangular beds either side of a
+     * path, an orchard, herb plats, and working ground. Empty lawn alone
+     * would read as a car park; this is what makes the open ward read as
+     * deliberately open rather than unbuilt.
+     *
+     * Everything below is checked against the ward's circulation, which
+     * is fixed by construction (see the lcSegs banding comment):
+     *   farmer lanes  x -45..-39 and +39..+45, the spine at x -2..+2,
+     *                 the cross band z LC_Z0+128..148, the gate square
+     *   guard patrol  x = +/-38, z = LC_Z0+18 and LC_Z0+246
+     * so no bed, tree or woodpile can ever stand where a resident walks.
+     * ------------------------------------------------------------------ */
     (function lowCastleGrounds(){
-      var g = det(10, 2, LC_Z0 + 190, D_FAR);
-      // kitchen garden in the row-3 gap between the workshops and the
-      // chapel (x 5..21 -- clear of lane B at -9..1 and lane C at 25..35)
-      var kz = LC_Z0 + 158;
-      add(g, boxGeo(16.0, 0.24, 34.0), soilMat, 13, 0.28, kz);
-      for (var i=0;i<4;i++){
-        gardenBed(g,  9.4, kz - 12 + i*8.2, 6.0, 6.4, 3, i%2 ? cropMat1 : cropMat2);
-        gardenBed(g, 16.6, kz - 12 + i*8.2, 6.0, 6.4, 3, i%2 ? cropMat2 : cropMat1);
+      /* NOT on D_FAR. Every other planting block in this file is gated at
+       * 500m because it is detail you only need once you have zoomed in,
+       * but this one IS the Low Castle now: with the sheds gone, an
+       * ungated ward shows 92 x 230m of bare lawn at the opening camera
+       * distance (620) and the whole point of the rebuild -- "walled
+       * enclosure with buildings round the edge and a GARDEN in the
+       * middle" -- is invisible exactly when the castle is being read as
+       * a whole. D_WARD sits past zMax (820) so the parterre, the herb
+       * plats and the orchard are always drawn. Measured cost of doing
+       * so: ~150 draw calls, against the ~930 the rebuild gave back. */
+      var D_WARD = 1000;   // > view.zMax (940), i.e. never gated out
+      var g = det(0, 2, LC_Z0 + 130, D_WARD);
+      /* FORMAL GARDEN: two blocks of rectangular beds either side of the
+       * cobbled spine, hedged all round -- the parterre that reads so
+       * clearly from the air in the reference photograph. */
+      var gz = LC_Z0 + 80;
+      [-1, 1].forEach(function(side){
+        var bx = side * 18;                       // block centre, x 6..30 either side
+        add(g, boxGeo(24.0, 0.24, 76.0), soilMat, bx, 0.28, gz);
+        for (var i=0;i<5;i++){
+          var bz = gz - 30 + i*15;
+          gardenBed(g, bx - 6.0, bz, 10.0, 6.4, 4, i%2 ? cropMat1 : cropMat2);
+          gardenBed(g, bx + 6.0, bz, 10.0, 6.4, 4, i%2 ? cropMat2 : cropMat1);
+        }
+        hedgeRun(g, bx, gz - 39.0, 24.0, 0, 1.0);
+        hedgeRun(g, bx, gz + 39.0, 24.0, 0, 1.0);
+        hedgeRun(g, bx + side*12.4, gz, 76.0, Math.PI/2, 1.0);
+      });
+      // herb plats west of the spine, north of the parterre
+      var hz = LC_Z0 + 166;
+      add(g, boxGeo(18.0, 0.24, 20.0), soilMat, -23, 0.28, hz);
+      herbPlat(g, -29.0, hz - 5.0, 5.2);
+      herbPlat(g, -29.0, hz + 5.0, 5.2);
+      herbPlat(g, -17.0, hz - 5.0, 5.2);
+      herbPlat(g, -17.0, hz + 5.0, 5.2);
+      hedgeRun(g, -23, hz - 10.4, 18.0, 0, 0.9);
+      hedgeRun(g, -23, hz + 10.4, 18.0, 0, 0.9);
+      vineRun(g, 20.0, hz, 24, Math.PI/2, 2.3);
+      // orchard filling the north half of the ward
+      for (var t=0;t<14;t++){
+        gardenTree(g, -24 + (t%4)*16, LC_Z0 + 192 + Math.floor(t/4)*15, 1.05, false);
       }
-      hedgeRun(g, 13, kz - 17.4, 16.0, 0, 1.0);
-      hedgeRun(g, 13, kz + 17.4, 16.0, 0, 1.0);
-      vineRun(g, 21.4, kz, 30, Math.PI/2, 2.3);
-      // herb garden in the row-2 gap at the north end (x -30..-12)
-      var hz = LC_Z0 + 254;
-      add(g, boxGeo(18.0, 0.24, 20.0), soilMat, -21, 0.28, hz);
-      herbPlat(g, -27.0, hz - 5.0, 5.2);
-      herbPlat(g, -27.0, hz + 5.0, 5.2);
-      herbPlat(g, -15.0, hz - 5.0, 5.2);
-      herbPlat(g, -15.0, hz + 5.0, 5.2);
-      hedgeRun(g, -21, hz - 10.4, 18.0, 0, 0.9);
-      hedgeRun(g, -21, hz + 10.4, 18.0, 0, 0.9);
-      // small orchard in the row-4 gap (x 46..58, clear of the east
-      // parcham the patrol walks at x=64)
-      for (var t=0;t<8;t++){
-        gardenTree(g, 47 + (t%2)*8, LC_Z0 + 122 + Math.floor(t/2)*8.5, 1.05, false);
-      }
-      // yard clutter round the lanes: woodpiles, hay, a cart, a well
-      /* Yard clutter. Every position below is checked against BOTH the
-       * lcSegs/cross-range footprints (so nothing stands inside a
-       * building) and the farmer lane bands + patrol line documented
-       * above the lcSegs table. The gaps used are: row 2 z 57-74 and
-       * 100-108, row 3 z 88-96, row 4 z 118-150. */
-      woodPile(g, -14, LC_Z0 + 65, 3.0, 0);        // row 2 gap, east of the cross range
-      woodPile(g, 23.5, LC_Z0 + 92, 3.0, Math.PI/2); // row 3 gap, west of lane C
-      hayPile(g, -28, LC_Z0 + 96, 2.0, 2.4);
-      hayPile(g, 22, LC_Z0 + 230, 1.8, 2.2);
-      cart(g, -30, LC_Z0 + 104, 0.6, true);        // row 2 gap
-      cart(g, 24, LC_Z0 + 196, -0.4, false);
-      // a working well on the east square (x 30, z LC_Z0+126, 30x26)
+      // yard clutter, kept in the corners of the ward and off every lane
+      woodPile(g, -33, LC_Z0 + 30, 3.0, 0);
+      woodPile(g, 30, LC_Z0 + 158, 3.0, Math.PI/2);
+      hayPile(g, -31, LC_Z0 + 232, 2.0, 2.4);
+      hayPile(g, 31, LC_Z0 + 34, 1.8, 2.2);
+      cart(g, -14, LC_Z0 + 26, 0.6, true);
+      cart(g, 16, LC_Z0 + 244, -0.4, false);
+      // a working well on the square inside the east gate
       (function lcWell(){
-        var wx = 38, wz = LC_Z0 + 118;
+        var wx = 30, wz = LC_GATE_Z - 7;
         add(g, cylGeo(1.1,1.1,1.0,12), stoneDarkMat, wx, 0.66, wz);
         [-1,1].forEach(function(s){
           add(g, boxGeo(0.18, 2.6, 0.18), woodMat, wx + s*1.0, 1.46, wz);
@@ -2716,8 +3205,8 @@ function buildMalborkPlan(){
         registerPick(pickables, 'structure', wx, 1.6, wz, 3.0, 3.2, 3.0,
           '低城の井戸 Vorburg Well', '低城の作業広場に置かれた井戸。厩舎・パン焼き所・鍛冶場の水源。');
       })();
-      registerPick(pickables, 'room', 13, 1.5, kz, 16, 3.0, 34,
-        '低城の菜園 Vorburg Garden', '低城の建物列の隙間に開かれた菜園。畝と葡萄棚、北側には薬草園と果樹園が続く。');
+      registerPick(pickables, 'room', 0, 1.5, gz, 62, 3.0, 80,
+        '低城の庭園 Vorburg Garden', '低城の広い中庭を占める整形庭園。石畳の軸道を挟んで矩形の花壇が並び、北へ薬草園と果樹園が続く。');
     })();
 
     /* ================================================================
@@ -3018,7 +3507,10 @@ function buildMalborkPlan(){
        * ============================================================ */
       (function stableHorses(){
         var cz = LC_Z0 + 135;
-        var g = det(-50, 4, cz, D_MID);
+        // authored on the old row-1 stables centre; the range moved to the
+        // west curtain when the Vorburg became a perimeter ring, so the
+        // whole herd rides the same rigid shift its stalls did.
+        var g = detShift(det(-50, 4, cz, D_MID), LC_WROW + 50, 12);
         var breeds = [WARHORSE, WARHORSE_G, WARHORSE_B];
         [0,1,3,5,7].forEach(function(i){          // 西列(頭は -X)
           var z = cz - 19 + i*4.6 + 2.3;
@@ -3033,86 +3525,83 @@ function buildMalborkPlan(){
         // 通路で寝そべる番犬と、馬糧を狙う鼠捕りの猫
         beast(g, -50.6, cz + 12.0, -0.8, DOG, 2);
         beast(g, -49.4, cz - 17.5, 1.9, CAT, 0);
-        registerPick(pickables, 'room', -50, 1.6, cz, 18, 3.2, 44,
+        registerPick(pickables, 'room', LC_WROW, 1.6, cz + 12, 18, 3.2, 44,
           '厩舎の軍馬 Warhorses', '馬房に立つ騎士団の軍馬。修道会は独自の厩を運営し、重装騎士1人につき3〜4頭の馬を養った。');
       })();
 
       /* ============================================================
-       * 2. 低城の家畜。列と列の隙間(lcSegs の z ギャップ)に囲いを
-       *    落とす。使うのは以下の3か所で、いずれも建物の footprint、
-       *    農民の通路帯(x -39..-33 / -9..+1 / +25..+35)、衛兵の巡回線
-       *    (parcham x=±64 と z=LC_Z0+6 の東西脚)のどれにも掛からない:
-       *      牛の囲い  行2の隙間 z 181..194、x -22..-12
-       *                (敷石広場 x -49..-23 / z 167..189 の東隣)
-       *      豚の囲い  行1の隙間 z 197..205、x -60..-44
-       *      羊の囲い  行4の隙間 z 207..213、x 38..56
-       *    すべて開けた地面なので D_FAR ゲート1つにまとめる。
+       * 2. 低城の家畜。低城を「周囲に建物・中央は緑地」へ組み直したので
+       *    囲いの置き場も全面的に取り直した。空いている場所は
+       *      南端の作業地   z LC_Z0+20..40(整形庭園の南、x -36..36)
+       *      パン焼き所の東 x -34..-26 / z LC_Z0+178..192
+       *      果樹園         x -24..24 / z LC_Z0+190..238
+       *    で、いずれも建物の footprint、農民の徘徊帯
+       *    (通路 x ±39..45、軸道、z LC_Z0+128..148 の横帯、東門前広場)、
+       *    衛兵の巡回線(x=±38、z=LC_Z0+18 と LC_Z0+246)のどれにも
+       *    掛からない。すべて開けた地面なので D_FAR ゲート1つにまとめる。
        * ============================================================ */
       (function vorburgYards(){
-        var g = det(-10, 2, LC_Z0 + 175, D_FAR);
+        var g = det(0, 2, LC_Z0 + 130, D_FAR);
 
-        // -- 牛の囲い(1万人を養う城の食肉と牽引力) --
-        var cx0 = -22, cx1 = -12, cz0 = LC_Z0 + 181, cz1 = LC_Z0 + 194;
+        // -- 牛の囲い(1万人を養う城の食肉と牽引力)。南端の作業地の西半分 --
+        var cx0 = -34, cx1 = -22, cz0 = LC_Z0 + 22, cz1 = LC_Z0 + 37;
         pen(g, cx0, cx1, cz0, cz1);
         prop(g, woodMat, boxGeo(1.2, 0.55, 3.2), cx0 + 1.6, 0.44, cz0 + 3.0);   // 水桶
-        hayPile(g, -13.8, LC_Z0 + 188.0, 1.2, 1.5);
-        // 5頭を 10x13m の囲いに散らす。牛は頭まで含めると 2.6m あるので
+        hayPile(g, -23.8, LC_Z0 + 29.0, 1.2, 1.5);
+        // 5頭を 12x15m の囲いに散らす。牛は頭まで含めると 2.6m あるので
         // 隣どうし最低 3m は空ける(2.8m で試したら2頭が1頭に見えた)
-        [[-18.0, 183.2, 0], [-14.5, 185.0, 1], [-19.4, 190.2, 1], [-14.3, 191.8, 2]]
+        [[-30.0, 24.2, 0], [-26.5, 26.0, 1], [-31.4, 31.2, 1], [-26.3, 32.8, 2]]
           .forEach(function(p){
             beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 3)*6.28, OX, p[2]);
           });
-        beast(g, -17.2, LC_Z0 + 187.6, 2.1, CALF, 0);
+        beast(g, -29.2, LC_Z0 + 28.6, 2.1, CALF, 0);
         registerPick(pickables, 'structure', (cx0+cx1)/2, 1.2, (cz0+cz1)/2, cx1-cx0, 2.4, cz1-cz0,
           '牛の囲い Cattle Pen', '低城の家畜囲い。修道会領の荘園から集めた牛は、荷役と食肉の両方に用いられた。');
 
-        // -- 豚の囲い(残飯で肥らせ、秋に塩漬け・燻製にする) --
-        var px0 = -60, px1 = -44, pz0 = LC_Z0 + 197.5, pz1 = LC_Z0 + 204.5;
+        // -- 豚の囲い(残飯で肥らせ、秋に塩漬け・燻製にする)。南端の東半分 --
+        var px0 = 18, px1 = 34, pz0 = LC_Z0 + 22, pz1 = LC_Z0 + 30;
         pen(g, px0, px1, pz0, pz1);
         prop(g, woodMat,  boxGeo(2.8, 1.5, 2.2), px0 + 2.2, 0.75, pz0 + 1.9);   // 寝床
         prop(g, strawMat, boxGeo(3.3, 0.20, 2.7), px0 + 2.2, 1.60, pz0 + 1.9);
         prop(g, woodMat,  boxGeo(1.4, 0.42, 0.8), px1 - 1.6, 0.21, pz1 - 1.6);  // 餌桶
-        [[-53.0, 199.4, 1], [-49.6, 200.8, 0], [-51.4, 202.6, 2], [-46.6, 202.0, 1]]
+        [[25.0, 23.9, 1], [28.4, 25.3, 0], [26.6, 27.1, 2], [31.4, 26.5, 1]]
           .forEach(function(p){
             beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 5)*6.28, PIG, p[2]);
           });
-        [[-52.2, 203.2], [-50.8, 203.6], [-47.8, 199.6]].forEach(function(p){
+        [[25.8, 27.7], [27.2, 28.1], [30.2, 24.1]].forEach(function(p){
           beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 7)*6.28, PIGLET, 0);
         });
         registerPick(pickables, 'structure', (px0+px1)/2, 1.1, (pz0+pz1)/2, px1-px0, 2.2, pz1-pz0,
           '豚の囲い Pigsty', '低城の豚舎。厨房の残飯で肥らせ、秋の屠殺で塩漬け肉と燻製に仕立てて越冬の糧とした。');
 
-        // -- 羊と山羊。行4の果樹園(gardenTree が x=47/55、z=122/130.5/
-        //    139/147.5)に放して下草を食ませる。中世の果樹園の実際の
-        //    使い方であり、囲いを立てるより読める -- 行4の z 206..214 の
-        //    隙間に柵を置いた版はスクリーンショットで確認したところ、
-        //    両隣の棟の屋根の陰にほぼ完全に埋もれた。東の敷石広場
-        //    (x 15..45)には乗せず、樹の幹からも 3m 以上離す。
-        [[46.5, 126.5, 1], [50.5, 133.5, 0], [58.0, 128.0, 1],
-         [51.5, 143.8, 2], [58.5, 138.5, 0], [46.0, 144.5, 1]].forEach(function(p){
+        // -- 羊と山羊。中庭北半の果樹園(gardenTree が x=-24/-8/8/24、
+        //    z=192/207/222/237)に放して下草を食ませる。中世の果樹園の
+        //    実際の使い方であり、囲いを立てるより読める。樹の幹からは
+        //    3m 以上、衛兵の北脚 z=LC_Z0+246 からも離す。
+        [[-16.5, 198.5, 1], [-2.5, 203.5, 0], [16.0, 199.0, 1],
+         [-13.5, 228.8, 2], [15.5, 214.5, 0], [1.0, 231.5, 1]].forEach(function(p){
           beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 11)*6.28, SHEEP, p[2]);
         });
-        beast(g, 54.0, LC_Z0 + 125.0, 2.6, GOAT, 0);
-        beast(g, 58.5, LC_Z0 + 147.0, -1.2, GOAT, 1);
-        registerPick(pickables, 'structure', 52, 1.1, LC_Z0 + 135, 16, 2.2, 30,
+        beast(g, -18.0, LC_Z0 + 216.0, 2.6, GOAT, 0);
+        beast(g, 18.5, LC_Z0 + 232.0, -1.2, GOAT, 1);
+        registerPick(pickables, 'structure', 0, 1.1, LC_Z0 + 214, 46, 2.2, 44,
           '羊と山羊 Sheep & Goats', '低城の果樹園に放して下草を食ませた羊と山羊。修道会は羊毛を輸出品としても扱った。');
 
-        // -- パン焼き所(交差棟 x -17..9 / z 139..153)の西隣に鶏。
-        //    行2の隙間 z 151..157、x -31..-19 は建物にも通路帯にも
-        //    掛からない。 --
-        [[-29.5, 152.4, 1], [-27.0, 153.6, 0], [-24.4, 152.0, 1], [-22.0, 154.2, 1],
-         [-28.2, 155.6, 0], [-25.0, 156.0, 1], [-20.6, 156.2, 0]].forEach(function(p){
+        // -- パン焼き所(x -68..-42 / z LC_Z0+179..193)の東隣に鶏。
+        //    x -34..-26 は建物にも通路帯にも巡回線にも掛からない。 --
+        [[-33.5, 180.4, 1], [-31.0, 181.6, 0], [-28.4, 180.0, 1], [-26.0, 182.2, 1],
+         [-32.2, 183.6, 0], [-29.0, 184.0, 1], [-26.6, 184.2, 0]].forEach(function(p){
           bird(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 13)*6.28, HEN, p[2]);
         });
-        bird(g, -26.4, LC_Z0 + 154.8, 2.2, COCK, 0);
-        prop(g, woodMat,  boxGeo(2.4, 1.3, 1.8), -30.0, 0.80, LC_Z0 + 155.4);    // 鶏小屋
-        prop(g, strawMat, coneGeo(2.0, 1.0, 4),  -30.0, 1.95, LC_Z0 + 155.4, Math.PI/4);
-        registerPick(pickables, 'structure', -25.5, 1.0, LC_Z0 + 154, 12, 2.2, 8,
-          '鶏 Chickens', 'パン焼き所の西の作業庭に放し飼いにされた鶏。卵と肉のほか、厨房の屑を片づける役目も担った。');
+        bird(g, -30.4, LC_Z0 + 182.8, 2.2, COCK, 0);
+        prop(g, woodMat,  boxGeo(2.4, 1.3, 1.8), -34.0, 0.80, LC_Z0 + 183.4);    // 鶏小屋
+        prop(g, strawMat, coneGeo(2.0, 1.0, 4),  -34.0, 1.95, LC_Z0 + 183.4, Math.PI/4);
+        registerPick(pickables, 'structure', -29.5, 1.0, LC_Z0 + 182, 12, 2.2, 8,
+          '鶏 Chickens', 'パン焼き所の東の作業庭に放し飼いにされた鶏。卵と肉のほか、厨房の屑を片づける役目も担った。');
 
-        // -- 鳩小屋: 行1の隙間 z 105..111。レンガ造の円塔に瓦の円錐屋根 --
+        // -- 鳩小屋: 薬草園の東、通路帯と巡回線の間の空き地 --
         (function dovecote(){
-          var dx = -51, dz = LC_Z0 + 108;
+          var dx = 33, dz = LC_Z0 + 172;
           prop(g, dcWallMat, cylGeo(1.35, 1.50, 5.20, 10), dx, 2.60, dz);
           prop(g, trimMat,   cylGeo(2.00, 1.90, 0.22, 10), dx, 5.31, dz);       // 止まり縁
           prop(g, dcRoofMat, coneGeo(1.60, 1.70, 10),      dx, 6.27, dz);
@@ -3130,32 +3619,34 @@ function buildMalborkPlan(){
             '鳩小屋 Dovecote', 'レンガ造の鳩小屋。冬季の生肉と畑の肥料を供給し、修道会の要塞網を結ぶ伝令鳩の巣でもあった。');
         })();
 
-        // -- 通りの犬と猫。敷石の作業広場(x -49..-23 / z 167..189)と
-        //    東広場(x 15..45 / z 113..139)の縁。農民の通路帯の外側 --
-        beast(g, -44.0, LC_Z0 + 172.0,  0.9, DOG, 0);
-        beast(g, -30.5, LC_Z0 + 185.5, -1.7, DOG, 2);
-        beast(g,  41.5, LC_Z0 + 117.0,  2.4, CAT, 2);
+        // -- 通りの犬と猫。東門前の敷石広場(x 22..46 / z 門±11)と
+        //    西の通路の縁。農民の徘徊帯・巡回線の外側 --
+        beast(g, -35.0, LC_Z0 + 152.0,  0.9, DOG, 0);
+        beast(g,  35.5, LC_Z0 + 118.0, -1.7, DOG, 2);
+        beast(g,  25.5, LC_GATE_Z + 8.0, 2.4, CAT, 2);
       })();
 
       /* ============================================================
-       * 3. ノガト川の水鳥。川面は y = GROUND_Y+2.6、帯は x -144..-84。
-       *    城壁(x=-70)からは十分離れているので何とも干渉しない。
+       * 3. ノガト川の水鳥。川面は y = WATER_Y、水域は x -114..-318。
+       *    最寄りの城側構造物は x=-102 の川岸壁なので何とも干渉しない。
+       *    川が 60m 幅から 204m 幅になったので、鳥も岸から離れた
+       *    本流側まで散らしてある(全部が岸に張りつくと池に見える)。
        * ============================================================ */
       (function riverFowl(){
-        var wy = GROUND_Y + 2.62;
-        var g = det(RIVER_CX, wy, LC_Z0 + 120, D_FAR);
-        [[-104, 30, 1.9], [-112, 74, -0.7], [-100, 132, 2.6],
-         [-118, 186, 0.4], [-106, 232, 1.2]].forEach(function(p){
+        var wy = WATER_Y + 0.02;
+        var g = det(-170, wy, LC_Z0 + 120, D_FAR);
+        [[-134, 30, 1.9], [-158, 74, -0.7], [-128, 132, 2.6],
+         [-176, 186, 0.4], [-146, 232, 1.2]].forEach(function(p){
           swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], SWAN);
         });
-        [[-96, 52, 1.1], [-99, 57, -1.4], [-110, 108, 0.6], [-113, 112, 2.2],
-         [-95, 168, -0.3], [-98, 173, 1.7], [-108, 250, 0.9]].forEach(function(p){
+        [[-124, 52, 1.1], [-129, 57, -1.4], [-150, 108, 0.6], [-155, 112, 2.2],
+         [-122, 168, -0.3], [-127, 173, 1.7], [-142, 250, 0.9]].forEach(function(p){
           swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], DUCK);
         });
-        [[-92, 88, 1.5], [-95, 93, -0.9], [-90, 96, 2.4]].forEach(function(p){
+        [[-120, 88, 1.5], [-125, 93, -0.9], [-118, 96, 2.4]].forEach(function(p){
           swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], GOOSE);
         });
-        registerPick(pickables, 'structure', -104, wy + 0.8, LC_Z0 + 130, 30, 1.6, 220,
+        registerPick(pickables, 'structure', -140, wy + 0.8, LC_Z0 + 130, 60, 1.6, 220,
           'ノガト川の水鳥 Waterfowl', '川面に浮かぶ白鳥・鵞鳥・家鴨。城の食卓に上るとともに、羽根はペンと矢羽根の材料になった。');
       })();
 
@@ -3198,9 +3689,11 @@ function buildMalborkPlan(){
     chimney(gblOuter, MC_WX,    25.5, RF_CZ + 9.5, 1.9, 5.5);      // Great Refectory
     chimney(gblOuter, GMP_CX+4, 30.0, GMP_CZ + 5.0, 1.8, 5.5);     // palace
     chimney(gblOuter, IF_CX,    29.5, IF_CZ + 1.5, 1.6, 5.5);      // infirmary
-    chimney(gblOuter, -8.0,     17.0, LC_Z0 + 146, 1.7, 5.0);      // bakehouse oven 1
-    chimney(gblOuter,  0.0,     17.0, LC_Z0 + 146, 1.7, 5.0);      // bakehouse oven 2
-    chimney(gblOuter, 15.0,     14.0, LC_Z0 + 68,  1.6, 4.6);      // smithy forge
+    // the bakehouse and smithy moved with the Vorburg rebuild -- their
+    // flues carry the identical (dx, dz) shift their ovens did.
+    chimney(gblOuter, -59.0,    17.0, LC_Z0 + 186, 1.7, 5.0);      // bakehouse oven 1
+    chimney(gblOuter, -51.0,    17.0, LC_Z0 + 186, 1.7, 5.0);      // bakehouse oven 2
+    chimney(gblOuter, 58.5,     14.0, LC_Z0 + 156, 1.6, 4.6);      // smithy forge
   })();
 
   /* ================================================================
@@ -3224,7 +3717,14 @@ function buildMalborkPlan(){
    * need the identical shift applied by hand -- done here, BEFORE
    * buildLabelGroup() reads pickable positions to place its sprites.
    * ================================================================ */
-  var MODEL_CZ = (LC_Z1 + (GD_CZ - GD_D/2)) / 2;
+  /* Extent now runs from the outer bailey's south wall (OB_SZ, well south
+   * of the Gdanisko) to the Low Castle's north wall, rather than from the
+   * Gdanisko's own south face -- the enclosure added ~46m to the southern
+   * end, and leaving MODEL_CZ where it was pushed the whole complex north
+   * of the camera target. The town north of the road is deliberately NOT
+   * counted: it is context, not the subject, and centring on it would
+   * throw the castle itself off-frame. */
+  var MODEL_CZ = (LC_Z1 + OB_SZ) / 2;
   var ZOFF = -MODEL_CZ;
   root.position.z = ZOFF;
   pickables.forEach(function(p){ p.position.z += ZOFF; p.updateMatrixWorld(true); });
@@ -3245,35 +3745,44 @@ function buildMalborkPlan(){
         {x:LC_HX+LC_WALL_T/2, z:LC_GATE_Z},
         {x:LC_HX+GATE_TOWER_D, z:LC_GATE_Z}
       ], outDir:{x:1,z:0}, vanishDist: 46 } ],
-    /* Wander boxes. These must agree with the Low Castle band layout
-     * documented above the lcSegs table (lanes A -40..-32, B -10..+2,
-     * C +24..+36) AND dodge the four east-west CROSS RANGES, which sit at
-     * z offsets 58-74 / 139-153 / 193-207 / 238-254 and would otherwise
-     * have farmers strolling through solid brick. Each lane is therefore
-     * cut into the three clear z bands between those cross ranges. */
+    /* Wander boxes -- RE-DERIVED for the rebuilt Vorburg. The old boxes
+     * traced three service lanes threaded between four rows of sheds;
+     * those rows are gone, the ranges now line the curtain and the middle
+     * of the ward is open, so the farmers' ground is the ward itself.
+     * Every box below is checked against the ranges (west -68.5..-46.5,
+     * east +46.5..+68.5, north z LC_Z1-20..-4, bakehouse x -68..-42 /
+     * z LC_Z0+179..193) and against the planting laid out in
+     * lowCastleGrounds (parterre |x| 6..30 / z LC_Z0+41..119, herb plats
+     * x -32..-14 / z 156..176, orchard |x|<=24 / z 190..238), so a farmer
+     * can never walk through brick, hedge or vegetable bed. */
     courtyard: (function(){
       /* 中城中庭。東側 x>=11 は菜園・薬草園・果樹園(内装セクションで
        * 追加)が占めるので、farmer の徘徊範囲を maxX 24 -> 10 に狭めて
        * ある -- これで住人が畝や生垣の中を歩くことがない。西側と中央は
        * そのまま空いており、guard の巡回路(x=0)にも干渉しない。 */
       var boxes = [ { minX:-MC_HX+MC_WD+3, maxX:10, minZ:MC_Z0+4, maxZ:MC_Z1-MC_WD-3 } ]; // 中城中庭
-      var lanes = [ [-39,-33], [-9,1], [25,35] ];       // 低城 3本の通路
-      var bands = [ [16,56], [78,136], [156,190], [210,235] ]; // 交差棟を避けた z 帯
-      lanes.forEach(function(l){
-        bands.forEach(function(b){
-          boxes.push({ minX:l[0], maxX:l[1], minZ:LC_Z0+b[0], maxZ:LC_Z0+b[1] });
-        });
-      });
-      boxes.push({ minX:60, maxX:68, minZ:LC_GATE_Z-14, maxZ:LC_GATE_Z+14 }); // 東門前の広場(parcham)
+      // 低城: 建物列の内側を南北に走る2本の敷石通路
+      boxes.push({ minX:-45, maxX:-39, minZ:LC_Z0+16, maxZ:LC_Z1-26 });
+      boxes.push({ minX: 39, maxX: 45, minZ:LC_Z0+16, maxZ:LC_Z1-26 });
+      // 整形庭園と薬草園・果樹園の間に空く東西の帯(東門の内側に続く)
+      boxes.push({ minX:-34, maxX: 34, minZ:LC_Z0+126, maxZ:LC_Z0+150 });
+      // 東門を入ってすぐの敷石広場
+      boxes.push({ minX: 22, maxX: 46, minZ:LC_GATE_Z-10, maxZ:LC_GATE_Z+10 });
+      // 南端の空き地(家畜囲いは x -34..-22 と +18..+34 なので中央だけ)
+      boxes.push({ minX:-16, maxX: 14, minZ:LC_Z0+22, maxZ:LC_Z0+38 });
       return boxes;
     })(),
-    /* Patrol runs the parcham -- the clear strip between the curtain wall
-     * and the outermost range (west -70..-62, east +58..+70) -- then down
-     * lane B and through the Middle Castle courtyard to the dry-ditch
-     * bridge. x=+/-64 lands inside the parcham by construction. */
+    /* Patrol. The old route ran the parcham -- the clear strip between
+     * curtain and outermost range -- but the ranges now stand hard
+     * against the curtain and there is no parcham left, so the guards
+     * instead walk the ward side of the ranges (x = +/-38, between the
+     * farmers' lanes at +/-42 and the planting, which reaches |x| 32 at
+     * most), close the loop north and south of the garden, take the spur
+     * in through the east gate square, and then run the same long leg
+     * down through the Middle Castle to the dry-ditch bridge. */
     patrol: [
-      [-64,0,LC_Z0+6], [-64,0,LC_Z1-6], [64,0,LC_Z1-6],
-      [64,0,LC_GATE_Z+10], [64,0,LC_GATE_Z-10], [64,0,LC_Z0+6],
+      [-38,0,LC_Z0+18], [-38,0,LC_Z0+246], [38,0,LC_Z0+246],
+      [38,0,LC_GATE_Z+10], [46,0,LC_GATE_Z], [38,0,LC_GATE_Z-10], [38,0,LC_Z0+18],
       [-4,0,LC_Z0+6], [-4,0,OUTMOAT_Z0+OUTMOAT_W/2], [0,0,MC_Z1-MC_WD-4],
       [0,0,MC_Z0+8], [0,0,DITCH_Z0+DITCH_W/2], [0,0,MC_Z0+8], [-4,0,LC_Z0+6]
     ],
@@ -3300,28 +3809,30 @@ registerCastle({
   description: 'チュートン騎士団が築いた世界最大級のレンガ造城塞。高城51x61m・中城80x100m・低城140x270mが南北約470mに連なり、南西隅には60m突き出す便所塔グダニスコが尖頭アーチ5連の架橋で結ばれる。公開実測寸法に基づく再現。',
   build: buildMalborkPlan,
   // The build re-centres itself on the world origin (see MODEL_CZ /
-  // ZOFF), so the model the camera actually orbits spans roughly
-  // x -160..+75 (Nogat river to Low Castle east gate) and z -282..+282,
-  // i.e. a half-extent of ~282m along the long axis. These numbers were
-  // derived from that box for the viewer's fixed opening azimuth
-  // (-0.22pi) / elevation (0.42 rad) and fov 42, then checked against
-  // actual screenshots rather than trusted from the trigonometry alone:
-  //   initDist 580  -- measured off screenshots: the whole High->Middle
-  //                    ->Low chain sits inside the frame with a margin on
-  //                    every edge; 660+ leaves it small and lost, 520 and
-  //                    below clips the Low Castle's near corner
-  //   zMax 820      -- keeps the opening reveal at (820-580)/(820-70)
-  //                    = 0.32, i.e. below WALL_START 0.35, so the castle
-  //                    opens as a solid exterior (same feel as
-  //                    malbork.js's own 0.28)
-  //   fogNear 760   -- 520 put the far (High Castle) end of a 564m-long
-  //                    complex inside the fog ramp and washed it out
-  //   envScale 2.6  -- puts the innermost mountain ring at 340*2.6=884m,
-  //                    clear of both the 282m model and the 580m orbit
+  // ZOFF). The reworked model is BIGGER than the one these numbers were
+  // first tuned for: the outer bailey pushed the south end out to
+  // z -295, the town sits off the north end, and the widened Nogat +
+  // its terraces now run out to x -318. Half-extent along the long axis
+  // is ~295m (was 282m) and the west side reaches ~320m off centre.
+  // Re-measured off screenshots, not trigonometry:
+  //   initDist 680  -- at the old 580 the Low Castle's north end and the
+  //                    outer bailey's south-east corner both ran off the
+  //                    frame at the fixed opening azimuth (-0.22pi) /
+  //                    elevation (0.42 rad); 680 clears both with a
+  //                    margin, and the Nogat reads full width
+  //   zMax 940      -- keeps the opening reveal at (940-680)/(940-70)
+  //                    = 0.30, i.e. still below WALL_START 0.35, so the
+  //                    castle opens as a solid exterior exactly as before
+  //   fogNear 860   -- scaled with the bigger orbit; at 760 the far
+  //                    (High Castle) end sat inside the fog ramp again
+  //   shadowExtent 420 -- 340 no longer covered the outer bailey, whose
+  //                    south wall cast no shadow at all
+  //   envScale 2.6  -- innermost mountain ring at 340*2.6=884m, still
+  //                    clear of both the model and the 680m orbit
   //   envLift -80   -- drops that ring's ridgeline back inside the
-  //                    frustum at this camera height (26 + 580*sin 0.42
-  //                    = ~262m), same trick Vincennes/malbork.js use
-  view: { targetY: 26, zMin: 70, zMax: 820, initDist: 580,
-    fogNear: 760, fogFar: 2600, shadowExtent: 340, shadowFar: 1400,
-    camFar: 4200, panLimit: 300, envScale: 2.6, envLift: -80 }
+  //                    frustum at this camera height, same trick
+  //                    Vincennes/malbork.js use
+  view: { targetY: 26, zMin: 70, zMax: 940, initDist: 680,
+    fogNear: 860, fogFar: 2600, shadowExtent: 420, shadowFar: 1500,
+    camFar: 4200, panLimit: 320, envScale: 2.6, envLift: -80 }
 });
