@@ -129,11 +129,43 @@ function buildCastelDelMonte(){
   // さらに落として、空撮写真どおり「壁より沈んだ灰褐色の石畳」にする。
   var ROOF_COL     = 0x8d8570; // 平屋根(石畳のテラス屋根、切妻なし)
   var WINDOW_COL   = 0x231b10;
-  var FLOOR_COL    = 0xc2ae82; // 各室の石床
-  var COURT_COL    = 0xb59f6c; // 中庭の石畳
-  var PARTITION_COL= 0x93815a;
+  /* ---- 床の色について(内装の作り込みで実測して直した点)-------------
+   * 上を向いた水平面には sun(1.55 x 天頂成分0.762 x 光色) + hemi(0.65 x
+   * 空色) + ambient(0.22) が乗り、Rでおよそ 1.97 倍・Gで1.94倍・Bで1.84倍
+   * になる。つまり水平面のマテリアル色は各チャンネル 130 を超えると
+   * 乗算後に飽和して真っ白に飛ぶ。
+   * 従来の FLOOR_COL 0xc2ae82 =(194,174,130)は乗算後(382,337,239)、
+   * COURT_COL 0xb59f6c =(181,159,108)は(357,308,199)で、どちらも完全に
+   * クリップしていた -- 室内の床も中庭の石畳も一様に白く飛び、部屋ごとに
+   * 床を描き分けても画面上では区別がつかない状態だった。
+   * 全チャンネルを 130 以下に抑えた値へ置き換える。日の当たる外壁
+   * (0xd0bc93 x 約1.15 =(240,217,170))と見かけの明るさが揃うように、
+   * 石床は (240,219,160)/1.95 相当を基準にした。 -------------------- */
+  var FLOOR_COL    = 0x7b7157; // 各室の石床(標準)
+  var FLOOR_WOOD   = 0x655036; // 板床(工房・書斎)
+  var FLOOR_STRAW  = 0x776b48; // 藁敷き(従者・衛兵の間)
+  var FLOOR_MARBLE = 0x7c7668; // 大理石(上階の格式高い室)
+  var FLOOR_TILE   = 0x6b6650; // 石タイル(厨房・浴室)
+  var CELLAR_COL   = 0x6d6550; // 地階(アンダークロフト)の粗い石敷き
+  var COURT_COL    = 0x786d54; // 中庭の石畳
+  var PARTITION_COL= 0x847451; // 天端(上向き面)が飽和しない上限に合わせた
   var WOOD_COL     = 0x6b4f34;
   var CISTERN_COL  = 0x2f6a78;
+  /* 内装用の追加色。垂直面が主なので水平面ほど厳しくないが、天板・座面
+   * など上を向く面を持つものは 130 のしきい値を意識して選んである。 */
+  var RIB_COL      = 0x9e9478; // ヴォールトのリブ(壁より明るい切石)
+  var WOOD_DK_COL  = 0x4a3624; // 濃い木部(梁・箱の縁)
+  var CLOTH_R_COL  = 0x7d3730; // 緋の織物(タペストリー・寝具)
+  var CLOTH_B_COL  = 0x36456a; // 藍の織物
+  var STRAW_COL    = 0x7e6d36; // 藁・干し草
+  var SOIL_COL     = 0x3d3120; // 菜園の土
+  var LEAF_COL     = 0x3f6b34; // 葉(濃)
+  var LEAF_HI_COL  = 0x4d7d3a; // 葉(明)
+  var FRUIT_COL    = 0x8a5a12; // 柑橘の実
+  var TERRA_COL    = 0x8c4f34; // テラコッタの鉢
+  var METAL_COL    = 0x4a4a48; // 鉄物
+  var GOLD_COL     = 0x8f7130; // 金物・燭台
+  var LINEN_COL    = 0x776f5e; // 麻布・紙
   /* 上向きの水平面には sun 1.55 + hemi 0.65 + ambient 0.22 でおよそ 1.9 倍が
    * 乗る。0x9e9459 = (158,148,89) は乗算後に (300,281,169) となって赤と緑が
    * クリップし、周囲の草地から浮いた鮮やかな黄色になっていた。どのチャンネルも
@@ -156,6 +188,29 @@ function buildCastelDelMonte(){
   var cisternMat = new T.MeshBasicMaterial({ color: CISTERN_COL });
   var hillFieldMat = new T.MeshLambertMaterial({ color: FIELD_COL });
   var hillTopMat   = new T.MeshLambertMaterial({ color: HILL_TOP });
+  /* 内装用マテリアル。床系は「下から見上げると天井面」になるので必ず
+   * DoubleSide -- 1階の部屋の天井は2階の床メッシュそのものだから。 */
+  function floorMatOf(hex){ return new T.MeshLambertMaterial({ color: hex, side: T.DoubleSide }); }
+  var floorWoodMat   = floorMatOf(FLOOR_WOOD);
+  var floorStrawMat  = floorMatOf(FLOOR_STRAW);
+  var floorMarbleMat = floorMatOf(FLOOR_MARBLE);
+  var floorTileMat   = floorMatOf(FLOOR_TILE);
+  var cellarMat      = floorMatOf(CELLAR_COL);
+  var ribMat     = new T.MeshLambertMaterial({ color: RIB_COL });
+  var woodDkMat  = new T.MeshLambertMaterial({ color: WOOD_DK_COL });
+  var clothRMat  = new T.MeshLambertMaterial({ color: CLOTH_R_COL });
+  var clothBMat  = new T.MeshLambertMaterial({ color: CLOTH_B_COL });
+  var strawMat   = new T.MeshLambertMaterial({ color: STRAW_COL });
+  var soilMat    = new T.MeshLambertMaterial({ color: SOIL_COL });
+  var leafMat    = new T.MeshLambertMaterial({ color: LEAF_COL });
+  var leafHiMat  = new T.MeshLambertMaterial({ color: LEAF_HI_COL });
+  var fruitMat   = new T.MeshLambertMaterial({ color: FRUIT_COL });
+  var terraMat   = new T.MeshLambertMaterial({ color: TERRA_COL });
+  var metalMat   = new T.MeshLambertMaterial({ color: METAL_COL });
+  var goldMat    = new T.MeshLambertMaterial({ color: GOLD_COL });
+  var linenMat   = new T.MeshLambertMaterial({ color: LINEN_COL });
+  // 炉の火だけは Basic -- 夜も光って見えてほしいので陰影を受けない。
+  var fireMat    = new T.MeshBasicMaterial({ color: 0xff7d24 });
 
   /* -------------------------------------------------------------- *
    * 幾何定数(コメント冒頭の検証結果に基づく)
@@ -212,7 +267,7 @@ function buildCastelDelMonte(){
   // 法線と真逆を向いていた。その結果:
   //   - 斜め4面の窓が壁の左右ではなく半径方向(壁の内外)へずれる
   //   - mkTrapFloor の台形室が風車状にねじれ、中庭から見て星形に突き出す
-  //   - furnitureBox も同様にずれる
+  //   - 家具の配置(現 fBox / rp)も同様にずれる
   // 「中央から棒状のものが突き出て見える」現象の実体はこのねじれた床・
   // 仕切り壁だった。
   function tanAt(theta){ return { x: Math.cos(theta), z: Math.sin(theta) }; }
@@ -618,16 +673,129 @@ function buildCastelDelMonte(){
     roofMain.group.add(lip);
   }
 
+  /* ================================================================ *
+   * 内装ヘルパー(部屋ローカル座標系)
+   * ---------------------------------------------------------------- *
+   * 部屋は台形なので、位置は常に (theta=面の中心角, r=中心からの半径,
+   * off=接線方向のずれ) の3つで指定する。箱の向きは既定で wallRy(theta)
+   * = 「幅wが接線方向、奥行きddが半径方向」。
+   * 追加する内装メッシュは数が多いので castShadow を切ってある -- 影
+   * マップの描画コストを増やさずに済み、室内は元々ほぼ影の中なので
+   * 見た目の損失がほとんどない(receiveShadow は残している)。
+   * ================================================================ */
+  function det(m){ m.castShadow = false; interiorGroup.add(m); return m; }
+  function rp(theta, r, off){
+    var d0 = dirAt(theta), t0 = tanAt(theta);
+    return { x: d0.x*r + t0.x*off, z: d0.z*r + t0.z*off };
+  }
+  // y は「下端」。上端ではなく下端で指定するほうが床から積むのに楽。
+  function fBox(theta, r, off, y, w, h, dd, mat, yaw){
+    var p = rp(theta, r, off);
+    var m = mkBox(w, h, dd, mat);
+    place(m, p.x, y + h/2, p.z, wallRy(theta) + (yaw||0));
+    return det(m);
+  }
+  function fCyl(theta, r, off, y, rt, rb, h, seg, mat, yaw){
+    var p = rp(theta, r, off);
+    var m = mkCyl(rt, rb, h, seg, mat);
+    place(m, p.x, y + h/2, p.z, wallRy(theta) + (yaw||0));
+    return det(m);
+  }
+  function fCone(theta, r, off, y, rad, h, seg, mat){
+    var p = rp(theta, r, off);
+    var m = mkCone(rad, h, seg, mat);
+    place(m, p.x, y + h/2, p.z);
+    return det(m);
+  }
+  // ローポリの塊(葉むら・実)。IcosahedronGeometry(r,0) は20面しかない。
+  function fBall(theta, r, off, y, rad, mat){
+    var p = rp(theta, r, off);
+    var m = new T.Mesh(new T.IcosahedronGeometry(rad, 0), mat);
+    m.receiveShadow = true;
+    m.position.set(p.x, y + rad, p.z);
+    return det(m);
+  }
+  /* 2点を結ぶ角材。ヴォールトのリブ・梁・斜材はどれも「任意方向の棒」
+   * なので、rotation.y だけでは向けられない。断面は正方形にしてあるので
+   * setFromUnitVectors が残す長さ軸まわりのねじれは見た目に出ない。 */
+  function strut(p0, p1, thick, mat){
+    var dx = p1.x-p0.x, dy = p1.y-p0.y, dz = p1.z-p0.z;
+    var len = Math.hypot(dx, dy, dz);
+    if (len < 1e-4) return null;
+    var m = mkBox(thick, len + thick*0.5, thick, mat);
+    m.position.set((p0.x+p1.x)/2, (p0.y+p1.y)/2, (p0.z+p1.z)/2);
+    m.quaternion.setFromUnitVectors(new T.Vector3(0,1,0), new T.Vector3(dx/len, dy/len, dz/len));
+    return det(m);
+  }
+  /* 尖頭アーチの骨組み。この城の開口(部屋どうしの扉口・中庭側の開口・
+   * ヴォールトの横断アーチ)はすべて尖頭アーチなので、1つのヘルパーで
+   * まかなう。等辺尖頭アーチ = 半径がスパンに等しい2本の円弧が反対側の
+   * 起拱点を中心に描かれ、頂点で交わる形。高さだけ rise で調整する。
+   * mapper(u, h) は「起拱点間の中央からの横ずれ u、起拱点からの高さ h」を
+   * ワールド座標へ写す関数。開口が接線方向を向くか半径方向を向くかで
+   * 写像が変わるので、呼び出し側から渡す。 */
+  function archStruts(mapper, half, rise, thick, mat, seg){
+    seg = seg || 3;
+    var S = half*2, i, base = [], poly = [];
+    for (i=0;i<=seg;i++){
+      var a = (Math.PI/3) * (i/seg);
+      base.push([ -half + S*Math.cos(a), S*Math.sin(a) * (rise/(S*Math.sin(Math.PI/3))) ]);
+    }
+    for (i=0;i<=seg;i++) poly.push([ -base[i][0], base[i][1] ]);  // 左の起拱点 -> 頂点
+    for (i=seg-1;i>=0;i--) poly.push(base[i]);                    // 頂点 -> 右の起拱点
+    for (i=0;i<poly.length-1;i++){
+      strut(mapper(poly[i][0], poly[i][1]), mapper(poly[i+1][0], poly[i+1][1]), thick, mat);
+    }
+  }
+  // 接線方向にスパンする尖頭アーチ(壁面の開口・中庭側の開口)
+  function tanArch(theta, r, off, springY, half, rise, thick, mat, seg){
+    archStruts(function(u,h){
+      var q = rp(theta, r, off + u);
+      return { x:q.x, y: springY + h, z:q.z };
+    }, half, rise, thick, mat, seg);
+  }
+  // 半径方向にスパンする尖頭アーチ(隅の仕切り壁に開く扉口)
+  function radArch(phi, rCenter, springY, half, rise, thick, mat, seg){
+    var dd = dirAt(phi);
+    archStruts(function(u,h){
+      return { x: dd.x*(rCenter+u), y: springY + h, z: dd.z*(rCenter+u) };
+    }, half, rise, thick, mat, seg);
+  }
+
   /* -------------------------------------------------------------- *
-   * 中庭(正八角形、開放空間)-- 石畳の床 + 低い縁壁(ロッジア状)
+   * 中庭(正八角形、開放空間)-- 石畳の床 + 中庭を囲む基壇の壁
    * -------------------------------------------------------------- */
+  /* 1階の床は y=3.0 にあり、中庭の石畳(y=0)との間には高さ3mの段差が
+   * ある。従来はここに高さ1.3mの腰壁しか無く、中庭から見ると腰壁の上に
+   * 1.7mの隙間が空いて地階(アンダークロフト)が丸見えだった。実物の
+   * 中庭も、1階の床面までは連続した石積みの立ち上がりになっている。
+   * -> 縁壁を1階床レベル(3.0m)まで立ち上げ、天端に笠石を回す。
+   * 南面(k=4)だけは主玄関から中庭へ抜ける通路なので開口を残す
+   * (住人の gate.path がここを通る)。 */
   var courtyard = octagonFan(COURT_R_VERT, 0.02, courtMat);
   interiorGroup.add(courtyard);
+  var COURT_WALL_H = GF_FLOOR_Y;           // 中庭の縁壁 = 1階床の高さ
+  var COURT_SIDE = OCT_SIDE*COURT_APOTH/OCT_APOTH_OUT + 0.3; // 中庭八角形の一辺(+のりしろ)
   for (k=0;k<8;k++){
-    var cTheta = wTheta(k), cd = dirAt(cTheta);
-    var courtWall = mkBox(OCT_SIDE*COURT_APOTH/OCT_APOTH_OUT + 0.3, 1.3, CWT, partitionMat);
-    place(courtWall, cd.x*(COURT_APOTH+CWT/2), 0.65, cd.z*(COURT_APOTH+CWT/2), wallRy(cTheta));
-    interiorGroup.add(courtWall);
+    (function(kk){
+      var cTheta = wTheta(kk), cd = dirAt(cTheta), ct2 = tanAt(cTheta);
+      var cwR = COURT_APOTH + CWT/2;
+      var spans = [[-COURT_SIDE/2, COURT_SIDE/2]];
+      if (kk === 4){                        // 玄関〜中庭の通路ぶんだけ開ける
+        var gapH = 1.7;
+        spans = [[-COURT_SIDE/2, -gapH], [gapH, COURT_SIDE/2]];
+      }
+      spans.forEach(function(sp){
+        var len = sp[1]-sp[0], mid = (sp[0]+sp[1])/2;
+        var cw = mkBox(len, COURT_WALL_H, CWT, partitionMat);
+        place(cw, cd.x*cwR + ct2.x*mid, COURT_WALL_H/2, cd.z*cwR + ct2.z*mid, wallRy(cTheta));
+        det(cw);
+      });
+      // 天端の笠石(1階床の縁を見せる帯)
+      var cope = mkBox(COURT_SIDE + 0.2, 0.26, CWT + 0.34, ribMat);
+      place(cope, cd.x*cwR, COURT_WALL_H - 0.13, cd.z*cwR, wallRy(cTheta));
+      det(cope);
+    })(k);
   }
   registerPick(pickables, 'room', 0, 1.2, 0, COURT_DIA*0.92, 2.4, COURT_DIA*0.92,
     '中庭 Courtyard',
@@ -650,35 +818,42 @@ function buildCastelDelMonte(){
     mesh.receiveShadow = true;
     return mesh;
   }
-  function radialWall(theta, rInner, rOuter, y, h, mat){
-    var d0 = dirAt(theta);
-    var cr = (rInner+rOuter)/2;
-    var m = mkBox(rOuter-rInner, h, 0.4, mat);
-    place(m, d0.x*cr, y+h/2, d0.z*cr, radialRy(theta));
-    interiorGroup.add(m);
-    return m;
-  }
   function pickRoom(theta, rInner, rOuter, halfW, y, h, name, desc){
     var d0 = dirAt(theta);
     var midR = (rInner+rOuter)/2;
     registerPick(pickables, 'room', d0.x*midR, y+h/2, d0.z*midR, halfW*2, h, rOuter-rInner, name, desc);
   }
-  function furnitureBox(theta, r, tangentOff, y, w, h, dd, mat){
-    var d0=dirAt(theta), t0=tanAt(theta);
-    var m = mkBox(w,h,dd,mat);
-    place(m, d0.x*r+t0.x*tangentOff, y+h/2, d0.z*r+t0.z*tangentOff, wallRy(theta));
-    interiorGroup.add(m);
-    return m;
-  }
 
+  /* 16室それぞれに用途を割り当てる。実物は家具が一切残っていない空の
+   * 空間で、各室の用途を示す確証も無い(「用途不明の城」と呼ばれる所以)
+   * -- が、他の4城と同じ密度で「当時の生活」を想像した内装にする、という
+   * 方針なので、フリードリヒ2世の狩猟・滞在の館として無理のない配置を
+   * 割り当てた。名称に(想定)を付けて、史実の断定と区別している。 */
   var ROOM_NAME_GF = {
     0: { name:'玉座の間(伝) Presumed Throne Room', desc:'玄関の対面(北)に位置する1階の部屋。伝統的に謁見・玉座の間と推定されてきたが、確証はなく用途不明の一室に過ぎない、という説も根強い。' },
-    4: { name:'玄関の間 Entrance Hall', desc:'主玄関ポータルの内側にあたる1階の間。城内で唯一、外部と直接つながる部屋。' }
+    1: { name:'厨房(想定) Kitchen', desc:'外壁側に炉を構えた1階の部屋。実物には厨房と断定できる痕跡は無いが、集水・排水設備が整うこの城で調理が行われたとすれば、煙を外へ抜ける外壁沿いのこの位置が自然。' },
+    2: { name:'食料貯蔵室(想定) Pantry', desc:'樽と穀物袋を収めた1階の部屋。皇帝の滞在は短期間だったとされ、常設の大規模な貯蔵は不要だった。' },
+    3: { name:'従士の間(想定) Retainers Hall', desc:'架台式の卓と長椅子を置いた1階の部屋。武具掛けがあるが、この城には駐屯機能がなく、随行の従士が短期滞在するだけの設え。' },
+    4: { name:'玄関の間 Entrance Hall', desc:'主玄関ポータルの内側にあたる1階の間。城内で唯一、外部と直接つながる部屋。' },
+    5: { name:'従者の間(想定) Servants Chamber', desc:'藁敷きの床に寝床を並べた1階の部屋。随行の使用人が寝起きした想定。' },
+    6: { name:'織物の間(想定) Weaving Room', desc:'竪機(たてはた)を据えた1階の部屋。城の日常を支える手仕事の場。' },
+    7: { name:'工房(想定) Workshop', desc:'作業台と材木を置いた1階の部屋。石造の館を維持するための修繕の場。' }
   };
   var ROOM_NAME_FF = {
     0: { name:'大広間(伝) Sala Maggiore / Great Hall', desc:'玄関の対面(北)に位置する2階の部屋。最も格の高い広間だったと推定されるが、暖炉の跡以外に用途を示す確証は乏しい。' },
-    4: { name:'貴賓の間(伝) Guest Chamber', desc:'玄関の真上にあたる2階の間。中庭側と外側の双方に開口を持つ。' }
+    1: { name:'皇帝の寝室(想定) Emperor Chamber', desc:'天蓋付きの寝台を据えた2階の部屋。上階は下階より格式が高く、大きな窓・装飾的な暖炉・大理石の腰壁を備える。' },
+    2: { name:'天文の間(想定) Study of the Stars', desc:'書見台と渾天儀を置いた2階の部屋。数学と天文学に傾倒したフリードリヒ2世の関心を映す。八角形という平面自体がその現れとされる。' },
+    3: { name:'鷹の間(想定) Falconry Chamber', desc:'鷹の止まり木を据えた2階の部屋。フリードリヒ2世は鷹狩の理論書『鳥類による狩猟の術』を自ら著しており、この城も狩猟の館だったとする説が有力。' },
+    4: { name:'貴賓の間(伝) Guest Chamber', desc:'玄関の真上にあたる2階の間。中庭側と外側の双方に開口を持つ。' },
+    5: { name:'控えの間(想定) Antechamber', desc:'壁沿いに長椅子を並べた2階の部屋。大広間へ通される前の待合。' },
+    6: { name:'浴室(想定) Bath Chamber', desc:'大理石の浴槽と水盤を置いた2階の部屋。実物のこの城には水洗式の設備があったとされ、当時としては例外的に高度な衛生設備を備えていた。' },
+    7: { name:'礼拝の間(想定) Private Oratory', desc:'簡素な石の祭壇を据えた2階の部屋。皇帝個人の祈りの場という想定。' }
   };
+  // 部屋ごとの床の質感(1階/2階)。石・板・藁・大理石・石タイルを使い分ける。
+  var GF_FLOOR_MAT = [floorMat, floorTileMat, floorMat, floorStrawMat,
+                      floorMat, floorStrawMat, floorWoodMat, floorWoodMat];
+  var FF_FLOOR_MAT = [floorMarbleMat, floorWoodMat, floorWoodMat, floorStrawMat,
+                      floorMarbleMat, floorMat, floorTileMat, floorMarbleMat];
 
   var innerFloorR = COURT_APOTH_OUT, outerFloorR = OCT_APOTH_IN;
   // 正八角形の「側辺半長 = 対辺間半径(アポテム) x tan(22.5°)」の関係を
@@ -688,29 +863,670 @@ function buildCastelDelMonte(){
   // だけ別の式(OCT_SIDE/2 - 0.4)を使っておりズレが生じていた。
   var halfInnerW = innerFloorR * Math.tan(Math.PI/8);
   var halfOuterW = outerFloorR * Math.tan(Math.PI/8);
+  var MID_R = (innerFloorR + outerFloorR)/2;                 // 室の中央の半径 ≒13.3m
+  var halfMidW = MID_R * Math.tan(Math.PI/8);                 // 室の中央での半幅 ≒5.5m
+  // 階ごとのレベル。柱頭(capY)から上がリブ、crownY がヴォールトの要。
+  var GF_ROOM_TOP = FF_FLOOR_Y - GF_FLOOR_Y;                  // 1階の階高 6.5m
+  var FF_ROOM_TOP = WALL_H - FF_FLOOR_Y;                      // 2階の階高 10.3m
+  var GF_CAP_Y = GF_FLOOR_Y + 3.2, GF_CROWN_Y = FF_FLOOR_Y - 0.28;
+  var FF_CAP_Y = FF_FLOOR_Y + 5.6, FF_CROWN_Y = WALL_H - 0.35;
+
+  /* ---- リブ・ヴォールト -------------------------------------------
+   * 実物写真(Wikimedia Commons: "Castel del monte, interno, volta 01.jpg"
+   * / "... stanze 01.jpg")で確認した構成をローポリに落とす:
+   *   - 台形室の4隅に角礫岩(玄関ポータルと同じ、白い石灰岩の中で唯一
+   *     赤みを持つ石)の付柱が立ち、その上に明色の柱頭が載る
+   *   - 柱頭から4本の対角リブが立ち上がり、中央のボス(rosoncino)で交差
+   *   - リブは天井のウェブ面より一段下がった明るい切石
+   * ウェブ(天井面そのもの)は張らない -- 上階の床メッシュ(DoubleSide)が
+   * そのまま天井として見えるので、リブ+付柱+ボスだけで「ヴォールトの
+   * 部屋」として十分読める。 */
+  function ribVault(theta, floorY, capY, crownY){
+    var cp = rp(theta, MID_R, 0);
+    var boss = { x: cp.x, y: crownY, z: cp.z };
+    var corners = [
+      [innerFloorR + 0.55, -(halfInnerW - 0.6)], [innerFloorR + 0.55, halfInnerW - 0.6],
+      [outerFloorR - 0.55,   halfOuterW - 0.8 ], [outerFloorR - 0.55, -(halfOuterW - 0.8)]
+    ];
+    corners.forEach(function(c){
+      fCyl(theta, c[0], c[1], floorY, 0.26, 0.30, capY - floorY, 8, marbleMat);
+      fBox(theta, c[0], c[1], capY, 0.76, 0.30, 0.76, ribMat);
+      var q = rp(theta, c[0], c[1]);
+      var a = { x:q.x, y: capY + 0.34, z:q.z };
+      // 尖頭アーチらしい反りを出すため、対角リブは2分割して中間点を
+      // 直線より上へ持ち上げる(直線1本だとただの斜材に見える)。
+      var mid = { x:(a.x+boss.x)/2, y: a.y + (crownY - a.y)*0.76, z:(a.z+boss.z)/2 };
+      strut(a, mid, 0.18, ribMat);
+      strut(mid, boss, 0.18, ribMat);
+    });
+    fCyl(theta, MID_R, 0, crownY - 0.14, 0.42, 0.42, 0.24, 8, ribMat);
+  }
+
+  /* ---- 隅の仕切り壁 + 扉口 ----------------------------------------
+   * 従来は高さ3.0mの腰壁で、階高6.5m/10.3mの中では「低い衝立」にしか
+   * 見えなかった。実物は天井まで達する石壁で、中ほどに尖頭アーチの扉口
+   * が開いて隣室へ連続する -- この城の部屋は廊下を持たず、8室が扉で
+   * 数珠つなぎに巡る、というのが平面の最大の特徴。 */
+  function partitionWithDoor(phi, floorY, roomH, doorH, arched){
+    var dd = dirAt(phi);
+    var dR0 = MID_R - 0.85, dR1 = MID_R + 0.85;
+    [[innerFloorR, dR0], [dR1, outerFloorR]].forEach(function(sp){
+      var m = mkBox(sp[1]-sp[0], roomH, 0.44, partitionMat);
+      place(m, dd.x*(sp[0]+sp[1])/2, floorY + roomH/2, dd.z*(sp[0]+sp[1])/2, radialRy(phi));
+      det(m);
+    });
+    var above = mkBox(dR1-dR0, roomH - doorH, 0.44, partitionMat);
+    place(above, dd.x*MID_R, floorY + doorH + (roomH-doorH)/2, dd.z*MID_R, radialRy(phi));
+    det(above);
+    // 扉枠(角礫岩)。実物では部屋どうしの扉口だけが赤みの石で縁取られる。
+    [dR0, dR1].forEach(function(rr){
+      var j = mkBox(0.34, doorH, 0.66, marbleMat);
+      place(j, dd.x*rr, floorY + doorH/2, dd.z*rr, radialRy(phi));
+      det(j);
+    });
+    if (arched) radArch(phi, MID_R, floorY + doorH - 0.95, 0.85, 0.95, 0.24, marbleMat, 2);
+    else {
+      var lint = mkBox(dR1-dR0+0.5, 0.3, 0.66, marbleMat);
+      place(lint, dd.x*MID_R, floorY + doorH + 0.15, dd.z*MID_R, radialRy(phi));
+      det(lint);
+    }
+  }
+
+  /* ---- 中庭側の立面 ------------------------------------------------
+   * 最初は「開放アーケード(細い方立+アーチの輪郭だけ)」で組んだが、
+   * 8面 x 2階 = 16組の細い部材だけが中庭をぐるりと囲む形になり、建築では
+   * なく白い足場のように見えた。実物の中庭側の立面もロッジアではなく、
+   * 扉と窓を穿った石壁(2階の装飾ポータルが有名)なので、素直に壁を
+   * 立てて中央に尖頭アーチの扉口を開ける。まぐさの上にアーチの見え掛かり
+   * (浮き彫り)を重ねると、開口が四角くてもこの城らしく読める。 */
+  function courtWallFace(theta, floorY, roomH, doorH, withWindows){
+    var r0 = innerFloorR + 0.26, tk = 0.52;
+    var edge = r0 * Math.tan(Math.PI/8);       // 室の内側端の半幅 ≒4.14
+    var half = 1.75;                            // 扉口の半幅(開口幅3.5m)
+    [-1,1].forEach(function(s){
+      var w = edge - half;
+      fBox(theta, r0, s*(half + w/2), floorY, w, roomH, tk, partitionMat);
+    });
+    fBox(theta, r0, 0, floorY + doorH, half*2, roomH - doorH, tk, partitionMat);
+    [-1,1].forEach(function(s){                 // 扉口の縁(角礫岩)
+      fBox(theta, r0 - 0.08, s*half, floorY, 0.34, doorH, tk, marbleMat);
+    });
+    fBox(theta, r0 - 0.08, 0, floorY + doorH, half*2 + 0.72, 0.34, tk, marbleMat);
+    tanArch(theta, r0 - tk*0.55, 0, floorY + doorH + 0.34, half + 0.18, 1.5, 0.24, ribMat, 3);
+    if (withWindows){                           // 上階は扉口の左右に窓
+      [-1,1].forEach(function(s){
+        fBox(theta, r0 - 0.16, s*2.95, floorY + 2.3, 0.85, 1.95, 0.30, windowMat);
+        fBox(theta, r0 - 0.24, s*2.95, floorY + 4.25, 1.15, 0.24, 0.30, trimMat);
+      });
+    }
+  }
+
+  /* ---- 家具の部品 -------------------------------------------------- */
+  function fTable(theta, r, off, y, w, dd, mat){
+    fBox(theta, r, off, y+0.70, w, 0.12, dd, mat);
+    fBox(theta, r, off - w/2 + 0.30, y, 0.20, 0.70, dd*0.72, mat);
+    fBox(theta, r, off + w/2 - 0.30, y, 0.20, 0.70, dd*0.72, mat);
+  }
+  function fBench(theta, r, off, y, w, dd, yaw){
+    fBox(theta, r, off, y+0.40, w, 0.10, dd, woodMat, yaw);
+    fBox(theta, r, off - w/2 + 0.22, y, 0.14, 0.40, dd*0.7, woodDkMat, yaw);
+    fBox(theta, r, off + w/2 - 0.22, y, 0.14, 0.40, dd*0.7, woodDkMat, yaw);
+  }
+  function fChest(theta, r, off, y, w){
+    fBox(theta, r, off, y, w, 0.52, 0.62, woodMat);
+    fBox(theta, r, off, y+0.52, w*1.05, 0.12, 0.68, woodDkMat);
+  }
+  function fBarrel(theta, r, off, y, rad, h){
+    fCyl(theta, r, off, y, rad*0.88, rad*0.88, h, 10, woodMat);
+    fCyl(theta, r, off, y + h*0.38, rad, rad, 0.10, 10, woodDkMat);
+  }
+  function fBrazier(theta, r, off, y){
+    fCyl(theta, r, off, y, 0.06, 0.06, 0.62, 6, metalMat);
+    fCyl(theta, r, off, y+0.62, 0.34, 0.20, 0.22, 8, metalMat);
+    fCone(theta, r, off, y+0.80, 0.20, 0.36, 6, fireMat);
+  }
+  function fCandle(theta, r, off, y, h){
+    fCyl(theta, r, off, y, 0.05, 0.14, h, 6, goldMat);
+    fCyl(theta, r, off, y+h, 0.26, 0.10, 0.07, 6, goldMat);
+    fCone(theta, r, off, y+h+0.07, 0.07, 0.20, 5, fireMat);
+  }
+  function fSack(theta, r, off, y, s){
+    fCone(theta, r, off, y, s, s*2.1, 6, linenMat);
+  }
+  function fTapestry(theta, r, off, y, w, h, mat){
+    fBox(theta, r, off, y, w, h, 0.09, mat);
+    fBox(theta, r - 0.06, off, y + h, w + 0.2, 0.12, 0.16, woodDkMat);
+  }
+  /* 暖炉。実物の上階には装飾的な暖炉(camino)がある。フードは
+   * CylinderGeometry(seg=4) の四角錐台を1メッシュで済ませる。
+   * 注意: 「rotation.y に +π/4 を足して面を正対させ、そのうえで
+   * scale.x で横に広げる」とやると破綻する -- scale はローカル座標系に
+   * 効くので、π/4 回した後の軸方向に伸びてしまい、菱形にひしゃげた
+   * 「白い帆」のような物体になる(実際そう見えていた)。回転はジオメトリ
+   * 側で済ませ、mesh の rotation.y は壁向きだけにする。 */
+  function fFireplace(theta, floorY){
+    var rw = outerFloorR - 0.28;
+    fBox(theta, rw - 0.34, 0, floorY, 3.0, 0.16, 1.05, darkMat);       // 炉床
+    [-1,1].forEach(function(s){
+      fBox(theta, rw, s*1.25, floorY, 0.45, 1.95, 0.72, marbleMat);     // 袖石
+    });
+    fBox(theta, rw, 0, floorY + 1.95, 3.2, 0.34, 0.78, marbleMat);      // まぐさ
+    var hoodGeo = new T.CylinderGeometry(0.34, 1.12, 1.7, 4);
+    hoodGeo.rotateY(Math.PI/4);
+    hoodGeo.scale(1.45, 1, 0.58);
+    var hood = new T.Mesh(hoodGeo, partitionMat);
+    hood.receiveShadow = true;
+    var hp = rp(theta, rw - 0.05, 0);
+    place(hood, hp.x, floorY + 3.14, hp.z, wallRy(theta));
+    flatFacets(hood); det(hood);
+    fCone(theta, rw - 0.34, 0, floorY + 0.16, 0.46, 0.62, 6, fireMat);  // 炎
+    fBox(theta, rw - 0.34, -0.5, floorY + 0.16, 0.9, 0.18, 0.2, woodDkMat, 0.3);
+    fBox(theta, rw - 0.34,  0.5, floorY + 0.16, 0.9, 0.18, 0.2, woodDkMat, -0.3);
+  }
+
+  /* ---- 各室の基準半径 ----------------------------------------------
+   * 台形室は内側(中庭側)9.73m 〜 外側(外壁の室内面)16.92m。家具は
+   * この範囲を出ないように、4つの基準半径からの相対で置く。
+   * (最初に組んだときは「外壁沿い」を outerFloorR-0.8 とし、そこから
+   *  さらに +1.0 したりしていたため、玉座の背もたれやタペストリーが
+   *  外壁の中に完全に埋まって見えなくなっていた。) */
+  var R_WALL = outerFloorR - 0.12;    // 外壁の室内側の面 ≒16.80(壁掛け用)
+  var R_OUT  = outerFloorR - 1.35;    // 外壁沿いに置く家具の中心 ≒15.57
+  var R_IN   = innerFloorR + 1.35;    // 中庭側に置く家具の中心 ≒11.08
+
+  /* ---- 1階8室の設え ------------------------------------------------ */
+  function furnishGF(kk, th){
+    var y = GF_FLOOR_Y;
+    if (kk === 0){                       // 玉座の間
+      fBox(th, R_OUT, 0, y, 5.4, 0.22, 2.4, darkMat);                  // 壇(1段目)
+      fBox(th, R_OUT + 0.33, 0, y + 0.22, 4.4, 0.22, 1.8, darkMat);    // 壇(2段目)
+      fBox(th, R_OUT + 0.53, 0, y + 0.44, 1.05, 0.48, 0.9, woodDkMat); // 玉座の座
+      fBox(th, R_OUT + 1.03, 0, y + 0.44, 1.15, 2.1, 0.24, woodDkMat); // 背もたれ
+      fBox(th, R_OUT + 0.58, 0, y + 1.05, 1.35, 0.14, 1.0, goldMat);   // 肘掛け
+      fTapestry(th, R_WALL, -2.9, y + 2.4, 2.0, 3.2, clothRMat);
+      fTapestry(th, R_WALL,  2.9, y + 2.4, 2.0, 3.2, clothBMat);
+      fBrazier(th, MID_R, -2.4, y); fBrazier(th, MID_R, 2.4, y);
+      fBench(th, R_IN, -3.2, y, 2.4, 0.5, Math.PI/2);
+      fBench(th, R_IN,  3.2, y, 2.4, 0.5, Math.PI/2);
+    } else if (kk === 1){                // 厨房
+      fFireplace(th, y);
+      fCyl(th, outerFloorR - 0.62, 0, y + 0.55, 0.55, 0.42, 0.6, 10, metalMat); // 釜
+      fCyl(th, outerFloorR - 0.62, 0, y + 1.15, 0.05, 0.05, 0.9, 6, metalMat);  // 吊り鎖
+      fTable(th, MID_R, -1.6, y, 2.6, 1.1, woodMat);
+      fBarrel(th, R_IN + 0.6, 2.9, y, 0.48, 1.05);
+      fBarrel(th, R_IN + 1.7, 3.2, y, 0.48, 1.05);
+      fBox(th, MID_R + 1.2, 3.0, y, 1.6, 1.0, 0.9, woodDkMat);         // 薪の山
+      fBox(th, MID_R + 1.2, 3.0, y + 1.0, 1.3, 0.5, 0.7, woodDkMat);
+      fBox(th, R_WALL - 0.28, -3.6, y + 1.5, 2.0, 0.12, 0.52, woodMat);// 吊り棚
+      fCyl(th, R_WALL - 0.35, -4.0, y + 1.62, 0.16, 0.16, 0.3, 8, metalMat);
+      fCyl(th, R_WALL - 0.35, -3.2, y + 1.62, 0.2, 0.2, 0.26, 8, terraMat);
+    } else if (kk === 2){                // 食料貯蔵室
+      [-3.4,-2.2,-1.0].forEach(function(o){ fBarrel(th, R_OUT, o, y, 0.52, 1.15); });
+      [-2.8,-1.6].forEach(function(o){ fBarrel(th, R_OUT - 1.3, o, y, 0.52, 1.15); });
+      fSack(th, MID_R, 1.6, y, 0.45); fSack(th, MID_R + 0.9, 2.5, y, 0.45);
+      fSack(th, MID_R - 0.7, 2.7, y, 0.40);
+      fBox(th, R_IN + 0.5, 3.2, y, 1.1, 0.8, 0.9, woodMat);            // 木箱
+      fBox(th, R_IN + 0.5, 3.2, y + 0.8, 0.9, 0.7, 0.75, woodMat);
+      fBox(th, R_WALL - 0.30, 2.6, y + 1.6, 3.2, 0.12, 0.55, woodMat); // 棚板
+      fBox(th, R_WALL - 0.30, 2.6, y + 2.3, 3.2, 0.12, 0.55, woodMat);
+      [1.6, 2.4, 3.2].forEach(function(o){
+        fCyl(th, R_WALL - 0.35, o, y + 1.72, 0.16, 0.13, 0.34, 8, terraMat);
+      });
+    } else if (kk === 3){                // 従士の間
+      fTable(th, MID_R, 0, y, 3.6, 1.2, woodMat);
+      fBench(th, MID_R, -1.05, y, 3.2, 0.42);
+      fBench(th, MID_R,  1.05, y, 3.2, 0.42);
+      fChest(th, R_OUT, -3.0, y, 1.3);
+      fBox(th, R_WALL - 0.16, 2.8, y + 2.0, 2.4, 0.16, 0.3, woodDkMat);// 武具掛け
+      [-0.7, 0, 0.7].forEach(function(o){
+        fCyl(th, R_WALL - 0.30, 2.8 + o, y, 0.05, 0.05, 2.4, 5, woodDkMat);
+        fCone(th, R_WALL - 0.30, 2.8 + o, y + 2.4, 0.09, 0.32, 5, metalMat);
+      });
+      fBox(th, R_IN + 0.4, -3.2, y, 2.0, 0.24, 1.1, strawMat);         // 藁の寝床
+      fBrazier(th, R_IN + 0.4, 2.6, y);
+    } else if (kk === 4){                // 玄関の間
+      fBench(th, R_IN + 0.4, -3.4, y, 3.0, 0.5, Math.PI/2);
+      fBench(th, R_IN + 0.4,  3.4, y, 3.0, 0.5, Math.PI/2);
+      fChest(th, R_OUT, -3.2, y, 1.4);
+      fChest(th, R_OUT,  3.2, y, 1.4);
+      [-2.2, 2.2].forEach(function(o){                                 // 松明の受け
+        fBox(th, R_WALL - 0.20, o, y + 2.4, 0.22, 0.5, 0.3, metalMat);
+        fCone(th, R_WALL - 0.36, o, y + 2.8, 0.16, 0.4, 5, fireMat);
+      });
+      fBox(th, MID_R + 0.6, 0, y + 0.02, 3.0, 0.06, 3.4, darkMat);     // 敷石の通路
+    } else if (kk === 5){                // 従者の間
+      [-3.2, -1.4, 0.4].forEach(function(o){
+        fBox(th, R_OUT - 0.1, o, y, 1.0, 0.22, 2.0, strawMat);
+        fBox(th, R_OUT - 0.1, o, y + 0.22, 0.9, 0.14, 1.9, linenMat);
+      });
+      fChest(th, R_IN + 0.6, 2.6, y, 1.2);
+      fTable(th, MID_R + 0.6, 3.0, y, 1.6, 0.9, woodMat);
+      fCyl(th, MID_R + 0.6, 3.0, y + 0.82, 0.26, 0.22, 0.16, 8, terraMat);
+      fCandle(th, MID_R + 0.6, 2.2, y, 0.9);
+      fBox(th, R_WALL - 0.16, -3.0, y + 1.9, 2.0, 0.12, 0.24, woodDkMat); // 衣掛け
+      fBox(th, R_WALL - 0.30, -3.0, y + 1.0, 0.9, 0.9, 0.14, clothBMat);
+    } else if (kk === 6){                // 織物の間
+      // 竪機(たてはた): 2本の柱 + 上の巻取り棒 + 織りかけの布
+      [-1.3, 1.3].forEach(function(o){ fBox(th, MID_R, o, y, 0.16, 2.6, 0.9, woodDkMat); });
+      fBox(th, MID_R, 0, y + 2.5, 2.9, 0.18, 0.9, woodDkMat);
+      fBox(th, MID_R, 0, y + 0.6, 2.5, 1.5, 0.12, linenMat);
+      fBench(th, MID_R - 1.3, 0, y, 1.0, 0.4);
+      fCyl(th, R_IN + 0.6, 2.8, y, 0.42, 0.5, 0.4, 8, strawMat);       // 糸かご
+      fBox(th, R_OUT, -2.8, y, 1.4, 0.9, 0.9, clothBMat);              // 反物
+      fBox(th, R_OUT, -2.8, y + 0.9, 1.2, 0.5, 0.8, clothRMat);
+      fTable(th, R_OUT, 2.4, y, 2.0, 1.0, woodMat);
+      fBox(th, R_OUT, 2.4, y + 0.82, 1.2, 0.2, 0.7, linenMat);
+    } else {                             // 工房(kk === 7)
+      fTable(th, MID_R, -0.8, y, 3.0, 1.3, woodDkMat);
+      fBox(th, MID_R, -0.8, y + 0.82, 0.6, 0.14, 0.5, metalMat);       // 金床
+      fBox(th, R_WALL - 0.16, 2.4, y + 1.9, 2.4, 0.14, 0.28, woodDkMat);// 道具掛け
+      [-0.6, 0, 0.6].forEach(function(o){
+        fBox(th, R_WALL - 0.30, 2.4 + o, y + 1.35, 0.14, 0.55, 0.12, metalMat);
+      });
+      [0, 0.34, 0.68].forEach(function(dy){                            // 材木の山
+        fBox(th, R_IN + 0.9, 3.0, y + dy, 3.0, 0.30, 0.32, woodMat, Math.PI/2);
+      });
+      fBarrel(th, R_OUT, -3.0, y, 0.45, 0.95);
+      fBox(th, MID_R + 0.4, 2.6, y, 1.4, 0.8, 0.5, woodMat, 0.4);      // 木挽き台
+      fSack(th, R_IN + 0.4, -2.6, y, 0.40);
+    }
+  }
+
+  /* ---- 2階8室の設え(上階のほうが格式が高い)----------------------
+   * 実物でも上階は大きな窓・装飾的な暖炉・大理石の腰壁を備え、下階より
+   * はっきり格が上。ここでも腰壁を全室に回し、家具の密度を上げる。 */
+  function furnishFF(kk, th){
+    var y = FF_FLOOR_Y;
+    fBox(th, outerFloorR - 0.16, 0, y, halfOuterW*1.7, 0.95, 0.3, marbleMat); // 大理石の腰壁
+    if (kk === 0){                       // 大広間
+      fFireplace(th, y);
+      fTable(th, MID_R, 0, y, 5.0, 1.4, woodMat);
+      fBench(th, MID_R, -1.15, y, 4.4, 0.45);
+      fBench(th, MID_R,  1.15, y, 4.4, 0.45);
+      fBox(th, R_OUT - 0.2, -3.6, y, 1.0, 0.5, 0.9, woodDkMat);        // 上座
+      fBox(th, R_OUT + 0.25, -3.6, y + 0.5, 1.1, 1.6, 0.16, clothRMat);
+      fTapestry(th, R_WALL, 3.4, y + 3.0, 2.4, 3.6, clothRMat);
+      fCandle(th, MID_R, -2.0, y + 0.82, 0.5);
+      fCandle(th, MID_R,  2.0, y + 0.82, 0.5);
+      fBox(th, R_IN + 0.3, 3.2, y, 2.2, 1.0, 0.7, woodMat);            // 食器棚
+      fBox(th, R_IN + 0.3, 3.2, y + 1.0, 2.0, 0.1, 0.6, woodDkMat);
+      [-0.6, 0, 0.6].forEach(function(o){
+        fCyl(th, R_IN + 0.3, 3.2 + o, y + 1.1, 0.13, 0.10, 0.24, 8, goldMat);
+      });
+    } else if (kk === 1){                // 皇帝の寝室
+      fFireplace(th, y);
+      var br = MID_R + 0.4, bo = -2.2;
+      fBox(th, br, bo, y, 2.2, 0.42, 2.6, woodDkMat);                  // 寝台
+      fBox(th, br, bo, y + 0.42, 2.05, 0.28, 2.45, linenMat);
+      fBox(th, br, bo, y + 0.70, 2.05, 0.14, 1.2, clothRMat);
+      fBox(th, br - 1.1, bo, y + 0.70, 1.6, 0.20, 0.5, linenMat);      // 枕
+      [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(function(s){               // 天蓋の4柱
+        fCyl(th, br + s[0]*1.2, bo + s[1]*1.0, y, 0.09, 0.09, 3.0, 6, woodDkMat);
+      });
+      fBox(th, br, bo, y + 3.0, 2.5, 0.18, 2.9, woodDkMat);            // 天蓋
+      fBox(th, br + 1.2, bo, y + 1.2, 0.14, 1.8, 2.6, clothBMat);      // 帳
+      fChest(th, R_IN + 0.5, 2.6, y, 1.5);
+      fBench(th, MID_R, 3.2, y, 1.0, 0.5);
+      fBox(th, R_OUT - 0.3, 3.0, y + 0.01, 3.2, 0.05, 2.4, clothBMat); // 敷物
+      fCandle(th, R_IN + 0.5, 3.6, y + 0.52, 0.5);
+    } else if (kk === 2){                // 天文の間
+      fBox(th, MID_R, -1.0, y, 0.5, 1.2, 0.5, woodDkMat);              // 書見台
+      fCyl(th, MID_R, -1.0, y + 1.2, 0.55, 0.55, 0.1, 8, woodDkMat);
+      fBox(th, MID_R, -1.0, y + 1.30, 0.9, 0.08, 0.7, woodMat);
+      fBox(th, MID_R, -1.0, y + 1.38, 0.7, 0.06, 0.5, linenMat);
+      fTable(th, MID_R + 0.9, 1.9, y, 2.4, 1.1, woodMat);
+      // 渾天儀(アーミラリー天球儀)-- 3枚の輪を直交させる
+      (function(){
+        var p = rp(th, MID_R + 0.9, 1.9);
+        [[0,0,0],[Math.PI/2,0,0],[0,0,Math.PI/2]].forEach(function(rot){
+          var ring = new T.Mesh(new T.TorusGeometry(0.34, 0.035, 4, 14), goldMat);
+          ring.position.set(p.x, y + 1.22, p.z);
+          ring.rotation.set(rot[0], rot[1], rot[2]);
+          det(ring);
+        });
+        var core = new T.Mesh(new T.IcosahedronGeometry(0.09, 0), metalMat);
+        core.position.set(p.x, y + 1.22, p.z);
+        det(core);
+      })();
+      fBox(th, R_WALL - 0.30, -3.0, y + 0.9, 2.8, 0.12, 0.5, woodMat); // 巻子の棚
+      fBox(th, R_WALL - 0.30, -3.0, y + 1.7, 2.8, 0.12, 0.5, woodMat);
+      [-3.8,-3.3,-2.8,-2.3].forEach(function(o){
+        fCyl(th, R_WALL - 0.30, o, y + 1.02, 0.09, 0.09, 0.5, 6, linenMat);
+        fCyl(th, R_WALL - 0.30, o, y + 1.82, 0.09, 0.09, 0.5, 6, linenMat);
+      });
+      fBench(th, MID_R - 1.1, 1.9, y, 0.8, 0.5);
+      fCandle(th, MID_R + 0.9, 2.9, y + 0.82, 0.45);
+      fTapestry(th, R_WALL, 3.4, y + 2.8, 2.0, 3.0, clothBMat);
+    } else if (kk === 3){                // 鷹の間
+      [-1.2, 1.2].forEach(function(o){
+        fCyl(th, MID_R + 0.4, o, y, 0.10, 0.10, 1.5, 6, woodDkMat);
+      });
+      fBox(th, MID_R + 0.4, 0, y + 1.5, 3.0, 0.14, 0.14, woodDkMat);   // 止まり木
+      [-0.9, 0.1, 0.9].forEach(function(o){                            // 鷹
+        fBall(th, MID_R + 0.4, o, y + 1.64, 0.20, woodMat);
+        fBall(th, MID_R + 0.26, o, y + 1.96, 0.11, linenMat);
+      });
+      fBox(th, MID_R + 0.4, 0, y + 0.01, 3.2, 0.06, 1.0, strawMat);    // 受けの藁
+      fChest(th, R_OUT, -3.0, y, 1.4);
+      fTable(th, R_IN + 0.8, 2.8, y, 1.8, 1.0, woodMat);
+      fBox(th, R_IN + 0.8, 2.8, y + 0.82, 0.5, 0.16, 0.4, woodDkMat);  // 鷹の頭巾箱
+      fTapestry(th, R_WALL, 3.2, y + 2.6, 2.0, 3.0, clothBMat);
+      fBrazier(th, MID_R - 1.4, -3.0, y);
+    } else if (kk === 4){                // 貴賓の間
+      var b2 = MID_R + 0.4;
+      fBox(th, b2, -2.4, y, 2.0, 0.40, 2.4, woodDkMat);
+      fBox(th, b2, -2.4, y + 0.40, 1.85, 0.26, 2.25, linenMat);
+      fBox(th, b2, -2.4, y + 0.66, 1.85, 0.12, 1.1, clothBMat);
+      fBox(th, b2 - 1.0, -2.4, y + 0.66, 1.5, 0.18, 0.45, linenMat);
+      fChest(th, R_IN + 0.6, 1.4, y, 1.3);
+      fBrazier(th, MID_R + 0.4, 2.6, y);
+      fTable(th, R_OUT, 3.0, y, 1.6, 0.9, woodMat);
+      fCyl(th, R_OUT, 3.0, y + 0.82, 0.30, 0.24, 0.2, 8, terraMat);    // 水差し
+      fTapestry(th, R_WALL, -3.4, y + 2.6, 2.0, 3.0, clothRMat);
+      fBench(th, R_IN + 0.6, -1.4, y, 1.4, 0.5);
+    } else if (kk === 5){                // 控えの間
+      fBench(th, R_IN + 0.4, -3.4, y, 3.4, 0.55, Math.PI/2);
+      fBench(th, R_IN + 0.4,  3.4, y, 3.4, 0.55, Math.PI/2);
+      fBench(th, R_OUT, 0, y, 4.0, 0.55);
+      fTable(th, MID_R, 0, y, 2.2, 1.0, woodMat);
+      fCandle(th, MID_R, 0, y + 0.82, 0.55);
+      fTapestry(th, R_WALL, -3.2, y + 2.6, 2.2, 3.2, clothBMat);
+      fTapestry(th, R_WALL,  3.2, y + 2.6, 2.2, 3.2, clothRMat);
+      fBrazier(th, MID_R - 1.6, 2.6, y);
+    } else if (kk === 6){                // 浴室
+      fBox(th, MID_R + 0.4, -1.6, y, 2.6, 0.72, 1.8, marbleMat);       // 浴槽
+      fBox(th, MID_R + 0.4, -1.6, y + 0.66, 2.2, 0.14, 1.4, cisternMat);
+      fCyl(th, R_OUT, 2.4, y, 0.36, 0.30, 0.95, 8, marbleMat);         // 水盤の脚
+      fCyl(th, R_OUT, 2.4, y + 0.95, 0.62, 0.5, 0.28, 8, marbleMat);
+      fCyl(th, R_OUT, 2.4, y + 1.20, 0.52, 0.52, 0.06, 8, cisternMat);
+      fBench(th, MID_R - 1.4, 2.2, y, 1.8, 0.55);
+      fBox(th, MID_R - 1.4, 2.2, y + 0.5, 1.2, 0.1, 0.45, linenMat);   // 布
+      fBrazier(th, R_IN + 0.8, -3.0, y);
+      fCyl(th, R_OUT, -2.6, y, 0.46, 0.40, 0.9, 10, terraMat);         // 水瓶
+      fBox(th, R_WALL - 0.20, -1.6, y + 1.0, 0.35, 0.35, 0.3, marbleMat); // 吐水口
+    } else {                             // 礼拝の間(kk === 7)
+      fBox(th, R_OUT + 0.2, 0, y, 2.6, 0.24, 1.5, marbleMat);          // 壇
+      fBox(th, R_OUT + 0.35, 0, y + 0.24, 1.9, 0.95, 0.85, marbleMat); // 祭壇
+      fBox(th, R_OUT + 0.35, 0, y + 1.19, 2.1, 0.12, 1.0, trimMat);
+      fBox(th, R_OUT + 0.35, 0, y + 1.31, 1.6, 0.06, 0.75, linenMat);
+      fBox(th, R_OUT + 0.55, 0, y + 1.37, 0.14, 0.85, 0.1, goldMat);   // 十字
+      fBox(th, R_OUT + 0.55, 0, y + 1.90, 0.55, 0.14, 0.1, goldMat);
+      fCandle(th, R_OUT + 0.35, -0.85, y + 1.31, 0.42);
+      fCandle(th, R_OUT + 0.35,  0.85, y + 1.31, 0.42);
+      fBox(th, MID_R, 0, y, 1.5, 0.30, 0.5, woodDkMat);                // 跪き台
+      fBox(th, MID_R - 0.3, 0, y + 0.30, 1.5, 0.7, 0.14, woodDkMat);
+      fBench(th, MID_R - 1.4, 0, y, 2.4, 0.5);
+      fTapestry(th, R_WALL, -3.0, y + 2.4, 1.8, 2.8, clothBMat);
+    }
+  }
+
   for (k=0;k<8;k++){
-    var rt = wTheta(k);
-    // 1階
-    var gfFloor = mkTrapFloor(rt, innerFloorR, outerFloorR, halfInnerW, halfOuterW, GF_FLOOR_Y, floorMat);
-    interiorGroup.add(gfFloor);
-    // 2階
-    var ffFloor = mkTrapFloor(rt, innerFloorR, outerFloorR, halfInnerW, halfOuterW, FF_FLOOR_Y, floorMat);
-    interiorGroup.add(ffFloor);
-    var gfInfo = ROOM_NAME_GF[k] || { name:'居室 Chamber G'+(k+1), desc:'1階、対称に配置された8室のひとつ。用途は諸説あり判然としない。' };
-    var ffInfo = ROOM_NAME_FF[k] || { name:'居室 Chamber F'+(k+1), desc:'2階、対称に配置された8室のひとつ。中庭側と外側の両方に開口を持つ。' };
-    pickRoom(rt, innerFloorR, outerFloorR, halfOuterW, GF_FLOOR_Y, GF_ROOM_H, gfInfo.name, gfInfo.desc);
-    pickRoom(rt, innerFloorR, outerFloorR, halfOuterW, FF_FLOOR_Y, FF_ROOM_H, ffInfo.name, ffInfo.desc);
+    (function(kk){
+      var rt = wTheta(kk);
+      var gfFloor = mkTrapFloor(rt, innerFloorR, outerFloorR, halfInnerW, halfOuterW, GF_FLOOR_Y, GF_FLOOR_MAT[kk]);
+      gfFloor.castShadow = false;
+      interiorGroup.add(gfFloor);
+      var ffFloor = mkTrapFloor(rt, innerFloorR, outerFloorR, halfInnerW, halfOuterW, FF_FLOOR_Y, FF_FLOOR_MAT[kk]);
+      ffFloor.castShadow = false;
+      interiorGroup.add(ffFloor);
+      var gfInfo = ROOM_NAME_GF[kk], ffInfo = ROOM_NAME_FF[kk];
+      pickRoom(rt, innerFloorR, outerFloorR, halfOuterW, GF_FLOOR_Y, GF_ROOM_H, gfInfo.name, gfInfo.desc);
+      pickRoom(rt, innerFloorR, outerFloorR, halfOuterW, FF_FLOOR_Y, FF_ROOM_H, ffInfo.name, ffInfo.desc);
+      // 中庭側の立面(扉口を穿った石壁)
+      courtWallFace(rt, GF_FLOOR_Y, GF_ROOM_TOP, 4.0, false);
+      courtWallFace(rt, FF_FLOOR_Y, FF_ROOM_TOP, 4.6, true);
+      // ヴォールト
+      ribVault(rt, GF_FLOOR_Y, GF_CAP_Y, GF_CROWN_Y);
+      ribVault(rt, FF_FLOOR_Y, FF_CAP_Y, FF_CROWN_Y);
+      // 柱頭の高さを巡る胴蛇腹(インポスト)-- 実物の室内で最も目を引く水平線
+      fBox(rt, outerFloorR - 0.12, 0, GF_CAP_Y - 0.16, halfOuterW*1.75, 0.14, 0.26, ribMat);
+      fBox(rt, outerFloorR - 0.12, 0, FF_CAP_Y - 0.16, halfOuterW*1.75, 0.14, 0.26, ribMat);
+      furnishGF(kk, rt);
+      furnishFF(kk, rt);
+    })(k);
   }
   // 隅の仕切り壁(1階・2階それぞれ、頂点角φで中庭〜外壁まで径方向に)
   for (v=0;v<8;v++){
-    radialWall(vPhi(v), innerFloorR, outerFloorR, GF_FLOOR_Y, 3.0, partitionMat);
-    radialWall(vPhi(v), innerFloorR, outerFloorR, FF_FLOOR_Y, 3.0, partitionMat);
+    partitionWithDoor(vPhi(v), GF_FLOOR_Y, GF_ROOM_TOP, 3.2, false);
+    partitionWithDoor(vPhi(v), FF_FLOOR_Y, FF_ROOM_TOP, 3.9, true);
   }
-  // 代表室の家具(簡易)
-  furnitureBox(wTheta(0), (innerFloorR+outerFloorR)/2, 0, GF_FLOOR_Y, 2.6, 1.1, 1.4, woodMat);
-  furnitureBox(wTheta(0), outerFloorR-0.8, 0, FF_FLOOR_Y, 3.0, 0.6, 1.2, woodMat);
-  furnitureBox(wTheta(4), (innerFloorR+outerFloorR)/2, 1.6, GF_FLOOR_Y, 1.0, 0.9, 1.0, woodMat);
-  furnitureBox(wTheta(4), (innerFloorR+outerFloorR)/2, -1.6, FF_FLOOR_Y, 1.0, 0.9, 1.0, woodMat);
+
+  /* ================================================================ *
+   * 地階(アンダークロフト)-- 中庭の石畳(y=0)と1階床(y=3.0)の間に
+   * できる高さ3mの環状空間。主玄関の扉口(高さ3.6m)はこの高さに開いて
+   * いるので、外から入った人はまずここを通って中庭へ抜ける(住人の
+   * life.gates の経路もこの高さを歩く)。従来はここが床も無い素通しの
+   * 隙間で、外壁がフェードすると丘の草地がそのまま室内に見えていた。
+   * ================================================================ */
+  (function buildUndercroft(){
+    var rvOut = OCT_APOTH_IN / Math.cos(Math.PI/8);
+    var rvIn  = COURT_APOTH_OUT / Math.cos(Math.PI/8);
+    var i;
+    for (i=0;i<8;i++){
+      var f = ringQuad(vPhi(i), vPhi(i+1), rvOut, rvIn, 0.05, cellarMat);
+      f.castShadow = false;
+      interiorGroup.add(f);
+    }
+    // 地階を8区画に分ける柱(1階の床を支える方杖付きの角柱)
+    for (i=0;i<8;i++){
+      var pd = dirAt(vPhi(i));
+      var col = mkBox(0.7, GF_FLOOR_Y, 0.7, partitionMat);
+      place(col, pd.x*MID_R, GF_FLOOR_Y/2, pd.z*MID_R, radialRy(vPhi(i)));
+      det(col);
+    }
+    // 玄関の通路(南、k=4): 敷石と壁付きのベンチ、松明
+    var th4 = wTheta(4);
+    fBox(th4, MID_R + 1.0, 0, 0.06, 3.0, 0.08, 7.0, darkMat);
+    [-1,1].forEach(function(s){
+      fBox(th4, MID_R + 1.0, s*2.1, 0.0, 0.6, 0.5, 5.0, partitionMat);
+      fCone(th4, outerFloorR - 1.2, s*2.4, 2.15, 0.16, 0.4, 5, fireMat);
+      fBox(th4, outerFloorR - 1.0, s*2.4, 1.9, 0.22, 0.45, 0.28, metalMat);
+    });
+    // 樽・薪・干し草・荷車 -- 地階は貯蔵と作業の場という設え
+    var stores = [1, 2, 3, 5, 6, 7];
+    stores.forEach(function(kk, idx){
+      var th = wTheta(kk), rr = MID_R + (idx%2 ? 0.9 : -0.9);
+      if (idx % 3 === 0){
+        [-2.2, -1.1, 0.0].forEach(function(o){ fBarrel(th, rr, o, 0, 0.5, 1.1); });
+        fBarrel(th, rr - 1.1, -1.6, 0, 0.5, 1.1);
+      } else if (idx % 3 === 1){
+        [0, 0.36, 0.72].forEach(function(dy){                 // 薪の山
+          fBox(th, rr, 1.8, dy, 3.2, 0.32, 0.34, woodDkMat, Math.PI/2);
+        });
+        fBox(th, rr - 1.4, 1.8, 0, 2.0, 0.9, 1.6, strawMat);  // 干し草
+      } else {
+        fBox(th, rr, -1.4, 0.5, 2.2, 0.6, 1.3, woodMat);      // 荷車の荷台
+        [-1,1].forEach(function(s){
+          var wcp = rp(th, rr, -1.4 + s*0.9);
+          var wheel = mkCyl(0.5, 0.5, 0.16, 10, woodDkMat);
+          wheel.rotation.z = Math.PI/2; wheel.rotation.y = wallRy(th);
+          place(wheel, wcp.x, 0.5, wcp.z);
+          det(wheel);
+        });
+        fBox(th, rr + 1.5, -1.4, 0.85, 0.12, 0.12, 1.8, woodDkMat);  // 梶棒
+        fSack(th, rr - 1.6, -2.4, 0, 0.42);
+      }
+    });
+  })();
+
+  /* ================================================================ *
+   * 中庭の設え -- 大階段 / 水盤 / 貯水槽の口 / 鉢植えの柑橘 / 菜園
+   * ---------------------------------------------------------------- *
+   * 実物の中庭は石敷きで植栽は無い(丘の上の乾いた台地に建つ、装飾を
+   * 削ぎ落とした空間)。ただし本ビューアの方針として中庭に緑を置くので、
+   * 地中海の館らしく「鉢植えの柑橘」と「石で囲った薬草の畝」という、
+   * 石敷きの上に後から置ける控えめな形にとどめる。
+   * 配置は住人(life.courtyard の矩形 = 中央の広場)と主玄関〜中庭の
+   * 通り道(南の1区画)を避け、半径7m以上の外周リングだけに置く。
+   * ================================================================ */
+  (function buildCourtGarden(){
+    var GARDEN_R = 7.6;          // 植栽・設備を置く外周リングの基準半径
+    // --- 大階段(北): 中庭から1階の玉座の間へ上がる ------------------
+    (function(){
+      var th = wTheta(0), steps = 8, rise = GF_FLOOR_Y/steps, tread = 0.60;
+      var r0 = innerFloorR - steps*tread;   // ≒4.9m から上り始める
+      var i;
+      for (i=0;i<steps;i++){
+        // 各段を「床から段の天端まで」の箱にすると、段裏に隙間ができない
+        fBox(th, r0 + i*tread + tread/2, 0, 0, 3.0, rise*(i+1), tread, courtMat);
+      }
+      [-1,1].forEach(function(s){          // 両脇の袖壁(勾配なりの斜材)
+        var a = rp(th, r0, s*1.65), b = rp(th, innerFloorR, s*1.65);
+        strut({x:a.x, y:0.45, z:a.z}, {x:b.x, y:GF_FLOOR_Y+0.45, z:b.z}, 0.38, courtMat);
+      });
+    })();
+    // --- 八角形の水盤(西)-- 実物の中庭にも水盤/浴槽があったとされる
+    (function(){
+      var th = wTheta(6);
+      var basin = fCyl(th, GARDEN_R, 0, 0.02, 1.35, 1.45, 0.62, 8, marbleMat, Math.PI/8);
+      flatFacets(basin);
+      fCyl(th, GARDEN_R, 0, 0.60, 1.16, 1.16, 0.07, 8, cisternMat, Math.PI/8);
+      fCyl(th, GARDEN_R, 0, 0.50, 0.22, 0.30, 0.85, 8, marbleMat);   // 中央の柱
+      fCyl(th, GARDEN_R, 0, 1.35, 0.42, 0.24, 0.16, 8, marbleMat);
+      var bp = rp(th, GARDEN_R, 0);
+      registerPick(pickables, 'structure', bp.x, 0.9, bp.z, 3.4, 2.2, 3.4,
+        '水盤 Basin',
+        '中庭に据えられた八角形の大理石の水盤。実物のこの城には水洗式の設備と集水システムがあり、中庭にも浴槽ないし水盤が置かれていたと考えられている。');
+    })();
+    // --- 貯水槽への開口 + 轆轤(東)---------------------------------
+    (function(){
+      var th = wTheta(2);
+      var curb = fCyl(th, GARDEN_R, 0, 0.02, 1.05, 1.10, 0.85, 8, partitionMat, Math.PI/8);
+      flatFacets(curb);
+      fCyl(th, GARDEN_R, 0, 0.84, 0.85, 0.85, 0.05, 8, cisternMat, Math.PI/8);
+      [-1,1].forEach(function(s){ fBox(th, GARDEN_R, s*1.05, 0.85, 0.20, 1.9, 0.20, woodDkMat); });
+      fBox(th, GARDEN_R, 0, 2.75, 2.5, 0.18, 0.18, woodDkMat);
+      fCyl(th, GARDEN_R, 0, 2.42, 0.16, 0.16, 1.5, 8, woodMat, Math.PI/2);  // 巻胴
+      fBox(th, GARDEN_R, 0.55, 2.10, 0.06, 0.28, 0.06, metalMat);           // 綱
+      fCyl(th, GARDEN_R, 0.55, 1.75, 0.24, 0.20, 0.35, 8, woodMat);         // 釣瓶
+      var cp = rp(th, GARDEN_R, 0);
+      registerPick(pickables, 'structure', cp.x, 1.6, cp.z, 2.8, 3.4, 2.8,
+        '貯水槽の口 Cistern Mouth',
+        '中庭の石畳に開く貯水槽への開口。井戸も堀も持たないこの城は、平屋根に降った雨水を塔の樋で集めて地下の水槽へ導いていた。');
+    })();
+    // --- 石で囲った薬草・野菜の畝(4区画)---------------------------
+    [1, 3, 5, 7].forEach(function(kk, gi){
+      var th = wTheta(kk);
+      fBox(th, GARDEN_R + 0.25, 0, 0.02, 3.4, 0.34, 1.25, partitionMat);  // 石の縁
+      fBox(th, GARDEN_R + 0.25, 0, 0.30, 3.0, 0.10, 0.95, soilMat);       // 土
+      [-1.05, -0.35, 0.35, 1.05].forEach(function(o, i){
+        var m = (i + gi) % 2 ? leafMat : leafHiMat;
+        fCone(th, GARDEN_R + 0.25, o, 0.36, 0.24, 0.55, 5, m);
+        fCone(th, GARDEN_R + 0.55, o, 0.36, 0.18, 0.40, 5, m);
+      });
+    });
+    // --- 鉢植えの柑橘(隅の6か所。南の2隅は玄関〜中庭の通り道なので空ける)
+    [0, 1, 2, 5, 6, 7].forEach(function(vv){
+      var ph = vPhi(vv), rr = 8.35;
+      fCyl(ph, rr, 0, 0.02, 0.46, 0.34, 0.62, 8, terraMat);      // 鉢
+      fCyl(ph, rr, 0, 0.58, 0.42, 0.42, 0.08, 8, soilMat);
+      fCyl(ph, rr, 0, 0.62, 0.09, 0.11, 0.75, 6, woodDkMat);     // 幹
+      fBall(ph, rr, 0, 1.30, 0.62, leafMat);                     // 葉むら
+      fBall(ph, rr - 0.28, 0.24, 1.95, 0.42, leafHiMat);
+      fBall(ph, rr + 0.26, -0.22, 1.90, 0.38, leafHiMat);
+      // 実は葉むら(半径0.62)の表面すれすれに置く -- 中に埋めると見えない
+      fBall(ph, rr - 0.50, -0.32, 1.80, 0.10, fruitMat);
+      fBall(ph, rr + 0.48, 0.34, 1.72, 0.10, fruitMat);
+    });
+    // --- 石のベンチ(北東・北西の壁沿い)-----------------------------
+    [1, 7].forEach(function(kk){
+      var th = wTheta(kk);
+      fBox(th, GARDEN_R + 0.9, 2.6, 0, 2.2, 0.20, 0.55, partitionMat);
+      fBox(th, GARDEN_R + 1.05, 2.6, 0.20, 2.2, 0.28, 0.5, trimMat);
+    });
+    var gp = rp(wTheta(3), GARDEN_R + 0.25, 0);
+    registerPick(pickables, 'structure', gp.x, 0.6, gp.z, 4.0, 1.6, 2.4,
+      '薬草の畝 Herb Beds',
+      '中庭の外周に置かれた薬草と野菜の畝、そして鉢植えの柑橘。実物の中庭は石敷きのみだが、丘の上のこの館でも、地中海の庭らしい鉢植えの緑が石の幾何学を和らげていたと想像したい。');
+  })();
+
+  /* ================================================================ *
+   * 8基の塔の内部 -- 螺旋階段 / 厠 / 貯水
+   * ---------------------------------------------------------------- *
+   * 塔の外殻(towerFG)はカメラを向いた面がフェードするので、その中身が
+   * 見える。実物どおり、2基は螺旋階段、5基は各階の厠(ガーダローブ)、
+   * 1基は集水した雨水を落とす貯水塔。
+   * ================================================================ */
+  (function buildTowerInteriors(){
+    for (var vv=0; vv<8; vv++){
+      var phi = vPhi(vv), dv = dirAt(phi);
+      var tcx = dv.x*TOWER_CENTER_R, tcz = dv.z*TOWER_CENTER_R;
+      var role = TOWER_ROLE[vv];
+      if (role === 'stair'){
+        // 螺旋階段: 中心柱(既存の newel)のまわりに踏み板を巻き上げる。
+        // 1階床(3.0m)から屋上テラス(19.8m)まで通す -- 平屋根に出られる
+        // 構成なので、階段は屋根の高さまで届いていないと辻褄が合わない。
+        var nStep = 22, y0 = GF_FLOOR_Y - 1.4, dy = (WALL_H - y0)/nStep;
+        for (var i=0;i<nStep;i++){
+          var a = i*Math.PI/6;
+          var ux = Math.cos(a), uz = Math.sin(a);
+          var st = mkBox(2.9, 0.18, 0.92, partitionMat);
+          place(st, tcx + ux*1.55, y0 + dy*(i+1), tcz + uz*1.55, -a);
+          det(st);
+        }
+      } else if (role === 'cistern'){
+        // 屋根から落ちてくる樋 + 汲み上げの釣瓶
+        fCyl(phi, TOWER_CENTER_R + TOWER_R*0.5, 0, 1.1, 0.20, 0.20, 2.6, 6, darkMat);
+        var bkt = mkCyl(0.3, 0.25, 0.42, 8, woodMat);
+        place(bkt, tcx - dv.x*1.4, 1.0, tcz - dv.z*1.4);
+        det(bkt);
+      } else {
+        // 厠(ガーダローブ): 1階・2階にひとつずつ、外側の壁につく
+        [GF_FLOOR_Y, FF_FLOOR_Y].forEach(function(fy){
+          var seat = mkBox(1.35, 0.5, 0.85, partitionMat);
+          place(seat, tcx + dv.x*1.15, fy + 0.25, tcz + dv.z*1.15, wallRy(phi));
+          det(seat);
+          var back = mkBox(1.55, 1.5, 0.2, partitionMat);
+          place(back, tcx + dv.x*1.62, fy + 0.75, tcz + dv.z*1.62, wallRy(phi));
+          det(back);
+          var slot = mkBox(0.55, 0.16, 0.5, darkMat);
+          place(slot, tcx + dv.x*1.15, fy + 0.5, tcz + dv.z*1.15, wallRy(phi));
+          det(slot);
+        });
+      }
+      // どの塔にも各階の床を張る(中が空洞の筒に見えないように)
+      [GF_FLOOR_Y, FF_FLOOR_Y].forEach(function(fy){
+        var fl = mkCyl(TOWER_R*0.95, TOWER_R*0.95, 0.16, 8, cellarMat);
+        fl.rotation.y = Math.PI/8;
+        fl.castShadow = false;
+        place(fl, tcx, fy, tcz);
+        interiorGroup.add(fl);
+      });
+    }
+  })();
+
+  /* ================================================================ *
+   * 屋上テラスの設え -- 集水溝と煙突
+   * ---------------------------------------------------------------- *
+   * 平屋根は雨水を集めて塔の樋から地下水槽へ落とす仕組み。屋根面に
+   * 浅い集水溝を刻み、貯水塔(v=3)へ向かって集める。煙突は実物の
+   * シルエットを崩さないよう低く2本だけ。屋根と一緒にフェードさせたい
+   * ので roofMain.mat を使う(fadeExtras に拾われず素直に消える)。
+   * ================================================================ */
+  (function buildRoofTerrace(){
+    var i;
+    for (i=0;i<8;i++){
+      var ct = wTheta(i), cd2 = dirAt(ct);
+      var gutter = mkBox(0.5, 0.14, OCT_APOTH_OUT - COURT_APOTH - 1.6, roofMain.mat);
+      place(gutter, cd2.x*((OCT_APOTH_OUT + COURT_APOTH)/2), WALL_H + 0.09,
+        cd2.z*((OCT_APOTH_OUT + COURT_APOTH)/2), wallRy(ct));
+      roofMain.group.add(gutter);
+    }
+    [1, 5].forEach(function(kk){          // 厨房(1階k=1)と大広間/寝室(2階)の煙突
+      var ct = wTheta(kk), cd2 = dirAt(ct), rr = OCT_APOTH_OUT - 2.2;
+      var stack = mkBox(1.05, 1.9, 0.95, roofMain.mat);
+      place(stack, cd2.x*rr, WALL_H + 0.97, cd2.z*rr, wallRy(ct));
+      roofMain.group.add(stack);
+      var cap = mkBox(1.35, 0.24, 1.25, roofMain.mat);
+      place(cap, cd2.x*rr, WALL_H + 2.03, cd2.z*rr, wallRy(ct));
+      roofMain.group.add(cap);
+      // 煙出しの口。roofMain.mat 以外なので fadeExtras に拾われ、屋根が
+      // 半分消えた時点で一緒に消える(屋根と同時に消えるので違和感はない)。
+      var flue = mkBox(0.55, 0.16, 0.5, darkMat);
+      place(flue, cd2.x*rr, WALL_H + 2.16, cd2.z*rr, wallRy(ct));
+      roofMain.group.add(flue);
+    });
+  })();
 
   /* -------------------------------------------------------------- *
    * 丘の頂上(標高約540m相当)-- 周囲になだらかな盛り上がりを作る。
@@ -770,10 +1586,16 @@ function buildCastelDelMonte(){
    * (この城には駐屯機能がない、という史実上の性格をそのまま反映)。
    * -------------------------------------------------------------- */
   var gateOuterZ = OCT_APOTH_OUT + 1.5;
+  /* 中庭に大階段・水盤・貯水槽の口・薬草の畝・鉢植えを置いたので、住人が
+   * うろつく矩形をそのぶん狭める。植栽・設備はすべて半径7.0m 以上の外周
+   * リングに置いてあるので、矩形の対角(半径 3.5*√2 = 4.95m)までに抑えれば
+   * 干渉しない。加えて、南(k=4)の一区画だけは主玄関〜中庭の通り道として
+   * 何も置いていない -- 住人が矩形から門の内側口 (0, 9.23) へ直線で歩く
+   * 経路が、この区画を通るため。 */
   var life = {
     gates: [ { path: [ {x:0, z:COURT_APOTH_OUT-0.5}, {x:0, z:OCT_APOTH_CENTER}, {x:0, z:gateOuterZ} ],
       outDir:{x:0,z:1}, vanishDist: R_PLATEAU - gateOuterZ - 2 } ],
-    courtyard: [ { minX:-COURT_APOTH*0.8, maxX:COURT_APOTH*0.8, minZ:-COURT_APOTH*0.8, maxZ:COURT_APOTH*0.8 } ],
+    courtyard: [ { minX:-3.5, maxX:3.5, minZ:-3.5, maxZ:3.5 } ],
     population: { farmers: 8, guards: 0 }
   };
 
