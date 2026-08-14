@@ -2721,6 +2721,448 @@ function buildMalborkPlan(){
     })();
 
     /* ================================================================
+     * C2. LIVESTOCK. Malbork was the Order's central supply base -- a
+     * garrison, a stud, a granary and a slaughterhouse for a complex
+     * that fed several thousand people. So the Vorburg gets the animals
+     * that go with the buildings already standing in it: warhorses in
+     * the stalls of the stables range, cattle and pigs in pens dropped
+     * into the gaps between ranges, sheep and goats in a fold, poultry
+     * round the bakehouse, a brick dovecote, and waterfowl on the Nogat.
+     *
+     * The four rules the rest of this fit-out follows apply here too,
+     * plus one more that matters most at this castle:
+     *  - EVERY animal hangs off a `det()` LOD gate, and there are only
+     *    THREE of them (stables / Vorburg yards / river), so the whole
+     *    population is one scene-graph switch each and vanishes entirely
+     *    beyond the gate distance.
+     *  - Parts are merged: each animal is 5-11 boxes/cylinders/spheres,
+     *    but they are accumulated and welded into ONE BufferGeometry per
+     *    (gate x material) pair. ~60 animals therefore cost about a
+     *    dozen draw calls in total, not six hundred. Measured before and
+     *    after: 2297 -> 2310 calls at the opening shot.
+     *  - Positions are checked against the Low Castle BAND table
+     *    documented above `lcSegs` (parcham / row / lane bands), the
+     *    farmer wander boxes and the guard patrol line -- in particular
+     *    the patrol's east-west leg along z = LC_Z0+6, which rules out
+     *    the otherwise-tempting open strip inside the south wall.
+     *  - Colours: every channel stays at or below 0x80, because a day-lit
+     *    horizontal face is multiplied by roughly 1.95.
+     *  - Poses vary deterministically from a coordinate hash, never
+     *    Math.random(), so a reload gives the identical yard.
+     * ================================================================ */
+    (function livestock(){
+      /* 楕円体だけは上の geoCache に無いので追加(球を1回だけ作って
+       * 寸法ごとに scale した geometry をキャッシュする) */
+      function ellGeo(rx,ry,rz){
+        var k = 'L'+rx.toFixed(2)+'/'+ry.toFixed(2)+'/'+rz.toFixed(2);
+        if (!geoCache[k]){ var g = new T.SphereGeometry(1,7,5); g.scale(rx,ry,rz); geoCache[k] = g; }
+        return geoCache[k];
+      }
+      /* ---- パーツの蓄積と統合 ------------------------------------
+       * at()   … 1体ぶんの基準変換(足元 x,y,z と向き yaw。局所 +X が前方)
+       * part() … 局所座標でパーツを1つ積む
+       * flush()… (親グループ × 素材) ごとに1メッシュへ溶接して吐き出す */
+      var batches = [];
+      function bucket(t, m){
+        for (var i=0;i<batches.length;i++) if (batches[i].t===t && batches[i].m===m) return batches[i];
+        var b = { t:t, m:m, parts:[] }; batches.push(b); return b;
+      }
+      function at(t, x, y, z, yaw){
+        var m = new T.Matrix4().makeRotationY(yaw || 0);
+        m.setPosition(x, y, z);
+        return { t:t, base:m };
+      }
+      function part(c, mat, geo, lx,ly,lz, ry,rz,rx){
+        var lm = new T.Matrix4().makeRotationFromEuler(new T.Euler(rx||0, ry||0, rz||0, 'YXZ'));
+        lm.setPosition(lx, ly, lz);
+        bucket(c.t, mat).parts.push({ g:geo, m:new T.Matrix4().multiplyMatrices(c.base, lm) });
+      }
+      function flush(){
+        var nrmM = new T.Matrix3(), v = new T.Vector3();
+        batches.forEach(function(b){
+          var nv = 0, ni = 0, i, k;
+          for (i=0;i<b.parts.length;i++){
+            nv += b.parts[i].g.attributes.position.count;
+            ni += b.parts[i].g.index.count;
+          }
+          var pos = new Float32Array(nv*3), nor = new Float32Array(nv*3);
+          var idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+          var vo = 0, io = 0;
+          for (i=0;i<b.parts.length;i++){
+            var p = b.parts[i], gp = p.g.attributes.position, gn = p.g.attributes.normal;
+            nrmM.getNormalMatrix(p.m);
+            for (k=0;k<gp.count;k++){
+              v.fromBufferAttribute(gp,k).applyMatrix4(p.m);
+              pos[(vo+k)*3] = v.x; pos[(vo+k)*3+1] = v.y; pos[(vo+k)*3+2] = v.z;
+              v.fromBufferAttribute(gn,k).applyMatrix3(nrmM).normalize();
+              nor[(vo+k)*3] = v.x; nor[(vo+k)*3+1] = v.y; nor[(vo+k)*3+2] = v.z;
+            }
+            var gi = p.g.index.array;
+            for (k=0;k<gi.length;k++) idx[io+k] = gi[k] + vo;
+            vo += gp.count; io += gi.length;
+          }
+          var geo = new T.BufferGeometry();
+          geo.setAttribute('position', new T.BufferAttribute(pos,3));
+          geo.setAttribute('normal', new T.BufferAttribute(nor,3));
+          geo.setIndex(new T.BufferAttribute(idx,1));
+          geo.computeBoundingSphere();
+          var mesh = new T.Mesh(geo, b.m);
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          b.t.add(mesh);
+        });
+        batches.length = 0;
+      }
+      function rnd(x,z,s){
+        var v = Math.sin(x*12.9898 + z*78.233 + (s||0)*37.719) * 43758.5453;
+        return v - Math.floor(v);
+      }
+
+      /* ---- 毛色・羽色。素の値でどのチャンネルも 0x80 以下 -------- */
+      var bayMat   = new T.MeshLambertMaterial({ color: 0x5e3f27 }); // 鹿毛の軍馬・犬
+      var blackMat = new T.MeshLambertMaterial({ color: 0x2f2620 }); // 黒毛・蹄・鬣・角
+      var greyMat  = new T.MeshLambertMaterial({ color: 0x7c766c }); // 芦毛・鳩・鵞鳥
+      var oxMat    = new T.MeshLambertMaterial({ color: 0x63513a }); // 牛
+      var woolMat2 = new T.MeshLambertMaterial({ color: 0x7a7264 }); // 羊毛
+      var goatMat  = new T.MeshLambertMaterial({ color: 0x6a5a45 });
+      var pigMat   = new T.MeshLambertMaterial({ color: 0x7d6153 });
+      var fowlMat  = new T.MeshLambertMaterial({ color: 0x6d5e45 });
+      var cockMat  = new T.MeshLambertMaterial({ color: 0x6b3520 });
+      var combMat  = new T.MeshLambertMaterial({ color: 0x7d2117 });
+      var beakMat2 = new T.MeshLambertMaterial({ color: 0x7d6626 });
+      var swanMat  = new T.MeshLambertMaterial({ color: 0x7f7a72 }); // 乗算後に白く見える
+      var dcWallMat= new T.MeshLambertMaterial({ color: 0x6c402f }); // 鳩小屋のレンガ
+      var dcRoofMat= new T.MeshLambertMaterial({ color: 0x7d3f2c }); // 同 瓦
+
+      /* ---- 四足獣。pose 0=立つ / 1=草を食む / 2=伏せる ---------- */
+      function beast(t, x, z, yaw, S, pose, baseY){
+        var c = at(t, x, baseY||0, z, yaw);
+        var lying = pose===2, graze = pose===1;
+        var lh = lying ? S.lh*0.26 : S.lh;
+        var by = lh + S.bh*0.5;
+        part(c, S.body, boxGeo(S.bl, S.bh, S.bw), 0, by, 0);
+        part(c, S.body, ellGeo(S.bh*0.42, S.bh*0.50, S.bw*0.50),  S.bl*0.5, by - S.bh*0.03, 0);
+        part(c, S.body, ellGeo(S.bh*0.46, S.bh*0.52, S.bw*0.52), -S.bl*0.5, by + S.bh*0.04, 0);
+        var px = S.bl*0.33, pz = S.bw*0.30;
+        [[px,pz],[px,-pz],[-px,pz],[-px,-pz]].forEach(function(p){
+          part(c, S.leg, cylGeo(S.lr*0.76, S.lr, lh, 5), p[0], lh*0.5, p[1]);
+        });
+        // 草を食む個体は口先が地面に届くまで首を落とす
+        var a = graze ? -1.35 : (lying ? 0.62 : S.neckA);
+        var nx0 = S.bl*0.44, ny0 = by + S.bh*0.26;
+        part(c, S.body, boxGeo(S.nl, S.nw, S.nw*0.9),
+          nx0 + Math.cos(a)*S.nl*0.5, ny0 + Math.sin(a)*S.nl*0.5, 0, 0, a);
+        if (S.mane) part(c, blackMat, boxGeo(S.nl*0.96, S.nw*0.26, S.nw*0.42),
+          nx0 + Math.cos(a)*S.nl*0.5 - Math.sin(a)*S.nw*0.44,
+          ny0 + Math.sin(a)*S.nl*0.5 + Math.cos(a)*S.nw*0.44, 0, 0, a);
+        var tx = nx0 + Math.cos(a)*S.nl, ty = ny0 + Math.sin(a)*S.nl;
+        var ha = a*0.45 - 0.32;
+        part(c, S.body, boxGeo(S.hl, S.hh, S.hw),
+          tx + Math.cos(ha)*S.hl*0.42, ty + Math.sin(ha)*S.hl*0.42, 0, 0, ha);
+        if (S.muzzle) part(c, S.muzzle, boxGeo(S.hl*0.36, S.hh*0.66, S.hw*0.8),
+          tx + Math.cos(ha)*S.hl*0.92, ty + Math.sin(ha)*S.hl*0.92, 0, 0, ha);
+        if (S.ear) [1,-1].forEach(function(s){
+          part(c, S.body, coneGeo(S.ear, S.ear*2.6, 4),
+            tx + Math.cos(ha)*S.hl*0.06, ty + S.hh*0.46, s*S.hw*0.34, 0, 0, -s*0.42);
+        });
+        if (S.horn) [1,-1].forEach(function(s){
+          part(c, S.hornMat || greyMat, coneGeo(S.horn, S.horn*4.2, 4),
+            tx + Math.cos(ha)*S.hl*0.10, ty + S.hh*0.52, s*S.hw*0.30, 0, -0.5, -s*0.75);
+        });
+        var td = S.tail;
+        part(c, S.tailMat || S.leg, boxGeo(td, S.tw, S.tw),
+          -S.bl*0.5 - 0.62*td*0.5, by + S.bh*0.32 - 0.78*td*0.5, 0, 0, -2.24);
+      }
+
+      /* ---- 地上の鳥。pose 0=立つ / 1=ついばむ / 2=うずくまる ---- */
+      function bird(t, x, z, yaw, S, pose, baseY){
+        var c = at(t, x, baseY||0, z, yaw);
+        var peck = pose===1, sit = pose===2;
+        var legH = sit ? 0.02 : S.legH;
+        var pitch = peck ? -0.55 : (sit ? 0.05 : 0.24);
+        var by = legH + S.br*0.95;
+        part(c, S.body, ellGeo(S.bl, S.br, S.bw), 0, by, 0, 0, pitch);
+        var na = peck ? -1.0 : 0.95;
+        var nx0 = S.bl*0.62, ny0 = by + S.br*0.30;
+        part(c, S.body, cylGeo(S.nr*0.85, S.nr, S.nl, 5),
+          nx0 + Math.cos(na)*S.nl*0.5, ny0 + Math.sin(na)*S.nl*0.5, 0, 0, na - Math.PI/2);
+        var hx = nx0 + Math.cos(na)*S.nl, hy = ny0 + Math.sin(na)*S.nl;
+        part(c, S.body, ellGeo(S.hr*1.15, S.hr, S.hr), hx, hy, 0);
+        part(c, beakMat2, coneGeo(S.hr*0.5, S.hr*1.5, 4),
+          hx + S.hr*1.5, hy - S.hr*0.1, 0, 0, peck ? -Math.PI/2-0.6 : -Math.PI/2+0.2);
+        part(c, S.tailMat || S.body, boxGeo(S.bl*1.1, S.br*0.7, S.bw*0.5),
+          -S.bl*1.05, by + S.br*0.6, 0, 0, 0.55);
+        if (!sit) [1,-1].forEach(function(s){
+          part(c, beakMat2, cylGeo(S.lr, S.lr, legH, 4), -S.bl*0.05, legH*0.5, s*S.bw*0.42);
+        });
+        if (S.comb){
+          part(c, combMat, boxGeo(S.hr*1.3, S.hr*0.85, S.hr*0.22), hx + S.hr*0.15, hy + S.hr*1.15, 0);
+          part(c, combMat, boxGeo(S.hr*0.5, S.hr*0.9, S.hr*0.2), hx + S.hr*1.1, hy - S.hr*1.0, 0);
+        }
+        if (S.sickle) [0.35,-0.25].forEach(function(o,i){
+          part(c, blackMat, boxGeo(S.bl*1.6, S.br*0.22, S.bw*0.22),
+            -S.bl*1.35, by + S.br*(1.15 + i*0.45), o*S.bw, 0, 0.95 + i*0.25);
+        });
+      }
+
+      /* ---- 水鳥(浮いている)。脚は水中なので作らない ------------ */
+      function swimmer(t, x, y, z, yaw, S){
+        var c = at(t, x, y, z, yaw);
+        part(c, S.body, ellGeo(S.bl, S.bh, S.bw), 0, S.bh*0.30, 0, 0, -0.10);
+        var bx = S.bl*0.55, byy = S.bh*0.75;
+        part(c, S.body, cylGeo(S.nr*0.8, S.nr, S.n1, 6),
+          bx + Math.cos(S.a1)*S.n1*0.5, byy + Math.sin(S.a1)*S.n1*0.5, 0, 0, S.a1 - Math.PI/2);
+        var mx = bx + Math.cos(S.a1)*S.n1, my = byy + Math.sin(S.a1)*S.n1;
+        part(c, S.body, cylGeo(S.nr*0.8, S.nr*0.8, S.n2, 6),
+          mx + Math.cos(S.a2)*S.n2*0.5, my + Math.sin(S.a2)*S.n2*0.5, 0, 0, S.a2 - Math.PI/2);
+        var hx = mx + Math.cos(S.a2)*S.n2, hy = my + Math.sin(S.a2)*S.n2;
+        part(c, S.body, ellGeo(S.hr*1.3, S.hr, S.hr), hx, hy, 0);
+        part(c, S.beak || beakMat2, coneGeo(S.hr*0.55, S.hr*2.0, 4),
+          hx + S.hr*1.7, hy - S.hr*0.25, 0, 0, -Math.PI/2 + 0.35);
+        part(c, S.body, boxGeo(S.bl*0.9, S.bh*0.5, S.bw*0.55), -S.bl*0.95, S.bh*0.55, 0, 0, 0.45);
+      }
+
+      /* ---- 止まっている鳥(鳩)。y は止まり木/棚の高さ ---------- */
+      function perched(t, x, y, z, yaw, S){
+        var c = at(t, x, y, z, yaw);
+        part(c, S.body, ellGeo(S.bl, S.br, S.bw), 0, S.br*1.05, 0, 0, 0.42);
+        part(c, S.body, ellGeo(S.hr*1.1, S.hr, S.hr), S.bl*0.72, S.br*2.0, 0);
+        part(c, S.beak || beakMat2, coneGeo(S.hr*0.5, S.hr*1.3, 4),
+          S.bl*0.72 + S.hr*1.25, S.br*2.0 - S.hr*0.2, 0, 0, -Math.PI/2 - 0.5);
+        part(c, S.tailMat || S.body, boxGeo(S.bl*1.5, S.br*0.35, S.bw*0.7), -S.bl*1.1, S.br*0.45, 0, 0, 0.30);
+        [1,-1].forEach(function(s){
+          part(c, beakMat2, cylGeo(S.br*0.14, S.br*0.14, S.br*0.55, 4), 0, S.br*0.3, s*S.bw*0.4);
+        });
+      }
+
+      /* 動物以外の小物も同じバッチに載せる。囲いの杭だけで約60メッシュ
+       * あり、add() で個別に置くとそのぶんドローコールが増えるため。 */
+      function prop(t, mat, geo, x, y, z, ry){
+        part(at(t, x, y, z, ry), mat, geo, 0, 0, 0);
+      }
+      /* ---- 柵(囲い)。杭と2段の横木 ------------------------------ */
+      function pen(t, x0, x1, z0, z1){
+        var h = 1.15;
+        function run(ax, az, bx, bz){
+          var len = Math.hypot(bx-ax, bz-az);
+          // 局所 +Z を柵の走る向きに合わせる(rotation.y=ry で +Z は
+          // (sin ry, cos ry) を向くので atan2(dx, dz) でよい)
+          var c = at(t, (ax+bx)/2, 0, (az+bz)/2, Math.atan2(bx-ax, bz-az));
+          var n = Math.max(2, Math.round(len/3.2));
+          for (var i=0;i<=n;i++){
+            part(c, woodMat, cylGeo(0.09, 0.11, h, 5), 0, h/2, -len/2 + len*(i/n));
+          }
+          [0.42, 0.86].forEach(function(f){
+            part(c, woodMat, boxGeo(0.10, 0.12, len), 0, h*f, 0);
+          });
+        }
+        run(x0, z0, x1, z0);
+        run(x0, z1, x1, z1);
+        run(x0, z0, x0, z1);
+        run(x1, z0, x1, z1);
+      }
+
+      /* ---- 種ごとの寸法(メートル) ------------------------------ */
+      var WARHORSE = { bl:2.05, bh:0.94, bw:0.72, lh:0.80, lr:0.11, nl:0.90, nw:0.40,
+                  hl:0.66, hh:0.35, hw:0.29, tail:0.76, tw:0.16, ear:0.06, neckA:0.72,
+                  mane:true, body:bayMat, leg:blackMat, muzzle:blackMat, tailMat:blackMat };
+      var WARHORSE_G = { bl:2.05, bh:0.94, bw:0.72, lh:0.80, lr:0.11, nl:0.90, nw:0.40,
+                  hl:0.66, hh:0.35, hw:0.29, tail:0.76, tw:0.16, ear:0.06, neckA:0.72,
+                  mane:true, body:greyMat, leg:blackMat, muzzle:blackMat, tailMat:greyMat };
+      var WARHORSE_B = { bl:2.05, bh:0.94, bw:0.72, lh:0.80, lr:0.11, nl:0.90, nw:0.40,
+                  hl:0.66, hh:0.35, hw:0.29, tail:0.76, tw:0.16, ear:0.06, neckA:0.72,
+                  mane:true, body:blackMat, leg:blackMat, muzzle:blackMat, tailMat:blackMat };
+      var OX    = { bl:1.90, bh:0.96, bw:0.72, lh:0.62, lr:0.105, nl:0.44, nw:0.36,
+                  hl:0.54, hh:0.32, hw:0.30, tail:0.72, tw:0.07, ear:0.07, horn:0.055,
+                  neckA:0.42, body:oxMat, leg:blackMat, muzzle:blackMat, tailMat:blackMat };
+      var CALF  = { bl:1.00, bh:0.52, bw:0.40, lh:0.38, lr:0.055, nl:0.24, nw:0.20,
+                  hl:0.30, hh:0.18, hw:0.17, tail:0.38, tw:0.045, ear:0.045,
+                  neckA:0.34, body:oxMat, leg:blackMat, muzzle:blackMat, tailMat:blackMat };
+      var SHEEP = { bl:0.98, bh:0.60, bw:0.48, lh:0.34, lr:0.055, nl:0.24, nw:0.24,
+                  hl:0.30, hh:0.20, hw:0.18, tail:0.16, tw:0.09, ear:0.045,
+                  neckA:0.35, body:woolMat2, leg:blackMat, muzzle:blackMat, tailMat:woolMat2 };
+      var GOAT  = { bl:0.86, bh:0.46, bw:0.38, lh:0.42, lr:0.045, nl:0.24, nw:0.20,
+                  hl:0.28, hh:0.16, hw:0.15, tail:0.14, tw:0.06, ear:0.05, horn:0.035,
+                  neckA:0.55, body:goatMat, leg:blackMat, muzzle:blackMat, tailMat:goatMat };
+      var PIG   = { bl:1.12, bh:0.56, bw:0.46, lh:0.28, lr:0.055, nl:0.16, nw:0.30,
+                  hl:0.34, hh:0.24, hw:0.24, tail:0.16, tw:0.05, ear:0.06,
+                  neckA:0.10, body:pigMat, leg:pigMat, muzzle:blackMat, tailMat:pigMat };
+      var PIGLET= { bl:0.52, bh:0.28, bw:0.24, lh:0.16, lr:0.03, nl:0.08, nw:0.16,
+                  hl:0.18, hh:0.13, hw:0.13, tail:0.09, tw:0.03, ear:0.035,
+                  neckA:0.10, body:pigMat, leg:pigMat, muzzle:blackMat, tailMat:pigMat };
+      var DOG   = { bl:0.74, bh:0.34, bw:0.26, lh:0.36, lr:0.045, nl:0.20, nw:0.17,
+                  hl:0.28, hh:0.16, hw:0.15, tail:0.36, tw:0.05, ear:0.055,
+                  neckA:0.62, body:bayMat, leg:bayMat, muzzle:blackMat, tailMat:bayMat };
+      var CAT   = { bl:0.42, bh:0.20, bw:0.16, lh:0.19, lr:0.026, nl:0.10, nw:0.11,
+                  hl:0.15, hh:0.11, hw:0.11, tail:0.30, tw:0.035, ear:0.038,
+                  neckA:0.65, body:blackMat, leg:blackMat, muzzle:blackMat, tailMat:blackMat };
+      var HEN   = { bl:0.21, br:0.17, bw:0.15, legH:0.14, lr:0.018, nr:0.045, nl:0.10,
+                  hr:0.065, body:fowlMat };
+      var COCK  = { bl:0.25, br:0.20, bw:0.17, legH:0.18, lr:0.021, nr:0.05, nl:0.14,
+                  hr:0.075, body:cockMat, comb:true, sickle:true };
+      var GOOSE = { bl:0.40, bh:0.20, bw:0.21, nr:0.055, n1:0.26, a1:1.25, n2:0.16, a2:0.45,
+                  hr:0.075, body:greyMat, beak:beakMat2 };
+      var SWAN  = { bl:0.62, bh:0.30, bw:0.32, nr:0.07, n1:0.42, a1:1.30, n2:0.34, a2:0.35,
+                  hr:0.10, body:swanMat, beak:combMat };
+      var DUCK  = { bl:0.30, bh:0.16, bw:0.17, nr:0.045, n1:0.14, a1:1.15, n2:0.10, a2:0.55,
+                  hr:0.065, body:greyMat };
+      var DOVE  = { bl:0.14, br:0.10, bw:0.085, hr:0.045, body:greyMat, beak:combMat };
+
+      /* ============================================================
+       * 1. 厩舎の軍馬。stables() が建てた馬房のジオメトリに合わせる:
+       *    仕切り板は x=-55.6 と -44.4 を中心に長さ6m(= 西房 x
+       *    -58.6..-52.6 / 東房 x -47.4..-41.4)、z は cz-19 から 4.6m
+       *    間隔で9枚。したがって馬房の中心は隣り合う仕切りの中間、
+       *    z = cz-19 + i*4.6 + 2.3。飼葉桶が外側(西房 x=-58.4 /
+       *    東房 x=-41.6)なので、馬はそちらへ頭を向ける。
+       *    厩舎の内装と同じ D_MID ゲートに載せる。
+       * ============================================================ */
+      (function stableHorses(){
+        var cz = LC_Z0 + 135;
+        var g = det(-50, 4, cz, D_MID);
+        var breeds = [WARHORSE, WARHORSE_G, WARHORSE_B];
+        [0,1,3,5,7].forEach(function(i){          // 西列(頭は -X)
+          var z = cz - 19 + i*4.6 + 2.3;
+          beast(g, -55.9, z, Math.PI, breeds[i % 3], i===3 ? 1 : 0);
+        });
+        [0,2,4,5,7].forEach(function(i){          // 東列(頭は +X)
+          var z = cz - 19 + i*4.6 + 2.3;
+          beast(g, -44.1, z, 0, breeds[(i+1) % 3], i===4 ? 1 : 0);
+        });
+        // 中央通路に1頭、引き出されたところ(通路は x -52.6..-47.4)
+        beast(g, -50.0, cz - 8.5, Math.PI/2, WARHORSE, 0);
+        // 通路で寝そべる番犬と、馬糧を狙う鼠捕りの猫
+        beast(g, -50.6, cz + 12.0, -0.8, DOG, 2);
+        beast(g, -49.4, cz - 17.5, 1.9, CAT, 0);
+        registerPick(pickables, 'room', -50, 1.6, cz, 18, 3.2, 44,
+          '厩舎の軍馬 Warhorses', '馬房に立つ騎士団の軍馬。修道会は独自の厩を運営し、重装騎士1人につき3〜4頭の馬を養った。');
+      })();
+
+      /* ============================================================
+       * 2. 低城の家畜。列と列の隙間(lcSegs の z ギャップ)に囲いを
+       *    落とす。使うのは以下の3か所で、いずれも建物の footprint、
+       *    農民の通路帯(x -39..-33 / -9..+1 / +25..+35)、衛兵の巡回線
+       *    (parcham x=±64 と z=LC_Z0+6 の東西脚)のどれにも掛からない:
+       *      牛の囲い  行2の隙間 z 181..194、x -22..-12
+       *                (敷石広場 x -49..-23 / z 167..189 の東隣)
+       *      豚の囲い  行1の隙間 z 197..205、x -60..-44
+       *      羊の囲い  行4の隙間 z 207..213、x 38..56
+       *    すべて開けた地面なので D_FAR ゲート1つにまとめる。
+       * ============================================================ */
+      (function vorburgYards(){
+        var g = det(-10, 2, LC_Z0 + 175, D_FAR);
+
+        // -- 牛の囲い(1万人を養う城の食肉と牽引力) --
+        var cx0 = -22, cx1 = -12, cz0 = LC_Z0 + 181, cz1 = LC_Z0 + 194;
+        pen(g, cx0, cx1, cz0, cz1);
+        prop(g, woodMat, boxGeo(1.2, 0.55, 3.2), cx0 + 1.6, 0.44, cz0 + 3.0);   // 水桶
+        hayPile(g, -13.8, LC_Z0 + 188.0, 1.2, 1.5);
+        // 5頭を 10x13m の囲いに散らす。牛は頭まで含めると 2.6m あるので
+        // 隣どうし最低 3m は空ける(2.8m で試したら2頭が1頭に見えた)
+        [[-18.0, 183.2, 0], [-14.5, 185.0, 1], [-19.4, 190.2, 1], [-14.3, 191.8, 2]]
+          .forEach(function(p){
+            beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 3)*6.28, OX, p[2]);
+          });
+        beast(g, -17.2, LC_Z0 + 187.6, 2.1, CALF, 0);
+        registerPick(pickables, 'structure', (cx0+cx1)/2, 1.2, (cz0+cz1)/2, cx1-cx0, 2.4, cz1-cz0,
+          '牛の囲い Cattle Pen', '低城の家畜囲い。修道会領の荘園から集めた牛は、荷役と食肉の両方に用いられた。');
+
+        // -- 豚の囲い(残飯で肥らせ、秋に塩漬け・燻製にする) --
+        var px0 = -60, px1 = -44, pz0 = LC_Z0 + 197.5, pz1 = LC_Z0 + 204.5;
+        pen(g, px0, px1, pz0, pz1);
+        prop(g, woodMat,  boxGeo(2.8, 1.5, 2.2), px0 + 2.2, 0.75, pz0 + 1.9);   // 寝床
+        prop(g, strawMat, boxGeo(3.3, 0.20, 2.7), px0 + 2.2, 1.60, pz0 + 1.9);
+        prop(g, woodMat,  boxGeo(1.4, 0.42, 0.8), px1 - 1.6, 0.21, pz1 - 1.6);  // 餌桶
+        [[-53.0, 199.4, 1], [-49.6, 200.8, 0], [-51.4, 202.6, 2], [-46.6, 202.0, 1]]
+          .forEach(function(p){
+            beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 5)*6.28, PIG, p[2]);
+          });
+        [[-52.2, 203.2], [-50.8, 203.6], [-47.8, 199.6]].forEach(function(p){
+          beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 7)*6.28, PIGLET, 0);
+        });
+        registerPick(pickables, 'structure', (px0+px1)/2, 1.1, (pz0+pz1)/2, px1-px0, 2.2, pz1-pz0,
+          '豚の囲い Pigsty', '低城の豚舎。厨房の残飯で肥らせ、秋の屠殺で塩漬け肉と燻製に仕立てて越冬の糧とした。');
+
+        // -- 羊と山羊。行4の果樹園(gardenTree が x=47/55、z=122/130.5/
+        //    139/147.5)に放して下草を食ませる。中世の果樹園の実際の
+        //    使い方であり、囲いを立てるより読める -- 行4の z 206..214 の
+        //    隙間に柵を置いた版はスクリーンショットで確認したところ、
+        //    両隣の棟の屋根の陰にほぼ完全に埋もれた。東の敷石広場
+        //    (x 15..45)には乗せず、樹の幹からも 3m 以上離す。
+        [[46.5, 126.5, 1], [50.5, 133.5, 0], [58.0, 128.0, 1],
+         [51.5, 143.8, 2], [58.5, 138.5, 0], [46.0, 144.5, 1]].forEach(function(p){
+          beast(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 11)*6.28, SHEEP, p[2]);
+        });
+        beast(g, 54.0, LC_Z0 + 125.0, 2.6, GOAT, 0);
+        beast(g, 58.5, LC_Z0 + 147.0, -1.2, GOAT, 1);
+        registerPick(pickables, 'structure', 52, 1.1, LC_Z0 + 135, 16, 2.2, 30,
+          '羊と山羊 Sheep & Goats', '低城の果樹園に放して下草を食ませた羊と山羊。修道会は羊毛を輸出品としても扱った。');
+
+        // -- パン焼き所(交差棟 x -17..9 / z 139..153)の西隣に鶏。
+        //    行2の隙間 z 151..157、x -31..-19 は建物にも通路帯にも
+        //    掛からない。 --
+        [[-29.5, 152.4, 1], [-27.0, 153.6, 0], [-24.4, 152.0, 1], [-22.0, 154.2, 1],
+         [-28.2, 155.6, 0], [-25.0, 156.0, 1], [-20.6, 156.2, 0]].forEach(function(p){
+          bird(g, p[0], LC_Z0 + p[1], rnd(p[0], p[1], 13)*6.28, HEN, p[2]);
+        });
+        bird(g, -26.4, LC_Z0 + 154.8, 2.2, COCK, 0);
+        prop(g, woodMat,  boxGeo(2.4, 1.3, 1.8), -30.0, 0.80, LC_Z0 + 155.4);    // 鶏小屋
+        prop(g, strawMat, coneGeo(2.0, 1.0, 4),  -30.0, 1.95, LC_Z0 + 155.4, Math.PI/4);
+        registerPick(pickables, 'structure', -25.5, 1.0, LC_Z0 + 154, 12, 2.2, 8,
+          '鶏 Chickens', 'パン焼き所の西の作業庭に放し飼いにされた鶏。卵と肉のほか、厨房の屑を片づける役目も担った。');
+
+        // -- 鳩小屋: 行1の隙間 z 105..111。レンガ造の円塔に瓦の円錐屋根 --
+        (function dovecote(){
+          var dx = -51, dz = LC_Z0 + 108;
+          prop(g, dcWallMat, cylGeo(1.35, 1.50, 5.20, 10), dx, 2.60, dz);
+          prop(g, trimMat,   cylGeo(2.00, 1.90, 0.22, 10), dx, 5.31, dz);       // 止まり縁
+          prop(g, dcRoofMat, coneGeo(1.60, 1.70, 10),      dx, 6.27, dz);
+          for (var h=0; h<6; h++){
+            var ah = h*(Math.PI*2/6) + 0.3;
+            prop(g, windowMat, boxGeo(0.30, 0.30, 0.30),
+                 dx + Math.cos(ah)*1.40, 4.05, dz + Math.sin(ah)*1.40, -ah);
+          }
+          perched(g, dx - 1.76, 5.42, dz + 0.22, -0.4, DOVE);
+          perched(g, dx + 1.70, 5.42, dz - 0.36,  2.8, DOVE);
+          perched(g, dx + 0.32, 5.42, dz + 1.74,  1.2, DOVE);
+          perched(g, dx + 0.06, 7.12, dz,        -1.5, DOVE);
+          perched(g, dx + 2.70, 0.02, dz + 1.70,  1.9, DOVE);
+          registerPick(pickables, 'structure', dx, 3.4, dz, 4.0, 7.2, 4.0,
+            '鳩小屋 Dovecote', 'レンガ造の鳩小屋。冬季の生肉と畑の肥料を供給し、修道会の要塞網を結ぶ伝令鳩の巣でもあった。');
+        })();
+
+        // -- 通りの犬と猫。敷石の作業広場(x -49..-23 / z 167..189)と
+        //    東広場(x 15..45 / z 113..139)の縁。農民の通路帯の外側 --
+        beast(g, -44.0, LC_Z0 + 172.0,  0.9, DOG, 0);
+        beast(g, -30.5, LC_Z0 + 185.5, -1.7, DOG, 2);
+        beast(g,  41.5, LC_Z0 + 117.0,  2.4, CAT, 2);
+      })();
+
+      /* ============================================================
+       * 3. ノガト川の水鳥。川面は y = GROUND_Y+2.6、帯は x -144..-84。
+       *    城壁(x=-70)からは十分離れているので何とも干渉しない。
+       * ============================================================ */
+      (function riverFowl(){
+        var wy = GROUND_Y + 2.62;
+        var g = det(RIVER_CX, wy, LC_Z0 + 120, D_FAR);
+        [[-104, 30, 1.9], [-112, 74, -0.7], [-100, 132, 2.6],
+         [-118, 186, 0.4], [-106, 232, 1.2]].forEach(function(p){
+          swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], SWAN);
+        });
+        [[-96, 52, 1.1], [-99, 57, -1.4], [-110, 108, 0.6], [-113, 112, 2.2],
+         [-95, 168, -0.3], [-98, 173, 1.7], [-108, 250, 0.9]].forEach(function(p){
+          swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], DUCK);
+        });
+        [[-92, 88, 1.5], [-95, 93, -0.9], [-90, 96, 2.4]].forEach(function(p){
+          swimmer(g, p[0], wy, LC_Z0 + p[1], p[2], GOOSE);
+        });
+        registerPick(pickables, 'structure', -104, wy + 0.8, LC_Z0 + 130, 30, 1.6, 220,
+          'ノガト川の水鳥 Waterfowl', '川面に浮かぶ白鳥・鵞鳥・家鴨。城の食卓に上るとともに、羽根はペンと矢羽根の材料になった。');
+      })();
+
+      flush();
+    })();
+
+    /* ================================================================
      * D. CHIMNEYS. Hearths inside want flues outside: each one is put in
      * a ROOF-tier fade group (the gable bundles carry brick colour and
      * roof:true), so a chimney vanishes together with the roof it stands
