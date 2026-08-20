@@ -19,7 +19,11 @@ function buildBodiam(){
   var pickables = [];   // hover/tap tooltip targets: rooms + major structures
 
   function makeFadeGroup(name, dir, isRoof, colorHex, roughness){
-    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    /* 試作: 壁/塔は石積み、屋根は鉛葺きのテクスチャ+法線マップ。
+     * Lambert -> Phong(shininess 0 / specular 黒)に差し替えているが、
+     * カットアウェイが触るのは .opacity / .transparent / .depthWrite
+     * だけなので、フェードの挙動は Lambert のときと同一。 */
+    var mat = texMat(colorHex, isRoof ? 'roof' : 'stone', isRoof ? { nrm: 0.85 } : { nrm: 1.0 });
     var g = new T.Group();
     g.name = name;
     group.add(g);
@@ -61,16 +65,491 @@ function buildBodiam(){
   // so the lawn keeps its shading gradient.
   var COURT_GRASS_COL = 0x5a7442;
 
+  /* ================================================================ *
+   * BODIAM 試作ブロック A -- 手続き的テクスチャ工房 (this castle only)
+   * ================================================================ *
+   * 「美しいビジュアル」3件の試作を **このファイル内だけ** で完結させる。
+   * 共有ファイル(js/*.js)は一切変更していない。共有ヘルパーに手を入れ
+   * たくなった箇所は、すべてこのクロージャ内にローカル実装を置いた。
+   *
+   * 設計上の制約と、それに対する対処:
+   *
+   *  1) r128 の MeshLambertMaterial は normalMap / bumpMap を無視する。
+   *     → 法線マップを載せる面だけ MeshPhongMaterial に差し替え、
+   *       shininess:0 / specular:0x000000 にしてマット感を Lambert 相当
+   *       に保つ(鏡面ハイライトが出ないので白飛び予算に影響しない)。
+   *
+   *  2) map は material.color に **乗算** される。この城の配色は「昼の
+   *     水平上向き面には約1.95倍が乗る」という露出予算つきで調整済みな
+   *     ので、テクスチャで明るくすると即座に白飛びする。
+   *     → すべてのテクスチャは彩度のない淡いグレーで描き、最後に
+   *       normaliseMean() で平均輝度を狙い値(0.90-0.95)に **実測して
+   *       強制的に合わせる**。色は material.color 側に残したまま、
+   *       全体としてはわずかに暗くなる方向にしか動かない。
+   *
+   *  3) 目地の大きさがメッシュの寸法に依存してはいけない。BoxGeometry の
+   *     UV は面ごとに 0..1 なので、texture.repeat を共有すると 44m の
+   *     城壁と 0.9m の煙突で石の大きさが 50 倍違ってしまう。
+   *     → repeat は (1,1) のまま、ジオメトリの UV を **メートル単位に
+   *       書き直す**(uvWorldize)。城壁も煙突もマーロンも同じ石になる。
+   *
+   *  4) テクスチャは種類ごとに1枚だけ生成し、buildBodiam 自身に貼って
+   *     キャッシュする。城を往復してもキャンバス生成をやり直さない。
+   *     (applyCastle は mat.map を dispose するが、CanvasTexture は
+   *      image を持ったままなので次の描画で再アップロードされるだけ。)
+   * ---------------------------------------------------------------- */
+  var TEX = (function buildBodiamTextureAtelier(){
+    if (buildBodiam._texCache) return buildBodiam._texCache;
+
+    /* -- 決定論的 PRNG。毎回同じ石積みが出る(スクショ比較のため) -- */
+    function rnd(seed){
+      var s = (seed>>>0) || 1;
+      return function(){ s = (s*1664525 + 1013904223)>>>0; return s/4294967296; };
+    }
+    function cvs(n){ var c = document.createElement('canvas'); c.width = c.height = n; return c; }
+
+    /* -- 継ぎ目なく繰り返せる value noise。格子を巻き込み参照するので
+     *    どの周波数でもタイル境界で不連続にならない。 ------------------ */
+    function noiseField(N, lat, seed){
+      var r = rnd(seed), g = new Float32Array(lat*lat), i;
+      for (i=0;i<g.length;i++) g[i] = r();
+      var out = new Float32Array(N*N), sc = lat/N;
+      for (var y=0;y<N;y++){
+        var fy = y*sc, yi = Math.floor(fy), ty = fy-yi, y0 = yi%lat, y1 = (yi+1)%lat;
+        var wy = ty*ty*(3-2*ty);
+        for (var x=0;x<N;x++){
+          var fx = x*sc, xi = Math.floor(fx), tx = fx-xi, x0 = xi%lat, x1 = (xi+1)%lat;
+          var wx = tx*tx*(3-2*tx);
+          var top = g[y0*lat+x0] + (g[y0*lat+x1]-g[y0*lat+x0])*wx;
+          var bot = g[y1*lat+x0] + (g[y1*lat+x1]-g[y1*lat+x0])*wx;
+          out[y*N+x] = top + (bot-top)*wy;
+        }
+      }
+      return out;
+    }
+    function octaves(N, seed, specs){
+      var out = new Float32Array(N*N), tot = 0, i, j;
+      for (i=0;i<specs.length;i++){
+        var f = noiseField(N, specs[i][0], seed + i*7919), a = specs[i][1];
+        for (j=0;j<out.length;j++) out[j] += f[j]*a;
+        tot += a;
+      }
+      for (j=0;j<out.length;j++) out[j] /= tot;
+      return out;
+    }
+
+    /* -- 巻き込み描画: タイル境界をまたぐ矩形は反対側にも描く -------- */
+    function fillWrap(ctx, N, x, y, w, h){
+      ctx.fillRect(x, y, w, h);
+      if (x + w > N) ctx.fillRect(x - N, y, w, h);
+      if (x < 0)     ctx.fillRect(x + N, y, w, h);
+    }
+
+    /* -- 平均輝度を狙い値に強制的に合わせる(白飛び対策の要) --------
+     * map は color に乗算されるので、平均が 1.0 を超えると既存の配色が
+     * そのまま明るくなって飽和する。ここで実測して線形に押し下げる。 */
+    function normaliseMean(c, target){
+      var ctx = c.getContext('2d'), N = c.width;
+      var im = ctx.getImageData(0,0,N,N), d = im.data, i, sum = 0;
+      for (i=0;i<d.length;i+=4) sum += (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114);
+      var mean = sum / (d.length/4) / 255;
+      var k = target / (mean || 1);
+      for (i=0;i<d.length;i+=4){
+        d[i]   = Math.min(255, Math.round(d[i]  *k));
+        d[i+1] = Math.min(255, Math.round(d[i+1]*k));
+        d[i+2] = Math.min(255, Math.round(d[i+2]*k));
+      }
+      ctx.putImageData(im,0,0);
+      return c;
+    }
+
+    /* -- 高さマップ(グレースケール)から接空間法線マップを焼く。
+     * r128 は USE_TANGENT なしでも画面空間微分で TBN を作る
+     * (perturbNormal2Arb)ので tangent 属性は不要。端は巻き込み参照。 */
+    function bakeNormal(hc, strength){
+      var N = hc.width;
+      var src = hc.getContext('2d').getImageData(0,0,N,N).data;
+      var out = cvs(N), octx = out.getContext('2d');
+      var img = octx.createImageData(N,N), o = img.data;
+      function H(x,y){ return src[((((y%N)+N)%N)*N + (((x%N)+N)%N))*4] / 255; }
+      for (var y=0;y<N;y++) for (var x=0;x<N;x++){
+        var dx = (H(x+1,y) - H(x-1,y)) * strength;
+        var dy = (H(x,y+1) - H(x,y-1)) * strength;
+        var nx = -dx, ny = dy, nz = 1;           // ny の符号は OpenGL 系(緑=上)
+        var l = Math.sqrt(nx*nx + ny*ny + nz*nz);
+        var i = (y*N+x)*4;
+        o[i]   = Math.round((nx/l*0.5+0.5)*255);
+        o[i+1] = Math.round((ny/l*0.5+0.5)*255);
+        o[i+2] = Math.round((nz/l*0.5+0.5)*255);
+        o[i+3] = 255;
+      }
+      octx.putImageData(img,0,0);
+      return out;
+    }
+    function mkTex(c){
+      var t = new T.CanvasTexture(c);
+      t.wrapS = t.wrapT = T.RepeatWrapping;
+      /* 異方性フィルタ。実測(SwiftShader / headless)で 8 は 1 に比べて
+       * フレームあたり約 8ms 重かった -- 城壁は斜めから見るので効果は
+       * 大きいが、4 に落として効果とコストの折り合いを取る。
+       * three 側で GPU の最大値にクランプされる。 */
+      t.anisotropy = 4;
+      return t;
+    }
+    /* 高さマップ配列をキャンバスに書き出す小道具 */
+    function heightCanvas(N, arr){
+      var c = cvs(N), ctx = c.getContext('2d');
+      var im = ctx.createImageData(N,N), d = im.data;
+      for (var i=0;i<N*N;i++){
+        var v = Math.max(0, Math.min(255, Math.round(arr[i]*255)));
+        d[i*4] = d[i*4+1] = d[i*4+2] = v; d[i*4+3] = 255;
+      }
+      ctx.putImageData(im,0,0);
+      return c;
+    }
+
+    /* ============================================================ *
+     * 1. 石積み -- 蜂蜜色の砂岩、布積み(running bond)の切石
+     * ============================================================ *
+     * 256px = 2.4m。1段 0.30m x 8段、ブロック幅 0.60-1.05m。実物写真の
+     * ボディアムは目地が細く(1-2cm)、面は風化でまだらに汚れている。
+     * 石の「大きさ」は uvWorldize の density 側で決めるので、ここでは
+     * 「タイル1枚 = 2.4m 角」という約束だけ守ればよい。 */
+    var STONE_M = 2.4;                       // タイル1枚が表す実寸(m)
+    function makeStone(){
+      var N = 256, COURSES = 8, ch = N/COURSES;
+      var a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var r = rnd(0x50D1A3);
+
+      A.fillStyle = '#8f8a80'; A.fillRect(0,0,N,N);          // 目地(モルタル)
+      for (var i=0;i<hgt.length;i++) hgt[i] = 0.30;           // 目地は凹み
+
+      // 段ごとに: 幅の合計がちょうど N になるブロック列を作り、
+      // ランダムな位相でずらして芋目地を避ける(横方向は完全にタイル可)
+      var blocks = [];
+      for (var c=0;c<COURSES;c++){
+        var ws = [], sum = 0;
+        while (sum < N - 60){ var w = 62 + Math.floor(r()*46); ws.push(w); sum += w; }
+        ws.push(N - sum);                                     // 端数を最後の石へ
+        var off = Math.floor(r()*N), x = off;
+        for (var k=0;k<ws.length;k++){
+          blocks.push({ x: x % N, y: c*ch, w: ws[k], h: ch });
+          x += ws[k];
+        }
+      }
+      // 面: 明度ばらつき + 上端の受光エッジ + 下端の影
+      var J = 1.5;                                            // 目地の半幅(px)
+      blocks.forEach(function(b){
+        var v = 232 + Math.floor(r()*22);
+        A.fillStyle = 'rgb('+v+','+(v-1)+','+(v-4)+')';
+        fillWrap(A, N, b.x+J, b.y+J, b.w-2*J, b.h-2*J);
+        A.fillStyle = 'rgba(255,255,255,0.30)';               // 上端の面取り
+        fillWrap(A, N, b.x+J, b.y+J, b.w-2*J, 1.6);
+        A.fillStyle = 'rgba(60,50,36,0.30)';                  // 下端の影(目地の落ち)
+        fillWrap(A, N, b.x+J, b.y+b.h-J-2.0, b.w-2*J, 2.0);
+      });
+      // 高さ: ブロックごとに少し飛び出す量を変える(斜光で段が波打つ)
+      blocks.forEach(function(b){
+        var hv = 0.72 + r()*0.26;
+        for (var yy=Math.ceil(b.y+J); yy<b.y+b.h-J; yy++){
+          for (var xx=Math.ceil(b.x+J); xx<b.x+b.w-J; xx++){
+            hgt[((yy%N)*N) + (((xx%N)+N)%N)] = hv;
+          }
+        }
+      });
+
+      // 風化: 低周波の斑を albedo と高さの両方へ
+      var stain = octaves(N, 0x5AA1, [[4,1.0],[9,0.6],[20,0.35],[48,0.18]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p=0;p<N*N;p++){
+        var s = stain[p];
+        var mul = 0.84 + s*0.30;                              // 0.84 - 1.14
+        d[p*4]   = Math.min(255, d[p*4]  *mul);
+        d[p*4+1] = Math.min(255, d[p*4+1]*(mul*0.995));
+        d[p*4+2] = Math.min(255, d[p*4+2]*(mul*0.985));       // 汚れは寒色に寄る
+        hgt[p] = Math.max(0, Math.min(1, hgt[p] + (s-0.5)*0.16));
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.90);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.6)), metres: STONE_M };
+    }
+
+    /* ============================================================ *
+     * 2. 屋根 -- 鉛葺きの立ちはぜ(standing seam)+ 板の継ぎ目
+     * ============================================================ *
+     * ROOF_COL / roofCaps はどちらもグレー = 鉛葺きの読み。128px = 1.8m。
+     * 0.45m ごとに縦のロール、1.8m ごとに横の継ぎ手。 */
+    var ROOF_M = 1.8;
+    function makeRoof(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      A.fillStyle = '#cfcbc4'; A.fillRect(0,0,N,N);
+      for (var i=0;i<hgt.length;i++) hgt[i] = 0.5;
+      var rolls = 4, rw = N/rolls;                            // 0.45m ごと
+      for (var k=0;k<rolls;k++){
+        var x = k*rw;
+        A.fillStyle = 'rgba(30,26,20,0.34)';                  // ロールの陰
+        A.fillRect(x, 0, 2.5, N);
+        A.fillStyle = 'rgba(255,255,255,0.42)';               // ロールの峰
+        A.fillRect(x+2.5, 0, 2.5, N);
+        for (var yy=0;yy<N;yy++){
+          for (var dx=0;dx<6;dx++){
+            var xx = Math.floor(x+dx) % N;
+            hgt[yy*N+xx] = dx<3 ? 0.92 : 0.62;
+          }
+        }
+      }
+      A.fillStyle = 'rgba(40,36,30,0.26)';                    // 横の継ぎ手(板の重ね)
+      A.fillRect(0, N-3, N, 3);
+      for (var yy2=N-3; yy2<N; yy2++) for (var xx2=0; xx2<N; xx2++) hgt[yy2*N+xx2] = 0.24;
+      // 鉛の緩い波打ちと汚れ
+      var w = octaves(N, 0x77C3, [[3,1.0],[8,0.55],[22,0.3]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p=0;p<N*N;p++){
+        var mul = 0.88 + w[p]*0.26;
+        d[p*4] = Math.min(255,d[p*4]*mul); d[p*4+1] = Math.min(255,d[p*4+1]*mul); d[p*4+2] = Math.min(255,d[p*4+2]*mul*1.01);
+        hgt[p] = Math.max(0, Math.min(1, hgt[p] + (w[p]-0.5)*0.22));
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.93);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.0)), metres: ROOF_M };
+    }
+
+    /* ============================================================ *
+     * 3. 木材 -- 板目。橋・扉・家具・小屋組で共用
+     * ============================================================ *
+     * 128px = 1.6m。板幅 0.4m、板の継ぎ目は U 軸に走らせる(BoxGeometry
+     * の上面は uv=(x,z) なので、南北に伸びる橋の板が長手方向に並ぶ)。 */
+    var WOOD_M = 1.6;
+    function makeWood(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var r = rnd(0x9E4D);
+      A.fillStyle = '#d8d2c8'; A.fillRect(0,0,N,N);
+      for (var i=0;i<hgt.length;i++) hgt[i] = 0.72;
+      var planks = 4, pw = N/planks;                          // 0.4m 幅の板
+      for (var k=0;k<planks;k++){
+        var x = k*pw;
+        var v = 210 + Math.floor(r()*44);
+        A.fillStyle = 'rgb('+v+','+v+','+v+')';
+        A.fillRect(x+1.5, 0, pw-3, N);
+        A.fillStyle = 'rgba(28,20,12,0.55)';                  // 板の隙間
+        A.fillRect(x, 0, 1.5, N);
+        for (var yy=0;yy<N;yy++){ hgt[yy*N+(x|0)] = 0.12; hgt[yy*N+((x+1)|0)] = 0.2; }
+      }
+      // 木目: 板ごとに縦に流れる筋(x は細かく、y は粗く読んで引き伸ばす)
+      var grain = octaves(N, 0x3B71, [[2,1.0],[6,0.7],[64,0.45]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p=0;p<N*N;p++){
+        var px = p % N, py = (p/N)|0;
+        var g = grain[(((py*3)%N)*N) + px];
+        var mul = 0.80 + g*0.36;
+        d[p*4] = Math.min(255,d[p*4]*mul); d[p*4+1] = Math.min(255,d[p*4+1]*mul*0.99); d[p*4+2] = Math.min(255,d[p*4+2]*mul*0.97);
+        if (hgt[p] > 0.3) hgt[p] = Math.max(0, Math.min(1, 0.72 + (g-0.5)*0.4));
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.92);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 1.5)), metres: WOOD_M };
+    }
+
+    /* ============================================================ *
+     * 4. 敷石 -- 各棟の石床 / 通路の不定形フラグストーン
+     * ============================================================ *
+     * 128px = 2.0m。格子を乱して 0.4-0.6m の不定形な板石にする。 */
+    var PAVE_M = 2.0;
+    function makePave(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var r = rnd(0xC0BB1E);
+      A.fillStyle = '#8c887e'; A.fillRect(0,0,N,N);           // 目地の砂
+      for (var i=0;i<hgt.length;i++) hgt[i] = 0.28;
+      var g = 4, cell = N/g;                                  // 4x4 = 0.5m 角
+      for (var gy=0; gy<g; gy++) for (var gx=0; gx<g; gx++){
+        var jx = (r()-0.5)*cell*0.30, jy = (r()-0.5)*cell*0.30;
+        var w = cell*(0.72 + r()*0.16), h = cell*(0.72 + r()*0.16);
+        var x = gx*cell + (cell-w)/2 + jx, y = gy*cell + (cell-h)/2 + jy;
+        var v = 224 + Math.floor(r()*28);
+        A.fillStyle = 'rgb('+v+','+(v-1)+','+(v-3)+')';
+        fillWrap(A, N, x, y, w, h);
+        A.fillStyle = 'rgba(255,255,255,0.22)';
+        fillWrap(A, N, x, y, w, 1.4);
+        A.fillStyle = 'rgba(50,44,34,0.26)';
+        fillWrap(A, N, x, y+h-1.6, w, 1.6);
+        var hv = 0.66 + r()*0.3;
+        for (var yy=Math.ceil(y); yy<y+h; yy++) for (var xx=Math.ceil(x); xx<x+w; xx++)
+          hgt[((((yy%N)+N)%N)*N) + (((xx%N)+N)%N)] = hv;
+      }
+      var wear = octaves(N, 0x4411, [[3,1.0],[10,0.6],[30,0.3]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p=0;p<N*N;p++){
+        var mul = 0.85 + wear[p]*0.28;
+        d[p*4] = Math.min(255,d[p*4]*mul); d[p*4+1] = Math.min(255,d[p*4+1]*mul); d[p*4+2] = Math.min(255,d[p*4+2]*mul*0.99);
+        hgt[p] = Math.max(0, Math.min(1, hgt[p] + (wear[p]-0.5)*0.2));
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.91);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.2)), metres: PAVE_M };
+    }
+
+    /* ============================================================ *
+     * 5. 芝 -- 中庭の芝生。刈り跡と踏み跡のむら(法線は入れない)
+     * ============================================================ */
+    var TURF_M = 3.0;
+    function makeTurf(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      A.fillStyle = '#ffffff'; A.fillRect(0,0,N,N);
+      var lo = octaves(N, 0x7A55, [[3,1.0],[7,0.5]]);
+      var hi = octaves(N, 0x1D66, [[24,1.0],[56,0.7]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p=0;p<N*N;p++){
+        var mul = 0.86 + lo[p]*0.22 + hi[p]*0.10;
+        d[p*4] = 255*mul*0.98; d[p*4+1] = 255*mul; d[p*4+2] = 255*mul*0.95;
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.94);
+      return { map: mkTex(a), normal: null, metres: TURF_M };
+    }
+
+    /* ============================================================ *
+     * 6. 水面のさざ波 -- 2枚を別速度で流すための法線マップ
+     * ============================================================ *
+     * 高さは低周波のうねり + やや高周波のさざ波。albedo は作らない
+     * (水の色は 11-environment.js が時間帯ごとに .color へ書くので、
+     *  こちらは法線だけを足して .color には一切触らない)。 */
+    function makeWaterNormal(seed, strength, spec){
+      var N = 128;
+      var h = octaves(N, seed, spec || [[2,1.0],[5,0.55],[9,0.22]]);
+      return mkTex(bakeNormal(heightCanvas(N,h), strength));
+    }
+
+    /* ============================================================ *
+     * 7. 煙のスプライト -- 中心が濃い柔らかい円板
+     * ============================================================ */
+    function makeSmoke(){
+      var N = 64, c = cvs(N), ctx = c.getContext('2d');
+      var img = ctx.createImageData(N,N), d = img.data;
+      var puff = octaves(N, 0x5A0E, [[4,1.0],[9,0.6],[18,0.35]]);
+      for (var y=0;y<N;y++) for (var x=0;x<N;x++){
+        var dx = (x-N/2)/(N/2), dy = (y-N/2)/(N/2);
+        var r2 = Math.sqrt(dx*dx+dy*dy);
+        var fall = Math.max(0, 1 - r2);
+        var av = fall*fall * (0.55 + puff[y*N+x]*0.85);
+        var i = (y*N+x)*4;
+        d[i] = d[i+1] = d[i+2] = 255;
+        d[i+3] = Math.max(0, Math.min(255, Math.round(av*255)));
+      }
+      ctx.putImageData(img,0,0);
+      var t = new T.CanvasTexture(c);
+      t.wrapS = t.wrapT = T.ClampToEdgeWrapping;
+      return t;
+    }
+
+    /* ============================================================ *
+     * 8. 旗 -- 竿側に金の帯を置いた単純な陣旗(紋章の忠実再現は狙わない)
+     * ============================================================ */
+    function makeFlag(){
+      var W = 96, H = 64, c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      var ctx = c.getContext('2d');
+      ctx.fillStyle = '#9d2f26'; ctx.fillRect(0,0,W,H);          // 赤地
+      ctx.fillStyle = '#c9b47e'; ctx.fillRect(0,0,W*0.30,H);     // 竿側の金の帯
+      ctx.fillStyle = '#7a2019'; ctx.fillRect(W*0.30, 0, 2.5, H);
+      ctx.fillStyle = '#c9b47e';
+      for (var i=0;i<3;i++) ctx.fillRect(W*0.40, H*(0.17+i*0.27), W*0.48, H*0.10);
+      var t = new T.CanvasTexture(c);
+      t.wrapS = t.wrapT = T.ClampToEdgeWrapping;
+      return t;
+    }
+
+    var out = {
+      stone: makeStone(), roof: makeRoof(), wood: makeWood(),
+      pave: makePave(), turf: makeTurf(),
+      /* 水面のさざ波は 3 スケール。poseidon のアブレーションで「カスケード
+       * 3->1」が最も効果が大きかった(細かいさざ波と鋭い峰が同時に消える)
+       * ので、こちらでも重ねる枚数を 2 -> 3 にしている。タイル実寸は
+       * 19 / 6.4 / 2.6 m(B-3 節)で互いに非通約。周波数構成も
+       * 「うねり寄り」「中間」「細かい波紋寄り」と変えてある。 */
+      waterN1: makeWaterNormal(0x11AA, 5.5, [[2,1.0],[4,0.55],[8,0.20]]),
+      waterN2: makeWaterNormal(0x9E31, 4.0, [[3,1.0],[6,0.45],[11,0.16]]),
+      waterN3: makeWaterNormal(0x4C07, 3.2, [[5,1.0],[10,0.60],[19,0.30]]),
+      smoke: makeSmoke(), flag: makeFlag()
+    };
+    buildBodiam._texCache = out;
+    return out;
+  })();
+
+  /* ---- UV をメートル単位に書き直す ---------------------------------
+   * mkBox / mkCyl はメッシュごとに新しい BufferGeometry を作る(共有は
+   * していない)ので、ビルド末尾で1回走査して UV を差し替えてよい。
+   *  - 円柱/円錐は円周方向の巻きを壊さないよう既存の UV を整数倍する
+   *  - それ以外(箱・板・押し出し)は面法線の主軸でローカル平面投影する
+   * density は「1m あたり何タイル」= 1/タイルの実寸(m)。 */
+  function uvWorldize(mesh, density){
+    var geo = mesh.geometry;
+    if (!geo || geo.userData.__uvW) return;
+    var pos = geo.attributes && geo.attributes.position;
+    var uv  = geo.attributes && geo.attributes.uv;
+    var nor = geo.attributes && geo.attributes.normal;
+    if (!pos || !uv) return;
+    var i, p = geo.parameters, ty = geo.type;
+    if (p && (ty === 'CylinderGeometry' || ty === 'ConeGeometry')){
+      var rad = ty === 'ConeGeometry' ? (p.radius||0)
+              : Math.max(p.radiusTop||0, p.radiusBottom||0);
+      var su = Math.max(1, Math.round(2*Math.PI*rad*density));   // 整数 = 継ぎ目なし
+      var sv = Math.max(1, Math.round((p.height||1)*density));
+      for (i=0;i<uv.count;i++) uv.setXY(i, uv.getX(i)*su, uv.getY(i)*sv);
+    } else {
+      for (i=0;i<uv.count;i++){
+        var nx = nor ? Math.abs(nor.getX(i)) : 0;
+        var ny = nor ? Math.abs(nor.getY(i)) : 1;
+        var nz = nor ? Math.abs(nor.getZ(i)) : 0;
+        var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (ny >= nx && ny >= nz)      uv.setXY(i, x*density,  z*density);
+        else if (nx >= nz)             uv.setXY(i, z*density,  y*density);
+        else                           uv.setXY(i, x*density,  y*density);
+      }
+    }
+    uv.needsUpdate = true;
+    geo.userData.__uvW = 1;
+  }
+  /* テクスチャ付きマテリアルを作る唯一の入口。density を userData に
+   * 覚えさせておき、ビルド末尾の走査(applyWorldUVs)がそれを読む。 */
+  function texMat(colorHex, kind, opt){
+    opt = opt || {};
+    var t = TEX[kind];
+    var m = new T.MeshPhongMaterial({
+      color: colorHex,
+      map: t.map,
+      shininess: 0, specular: 0x000000,     // マット: Lambert 相当の見え方
+      side: opt.side || T.FrontSide
+    });
+    if (t.normal && opt.nrm !== 0){
+      var ns = opt.nrm != null ? opt.nrm : 1.0;
+      m.normalMap = t.normal;
+      m.normalScale = new T.Vector2(ns, ns);
+    }
+    m.userData.uvDensity = (opt.density != null ? opt.density : 1/t.metres);
+    return m;
+  }
+  function applyWorldUVs(root){
+    root.traverse(function(o){
+      if (!o.isMesh || !o.material) return;
+      var d = o.material.userData && o.material.userData.uvDensity;
+      if (d) uvWorldize(o, d);
+    });
+  }
+
   var windowMat = new T.MeshLambertMaterial({ color: WINDOW_COL });
-  var floorMat  = new T.MeshLambertMaterial({ color: FLOOR_COL }); // stone slab under each wing (grey-sand, one step above the lawn)
+  var floorMat  = texMat(FLOOR_COL, 'pave', { nrm: 0.9 }); // stone slab under each wing -- 不定形の板石に(試作)
   var stubMat   = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
   var partitionMat = new T.MeshLambertMaterial({ color: 0x8a7a5e, side: T.DoubleSide }); // room-dividing stub walls
-  var woodMat   = new T.MeshLambertMaterial({ color: WOOD_COL });
+  var woodMat   = texMat(WOOD_COL, 'wood', { nrm: 0.8 });   // 橋・扉・家具の板目(試作)
   var metalMat  = new T.MeshLambertMaterial({ color: METAL_COL });
-  var tileMat   = new T.MeshLambertMaterial({ color: TILE_COL });
+  var tileMat   = texMat(TILE_COL, 'roof', { nrm: 0.8 });
   var grassMat  = new T.MeshLambertMaterial({ color: GRASS_COL });
   var grassMat2 = new T.MeshLambertMaterial({ color: GRASS_COL2 });
-  var courtGrassMat = new T.MeshLambertMaterial({ color: COURT_GRASS_COL });
+  var courtGrassMat = texMat(COURT_GRASS_COL, 'turf');      // 芝の刈りむら(法線なし)
   var wellMat   = new T.MeshBasicMaterial({ color: 0x2e6a7a });
 
   /* ---- interior fittings / planting palette ------------------------
@@ -85,8 +564,8 @@ function buildBodiam(){
    * below is kept at or under 0x77 per channel so that base x 1.98
    * lands under 235 and the shading gradient survives. */
   var oakMat     = new T.MeshLambertMaterial({ color: 0x5a4128 }); // 家具の樫材(既存 woodMat より濃い)
-  var oakLtMat   = new T.MeshLambertMaterial({ color: 0x6f5334 }); // 板材・棚・柵
-  var ashlarMat  = new T.MeshLambertMaterial({ color: 0x6f6858 }); // 屋内の切石(柱・ヴォールト)
+  var oakLtMat   = texMat(0x6f5334, 'wood', { nrm: 0.6 }); // 板材・棚・柵
+  var ashlarMat  = texMat(0x6f6858, 'stone', { nrm: 0.7 }); // 屋内の切石(柱・ヴォールト)
   var ashlarDkMat= new T.MeshLambertMaterial({ color: 0x554f42 }); // 柱頭・礎盤
   var strawMat   = new T.MeshLambertMaterial({ color: 0x6e6234 }); // 藁・干し草・床の藺草
   var soilMat    = new T.MeshLambertMaterial({ color: 0x463527 }); // 菜園の畝の土
@@ -220,7 +699,7 @@ function buildBodiam(){
   // meets the moat with a dark, wet, slightly wider base course rather
   // than a clean butt joint against the grass. `batterBox` / the tower
   // equivalents below add that course everywhere.
-  var batterMat = new T.MeshLambertMaterial({ color: STONE_BASE });
+  var batterMat = texMat(STONE_BASE, 'stone', { nrm: 1.0 });
   function batterBox(target, cx, cz, length, ry, thickness, topY){
     topY = topY != null ? topY : 1.1;
     var b = mkBox(length + 0.35, topY - BATTER_BOT, thickness + 0.5, batterMat);
@@ -1360,9 +1839,9 @@ function buildBodiam(){
   var OCT_DECK_Y = 0.10;               // gravel deck, just under the bridge deck tops
   var OCT_FOOT_Y = WATER_Y - 1.2;      // revetment foot, buried below the waterline
 
-  var octStoneMat  = new T.MeshLambertMaterial({ color: 0x635d4e }); // revetment ashlar (darker: reads as a wall face)
+  var octStoneMat  = texMat(0x635d4e, 'stone', { nrm: 1.0 }); // revetment ashlar (darker: reads as a wall face)
   var octCopeMat   = new T.MeshLambertMaterial({ color: 0x76705f }); // coping / kerb
-  var octGravelMat = new T.MeshLambertMaterial({ color: 0x6a6350 }); // path surface across the plinth
+  var octGravelMat = texMat(0x6a6350, 'pave', { nrm: 0.7 }); // path surface across the plinth
   var octTurfMat   = new T.MeshLambertMaterial({ color: 0x4a5b3a }); // the thin turf inside the kerb
   var octBaseMat   = new T.MeshLambertMaterial({ color: 0x4d4838 }); // wet, weed-stained lower courses
 
@@ -1835,6 +2314,465 @@ function buildBodiam(){
 
   // always-on labels (section 6 toggle): shared helper, see buildLabelGroup
   // (section 0) -- covers both structure and room pickables.
+
+  /* ================================================================ *
+   * BODIAM 試作ブロック B -- 動くもの(煙 / 旗 / さざ波)
+   * ================================================================ *
+   * メインループ(js/90-main.js)には手を入れられないので、毎フレームの
+   * 更新は **mesh.onBeforeRender** に載せる。ただし three は
+   * 「visible=false / 視錐台の外」のオブジェクトには onBeforeRender を
+   * 呼ばないので、煙のスプライトを個別に消すと二度と復活できない。
+   * → frustumCulled=false の極小メッシュを1つだけ「時計」として置き、
+   *   そこから煙・旗・水面をまとめて更新する(追加 drawCall は1)。
+   *
+   * 更新はすべて「絶対時刻の純関数」にしてある。ポストFXが1フレームに
+   * 複数回シーンを描いても(ゴッドレイの遮蔽プリパス等)、同じ時刻なら
+   * 同じ結果になるので二重進行しない。
+   * ---------------------------------------------------------------- */
+  var ANIM = [];                       // 毎フレーム呼ぶ更新関数のリスト
+  function nowSec(){
+    return (typeof performance !== 'undefined' && performance.now
+            ? performance.now() : Date.now()) / 1000;
+  }
+  /* 時間帯・天候の読み取り(共有ファイルのグローバルを読むだけ。書かない) */
+  function envState(){
+    var glow = 0, rain = 0, snow = 0, sunMul = 1;
+    if (typeof CUR_TIME !== 'undefined' && CUR_TIME){ glow = CUR_TIME.windowGlow || 0; }
+    if (typeof CUR_WEATHER !== 'undefined' && CUR_WEATHER){
+      rain = CUR_WEATHER.rain || 0; snow = CUR_WEATHER.snow || 0;
+      sunMul = CUR_WEATHER.sunMul != null ? CUR_WEATHER.sunMul : 1;
+    }
+    return { glow: glow, rain: rain, snow: snow, sunMul: sunMul };
+  }
+
+  /* ---- 時計メッシュ ------------------------------------------------- */
+  (function(){
+    /* 頂点が3つとも原点に重なった退化三角形。面積0なので1画素も塗らない
+     * が、renderObject は呼ばれるので onBeforeRender が必ず走る。
+     * transparent にしないのが肝心: three は不透明キューを先に描くので、
+     * renderOrder -1000 と合わせて「このフレームで最初に呼ばれる」ことが
+     * 保証され、旗(不透明メッシュ)も同じフレーム内で更新後に描かれる。 */
+    var tick = new T.Mesh(new T.BufferGeometry(),
+      new T.MeshBasicMaterial({ depthWrite:false, depthTest:false }));
+    tick.geometry.setAttribute('position', new T.BufferAttribute(new Float32Array(9), 3));
+    tick.frustumCulled = false;
+    tick.renderOrder = -1000;
+    tick.onBeforeRender = function(){
+      var t = nowSec(), e = envState();
+      for (var i=0;i<ANIM.length;i++) ANIM[i](t, e);
+    };
+    group.add(tick);
+  })();
+
+  /* ================================================================ *
+   * B-1. 煙突の煙
+   * ================================================================ *
+   * 厨房・パン焼き所・大広間・領主居室に火が入っている城、という読み。
+   * 昼でも厨房の煙は細く立つので常時ゼロにはしない。夜(暖炉が焚かれる)
+   * と雨雪(湿って白く重くなる)で量を増やす。
+   * スプライト1枚 = 1 drawCall なので、煙突あたり4-5枚に抑える。 */
+  var WIND = { x: 0.80, z: 0.60 };     // 南西からの緩い風(単位ベクトルでなくてよい)
+  function smokePlume(fg, x, y0, z, opt){
+    opt = opt || {};
+    var n     = opt.count != null ? opt.count : 5;
+    var rise  = opt.rise  != null ? opt.rise  : 12.0;
+    var speed = opt.speed != null ? opt.speed : 0.13;   // 1秒あたりの寿命進行
+    var base  = opt.base  != null ? opt.base  : 0.55;   // 濃さの基準
+    var g = new T.Group();
+    g.position.set(x, y0, z);
+    (fg ? fg.group : group).add(g);
+    var puffs = [];
+    for (var i=0;i<n;i++){
+      var mat = new T.SpriteMaterial({ map: TEX.smoke, color: 0xcfcac1,
+        transparent: true, depthWrite: false, opacity: 0, fog: true });
+      var s = new T.Sprite(mat);
+      s.renderOrder = 5;
+      s.visible = false;
+      g.add(s);
+      puffs.push({ s: s, ph: i/n + (i*0.137) % 0.1 });
+    }
+    ANIM.push(function(t, e){
+      // 量: 昼 0.34 / 夕 0.54 / 夜 0.84、雨雪で増える
+      var amt = Math.min(1.0, 0.82 + e.glow*0.18 + e.rain*0.16 + e.snow*0.12);
+      var wind = 1 + e.rain*0.9 + e.snow*0.35;
+      var op0 = base * amt * (fg ? fg.op : 1);
+      // 昼 0x757068(空より暗い) -> 夜 0xb4afa5(淡い)
+      var cr = 0.395 + (0.706-0.395)*e.glow;
+      var cg = 0.377 + (0.686-0.377)*e.glow;
+      var cb = 0.349 + (0.647-0.349)*e.glow;
+      // 壁/屋根がフェードで消えているあいだは煙も消す(煙突ごと消えるので)
+      if (fg && (!fg.group.visible || fg.op < 0.15)) op0 = 0;
+      for (var i=0;i<puffs.length;i++){
+        var p = puffs[i];
+        var k = (t*speed + p.ph) % 1;                    // 0..1 の寿命
+        var op = op0 * Math.min(1, k*5) * Math.pow(1-k, 1.30);
+        if (op < 0.012){ p.s.visible = false; continue; }
+        var drift = wind * (0.20 + 1.6*k*k);
+        var climb = Math.pow(k, 1.35);          // 根元は詰まり、上ほど間隔が開く
+        p.s.position.set(
+          Math.sin(t*0.55 + p.ph*6.28)*0.30*k + WIND.x*drift,
+          climb*rise,
+          Math.cos(t*0.41 + p.ph*5.13)*0.30*k + WIND.z*drift
+        );
+        var sc = 1.45 + k*5.0;                  // 隣の粒と必ず重なる大きさ
+        p.s.scale.set(sc, sc, 1);
+        p.s.material.opacity = op;
+        p.s.material.color.setRGB(cr, cg, cb);
+        p.s.visible = true;
+      }
+    });
+    return g;
+  }
+  /* 煙突の座標は上の chimney() 呼び出しと同じ数式で出す(重複だが、
+   * chimney() を書き換えずに済ませるためのローカル複製)。 */
+  smokePlume(roofS, 9.5,  WH+2.9,  INNER-1.8, { base:0.42, rise:18, speed:0.100, count:6 }); // 大広間
+  smokePlume(roofS, -12.5, WH+2.7, INNER-1.5, { base:0.50, rise:17, speed:0.114, count:6 }); // 厨房
+  smokePlume(roofS, -15.5, WH+2.5, INNER-1.5, { base:0.42, rise:15, speed:0.131, count:6 }); // 厨房(第2炉)
+  smokePlume(roofE, INNER-1.8, WH+2.7, 10.5,  { base:0.35, rise:15, speed:0.110, count:5 }); // 領主居室
+  smokePlume(roofE, INNER-1.8, WH+2.5, 2.0,   { base:0.31, rise:14, speed:0.126, count:5 }); // ソーラー
+  smokePlume(tNW,  -OW+3.0, CORNER_H+2.7, -OW+3.0, { base:0.33, rise:16, speed:0.105, count:5 }); // 北西塔
+
+  /* ================================================================ *
+   * B-2. 旗のはためき
+   * ================================================================ *
+   * ボディアムには旗が1本も立っていなかったので、まず双子塔の胸壁に
+   * 2本立て、そのうえで布を波打たせる。板を14x7分割し、竿からの距離の
+   * 2乗で振幅を増やす進行波(位相の違う2波の重ね合わせ)。 */
+  function flagOnTower(fg, x, z, baseY, opt){
+    opt = opt || {};
+    var poleH = opt.poleH != null ? opt.poleH : 5.2;
+    var pole = mkCyl(0.085, 0.105, poleH, 6, metalMat);
+    place(pole, x, baseY + poleH/2, z);
+    fg.group.add(pole);
+    var knob = mkCyl(0.16, 0.16, 0.16, 6, metalMat);
+    place(knob, x, baseY + poleH + 0.08, z);
+    fg.group.add(knob);
+
+    var W = opt.w != null ? opt.w : 3.0, H = opt.h != null ? opt.h : 1.9;
+    var geo = new T.PlaneGeometry(W, H, 14, 7);
+    var mat = new T.MeshLambertMaterial({ map: TEX.flag, side: T.DoubleSide });
+    var flag = new T.Mesh(geo, mat);
+    // 布は影を落とさない。シャドウマップの描画では onBeforeRender が
+    // 呼ばれず、1フレーム前の頂点で影が焼かれてちらつくため。
+    flag.castShadow = false; flag.receiveShadow = false;
+    flag.position.set(x + W/2 + 0.05, baseY + poleH - 0.30 - H/2, z);
+    fg.group.add(flag);
+
+    var pos = geo.attributes.position;
+    var base = new Float32Array(pos.array);        // 静止形状を保存
+    var seed = opt.seed || 0;
+    ANIM.push(function(t, e){
+      if (!fg.group.visible || !flag.visible) return;
+      // 突風のうねり + 天候による強さ
+      var gust = 0.78 + 0.34*Math.sin(t*0.31 + seed) + 0.16*Math.sin(t*0.83 + seed*2.1);
+      var strength = gust * (1 + e.rain*0.55 + e.snow*0.2);
+      var sp = 3.1 * (1 + e.rain*0.4);
+      var arr = pos.array;
+      for (var i=0;i<pos.count;i++){
+        var bx = base[i*3], by = base[i*3+1];
+        var u = (bx + W/2) / W;                    // 0 = 竿側、1 = 吹き流し端
+        var amp = u*u * 0.52 * strength;
+        var ph = u*4.6 - t*sp + by*1.05 + seed;
+        var w1 = Math.sin(ph), w2 = Math.sin(ph*0.57 + 1.7);
+        arr[i*3+2] = w1*amp + w2*amp*0.42;
+        arr[i*3]   = bx - u*amp*0.30;              // 波打つぶん竿側へ縮む
+        arr[i*3+1] = by + w2*amp*0.16;
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    });
+    return flag;
+  }
+  flagOnTower(tG1, -gateCx + 0.35, gateCz + 0.9, GATE_H + 0.2, { seed: 0.0 });
+  flagOnTower(tG2,  gateCx - 3.35, gateCz + 0.9, GATE_H + 0.2, { seed: 2.3 });
+
+  /* ================================================================ *
+   * B-3. 水堀 -- 空を映す水面(フレネル反射 + 3スケールのさざ波)
+   * ================================================================ *
+   * 【設計の根拠 / 前任実装からの方針転換】
+   * 前の版は Phong の鏡面ローブ(shininess 90 / specular 0x9fd4e0)に
+   * 頼り、法線マップの傾きを「明暗」として最終色に掛けていた。平らな
+   * 池を上から見るとその明暗はほとんど出ず、鏡面ローブは太陽方向の
+   * 狭い範囲しか光らないので、結果は「紫の板 + オレンジの帯」になる。
+   *
+   * 水面の見えは拡散反射でも鏡面ローブでもなく **空の鏡像** が本体で、
+   * どれだけ映るかは視線の入射角(フレネル)だけで決まる。そこで:
+   *
+   *   1. Phong の鏡面を殺す(specularStrength = 0)。専用 specular 項は
+   *      書かない。太陽のきらめきは「空に太陽を置いて反射で拾う」。
+   *   2. Schlick フレネル F0 = 0.02(水の正しい値)。真上から見ると
+   *      F=0.02 でほぼ水中の色、視線が浅いと F->1 で空を強く映す。
+   *      この角度依存が「水らしさ」の本体。
+   *   3. 映す空は 11-environment.js と **同じ 6 段グラデーション**
+   *      (CUR_TIME.sky + skySatMul の彩度落とし)。しかもこの空は
+   *      スカイドームではなく scene.background = 画面空間のグラデー
+   *      ションなので、反射ベクトルを **カメラに投影して画面 v 座標を
+   *      出し、その位置のグラデーション色を引く**。これは screen-space
+   *      の空に対する厳密な鏡像で、水平線で色が必ず繋がる。
+   *   4. さざ波は 3 スケール(19m / 6.4m / 2.6m)の法線マップを互いに
+   *      非通約な周期・別方向・別速度でスクロールして加算。タイル
+   *      パターンが目視できないための条件。
+   *
+   * poseidon(WebGPU FFT 海面)から採ったのは 1・2・3・4 の「考え方」
+   * だけで、FFT も JONSWAP も choppiness も泡のヤコビアンも持ち込んで
+   * いない(WebGL r128 / file:// / 堀という条件に合わない)。
+   *
+   * 【共有ファイルとの共存】
+   * 11-environment.js は毎フレーム waterMat.color と .specular を
+   * 時間帯色で上書きする。ここが触るのは normalMap / onBeforeCompile の
+   * 自前ユニフォームと shininess だけなので競合しない。水の「地の色」
+   * (= 水中の色)は今までどおり CUR_TIME.waterColor が決めるので、
+   * 時間帯による水色の変化はそのまま生きる。.specular は使われなく
+   * なるが、書き込まれても無害。
+   *
+   * 【変更をこのファイルに閉じ込める】
+   * 共有ヘルパー(01-moat.js / 11-environment.js)は一切変更していない。
+   * 空の彩度落としは paintSky と同じ式をこの中にローカルコピーした。
+   * ================================================================ */
+  (function moatWater(){
+    var n1 = TEX.waterN1, n2 = TEX.waterN2, n3 = TEX.waterN3;
+
+    /* vUv をメートル座標そのものに固定する。
+     * moatWater は ShapeGeometry なので three が「world uvs」= シェイプ
+     * のローカル xy をそのまま UV に入れている。rotateX(-PI/2) 後は
+     *   uv.x = worldX, uv.y = -worldZ  (単位: m)
+     * repeat=1 / offset=0 にしておけば uvTransform は単位行列になり、
+     * vUv がそのままメートル座標として使える(スクロールは全部シェーダ
+     * 側の自前ユニフォームでやる)。r128 は map が無い場合 normalMap の
+     * matrix を uvTransform に流すので、ここを動かすと 3 枚とも一緒に
+     * 動いてしまう -- だから n1.offset は使わない。 */
+    n1.repeat.set(1, 1); n1.offset.set(0, 0);
+    waterMat.normalMap = n1;                       // USE_NORMALMAP と vUv を有効にするため
+    waterMat.normalScale = new T.Vector2(1, 1);    // 自前で法線を組むので未使用
+    waterMat.shininess = 1;                        // 鏡面はシェーダ側で完全に殺す
+
+    var uN2   = { value: n2 };
+    var uN3   = { value: n3 };
+    var uOff1 = { value: new T.Vector2(0, 0) };
+    var uOff2 = { value: new T.Vector2(0, 0) };
+    var uOff3 = { value: new T.Vector2(0, 0) };
+    var uSky  = { value: [ new T.Vector3(), new T.Vector3(), new T.Vector3(),
+                           new T.Vector3(), new T.Vector3(), new T.Vector3() ] };
+    var uSunCol = { value: new T.Vector3(0, 0, 0) };
+    var uSunDirV= { value: new T.Vector3(0, 1, 0) };
+    var uProjY  = { value: 2.6 };
+    var uAmp    = { value: 1.0 };
+    var uSkyGain= { value: 0.86 };
+    var uGlint  = { value: 1.70 };
+    var uFog    = { value: new T.Vector3(0, 0, 0) };
+    var uHaze   = { value: 0.75 };
+    var uEdge   = { value: new T.Vector2(moatSys.waterInnerHalf, moatSys.waterHalf) };
+    var uFoam   = { value: 0.30 };
+
+    waterMat.onBeforeCompile = function(sh){
+      /* 差し替え対象のチャンク名は three のバージョンに依存する。3つとも
+       * 見つかったときだけ差し込む。1つでも欠けた状態で残りを入れると
+       * 未定義の変数を参照する GLSL になり、水面が真っ黒 + コンソール
+       * エラーになる(前任者が踏んだ罠なのでそのまま踏襲する)。 */
+      var SPM = '#include <specularmap_fragment>',
+          NFM = '#include <normal_fragment_maps>',
+          FOG = '#include <fog_fragment>';
+      var fs = sh.fragmentShader;
+      if (fs.indexOf(SPM) < 0 || fs.indexOf(NFM) < 0 || fs.indexOf(FOG) < 0) return;
+
+      sh.uniforms.uWN2 = uN2;         sh.uniforms.uWN3 = uN3;
+      sh.uniforms.uWOff1 = uOff1;     sh.uniforms.uWOff2 = uOff2;   sh.uniforms.uWOff3 = uOff3;
+      sh.uniforms.uWSky = uSky;       sh.uniforms.uWSunCol = uSunCol;
+      sh.uniforms.uWSunDirV = uSunDirV;
+      sh.uniforms.uWProjY = uProjY;   sh.uniforms.uWAmp = uAmp;
+      sh.uniforms.uWSkyGain = uSkyGain; sh.uniforms.uWGlint = uGlint;
+      sh.uniforms.uWEdge = uEdge;     sh.uniforms.uWFoam = uFoam;
+      sh.uniforms.uWFog = uFog;       sh.uniforms.uWHaze = uHaze;
+
+      /* --- 前置き: ユニフォーム宣言と空グラデーションの評価関数 -------
+       * uWSky/ストップ位置は 11-environment.js の SKY_STOPS_POS と
+       * 同じ [0, .30, .52, .68, .84, 1]。clamp した線形ランプを mix で
+       * 連鎖させると区分線形グラデーションと厳密に一致する(前の区間が
+       * 1 に飽和してから次が立ち上がるため)。canvas の線形補間と同じ
+       * 数値になるので、水平線で空と水の色が一致する。
+       * viewMatrix / cameraPosition は three が fragment prefix で
+       * 宣言済みなので、ここで再宣言してはならない。 */
+      fs = [
+        'uniform sampler2D uWN2;',
+        'uniform sampler2D uWN3;',
+        'uniform vec2 uWOff1;',
+        'uniform vec2 uWOff2;',
+        'uniform vec2 uWOff3;',
+        'uniform vec3 uWSky[6];',
+        'uniform vec3 uWSunCol;',
+        'uniform vec3 uWSunDirV;',
+        'uniform float uWProjY;',
+        'uniform float uWAmp;',
+        'uniform float uWSkyGain;',
+        'uniform float uWGlint;',
+        'uniform vec2 uWEdge;',
+        'uniform float uWFoam;',
+        'uniform vec3 uWFog;',
+        'uniform float uWHaze;',
+        'float wRamp( float a, float b, float p ){ return clamp( ( p - a ) / ( b - a ), 0.0, 1.0 ); }',
+        'vec3 wSkyAt( float p ){',
+        '  vec3 c = mix( uWSky[0], uWSky[1], wRamp( 0.00, 0.30, p ) );',
+        '  c = mix( c, uWSky[2], wRamp( 0.30, 0.52, p ) );',
+        '  c = mix( c, uWSky[3], wRamp( 0.52, 0.68, p ) );',
+        '  c = mix( c, uWSky[4], wRamp( 0.68, 0.84, p ) );',
+        '  c = mix( c, uWSky[5], wRamp( 0.84, 1.00, p ) );',
+        '  return c;',
+        '}'
+      ].join('\n') + '\n' + fs;
+
+      // 1) Phong の鏡面ローブを完全に殺す。専用の specular 項は書かない。
+      fs = fs.replace(SPM, 'float specularStrength = 0.0;');
+
+      /* 2) 法線: 3スケールの接空間法線を足して、平面(y up)であることを
+       * 使って直接ワールド法線を組む。perturbNormal2Arb は画面空間微分
+       * から TBN を推定する近似で、3枚を別スケールで混ぜると精度が落ちる
+       * うえに堀は完全な水平面なので推定する必要がない。
+       *   uv.x = worldX, uv.y = -worldZ なので
+       *   T = +X, B = -Z, N = +Y  ->  Nworld = ( s.x, 1, -s.y )
+       * タイル周期 19 / 6.4 / 2.6 m は互いに非通約(比 2.97 / 2.46)で、
+       * 3枚が同時に揃う周期が視界内に来ない。 */
+      fs = fs.replace(NFM, [
+        /* 重みは「焼いた法線マップが実際に持っている傾き」から決めた。
+         * 3枚の |xy| は中央値 0.082 / 0.079 / 0.117(node で bakeNormal を
+         * 再現して実測)。最初 0.30/0.22/0.15 で組んだら合計の傾きが
+         * 中央値 3.4 度しかなく、真上から見てさざ波が1本も見えなかった。
+         * 2.4 倍して中央値 8.2 度 / 95 パーセンタイル 15.6 度にしてある。*/
+        '  vec2 wS  = ( texture2D( normalMap, vUv * 0.05263 + uWOff1 ).xy * 2.0 - 1.0 ) * 0.72;',
+        '  wS      += ( texture2D( uWN2,      vUv * 0.15625 + uWOff2 ).xy * 2.0 - 1.0 ) * 0.52;',
+        '  wS      += ( texture2D( uWN3,      vUv * 0.38462 + uWOff3 ).xy * 2.0 - 1.0 ) * 0.36;',
+        '  wS *= uWAmp;',
+        '  vec3 wNW = normalize( vec3( wS.x, 1.0, -wS.y ) );',
+        '  normal = normalize( mat3( viewMatrix ) * wNW );'
+      ].join('\n'));
+
+      /* 3) 合成。fog の直前なので gl_FragColor には拡散光だけが入って
+       * いる(= 水中の色。時間帯で変わる CUR_TIME.waterColor 由来)。
+       *   ・反射ベクトルをカメラに投影して画面 v を出し、同じ空の
+       *     グラデーションを引く(screen-space の空の厳密な鏡像)。
+       *   ・太陽は「空側のディスク」として反射経由でだけ入れる。
+       *     さざ波が法線を散らすので、点ではなく粒の帯になる。
+       *   ・岸辺は薄い泡/濡れ。細かい法線で縁をぎざぎざにする。
+       * fog はこの後に掛かるので、遠くの水面は空・山と同じ霧色へ沈む。*/
+      fs = fs.replace(FOG, [
+        '  vec3  wUp  = normalize( mat3( viewMatrix )[ 1 ] );',   // ワールド +Y のビュー空間での向き
+        '  vec3  wV   = normalize( vViewPosition );',
+        '  float wNdv = clamp( dot( normal, wV ), 0.0, 1.0 );',
+        /* 濁った水の「見かけの深さ」。視線側に傾いた波面は水中を通る
+         * 距離が短くなるので明るく、逆に傾けば暗く見える。真上から
+         * (F=0.02 でほぼ反射が無い角度)でもさざ波が読めるのはこの項の
+         * おかげ。平らな面では差が 0 になるよう、同じ視線に対する
+         * 「傾いていない場合の N・V」との差だけを使う(視点に依らない)。*/
+        '  float wFlt = clamp( dot( wUp, wV ), 0.0, 1.0 );',
+        '  gl_FragColor.rgb *= 1.0 + clamp( ( wNdv - wFlt ) * 6.0, -0.30, 0.30 );',
+        '  vec3  wR   = reflect( -wV, normal );',
+        '  float wP   = clamp( 0.5 - 0.5 * ( uWProjY * wR.y / max( -wR.z, 1e-3 ) ), 0.0, 1.0 );',
+        '  float wF   = 0.02 + 0.98 * pow( 1.0 - wNdv, 5.0 );',
+        '  float wSd  = max( dot( wR, uWSunDirV ), 0.0 );',
+        /* 反射光路のかすみ。反射ベクトルが水平に近いほど、その光は地平線
+         * まで長い大気を通って来たことになるので霧色へ寄る。これを入れる
+         * までは「浅い角度で水が暗い」絵になっていた ―― この空は
+         * scene.background = 画面空間グラデーションなので、地平線のすぐ
+         * 上に出ているのは sky[0]〜sky[1](夕なら濃紺)で、夕焼け色の
+         * sky[3..5] は画面下端 = 地面の裏に隠れている。実際に画面で
+         * 地平線の帯を作っているのは fogColor(夕 0xaa6f66 の桃色)の
+         * ほうなので、そこへ寄せて初めて水平線で色が繋がる。
+         * mat3(viewMatrix)[1] はワールド +Y のビュー空間での向き。
+         * これとの内積が反射ベクトルの仰角の sin。 */
+        '  float wRy  = dot( wR, wUp );',
+        '  float wHz  = ( 1.0 - clamp( wRy * 4.0, 0.0, 1.0 ) ) * uWHaze;',
+        /* 太陽は「空側に置いた円板」で、専用の specular 項ではない。
+         * 芯 pow(sd,240) + 裾 pow(sd,26)。芯を 1 より十分明るくして
+         * おかないと、このあと F(浅い角度でも 0.3 前後)を掛けた時点で
+         * ただの薄い染みになる ―― さざ波が法線を散らすので、明るく
+         * しても「面」ではなく「粒」にしかならない。上限は clamp で
+         * 押さえて白飛びを防ぐ。 */
+        '  vec3  wGl  = min( uWSunCol * uWGlint * ( pow( wSd, 160.0 ) + 0.30 * pow( wSd, 16.0 ) ), vec3( 1.30 ) );',
+        '  vec3  wRef = mix( wSkyAt( wP ) * uWSkyGain, uWFog, wHz ) + wGl;',
+        '  gl_FragColor.rgb = mix( gl_FragColor.rgb, wRef, wF );',
+        '  float wD   = max( abs( vUv.x ), abs( vUv.y ) );',
+        '  float wEg  = max( wRamp( uWEdge.x + 1.5, uWEdge.x, wD ), wRamp( uWEdge.y - 1.5, uWEdge.y, wD ) );',
+        '  float wFn  = texture2D( uWN3, vUv * 0.31 + uWOff3 * 1.7 ).x;',
+        '  float wFm  = uWFoam * wEg * wEg * clamp( wFn * 1.9 - 0.62, 0.0, 1.0 );',
+        '  gl_FragColor.rgb = mix( gl_FragColor.rgb, wSkyAt( 0.92 ) * 0.80, wFm );',
+        '  gl_FragColor.a = clamp( gl_FragColor.a + wF * 0.20 + wFm * 0.5, 0.0, 1.0 );',
+        '#include <fog_fragment>'
+      ].join('\n'));
+
+      sh.fragmentShader = fs;
+    };
+    waterMat.customProgramCacheKey = function(){ return 'bodiam-moat-fresnel-v1'; };
+    waterMat.needsUpdate = true;
+
+    /* ---- 毎フレームの更新 -------------------------------------------
+     * 決定性のため Math.random() は一切使わない(poseidon はシード無し
+     * の乱数で A/B 比較を潰していた)。すべて絶対時刻 t の純関数。 */
+    var _wSkyC = new T.Color(), _wGray = new T.Color(), _wSunV = new T.Vector3();
+    /* paintSky と同じ彩度落とし(共有ファイルを変えないためのローカル
+     * コピー。式を変えると空と水で彩度がずれるので必ず同じにする)。 */
+    function wDesat(c, satMul){
+      if (satMul >= 0.999) return c;
+      var lum = c.r*0.299 + c.g*0.587 + c.b*0.114;
+      _wGray.setRGB(lum, lum, lum);
+      c.lerp(_wGray, 1 - satMul);
+      return c;
+    }
+    ANIM.push(function(t, e){
+      /* 雨のときは波立つ: 振幅と流れる速さを上げる */
+      var rain = e.rain || 0;
+      var sp = 1 + rain * 1.30;
+      uAmp.value = 1 + rain * 0.80;
+      // 単位はタイル/秒。実速度 = 速度 x タイル実寸 -> 0.10 / 0.17 / 0.26 m/s
+      uOff1.value.set(  t * 0.00526 * sp,  t * 0.00311 * sp );
+      uOff2.value.set( -t * 0.02031 * sp,  t * 0.01750 * sp );
+      uOff3.value.set(  t * 0.04100 * sp, -t * 0.09231 * sp );
+
+      if (typeof camera !== 'undefined' && camera && camera.projectionMatrix){
+        // 反射ベクトルを画面 v へ落とすのに使う縦方向の投影係数
+        uProjY.value = camera.projectionMatrix.elements[5];
+      }
+      /* 霧色。11-environment.js が毎フレーム天候の彩度落としまで済ませて
+       * scene.fog.color に入れているので、それをそのまま読む(= 山や
+       * 遠景と完全に同じ色。だから水平線で必ず繋がる)。 */
+      if (typeof scene !== 'undefined' && scene && scene.fog){
+        uFog.value.set(scene.fog.color.r, scene.fog.color.g, scene.fog.color.b);
+      }
+      if (typeof CUR_TIME !== 'undefined' && CUR_TIME){
+        var sat = (typeof CUR_WEATHER !== 'undefined' && CUR_WEATHER && CUR_WEATHER.skySatMul != null)
+                  ? CUR_WEATHER.skySatMul : 1;
+        if (CUR_TIME.sky){
+          for (var i = 0; i < 6; i++){
+            _wSkyC.copy(CUR_TIME.sky[i]);
+            wDesat(_wSkyC, sat);
+            uSky.value[i].set(_wSkyC.r, _wSkyC.g, _wSkyC.b);
+          }
+        }
+        /* 太陽(夜は月)の色と強さ。天候で弱まるので e.sunMul を掛ける。
+         * ★向きは 11-environment.js の sunAnchorDir をそのまま使う。
+         * このビューアの太陽円板と光芒は「仰角を 0.13rad へクランプした
+         * 見かけの方向」に描かれている(そうしないと軌道カメラでは画面に
+         * 入らない)。水面のきらめきは太陽の鏡像なので、円板と別の向きで
+         * 計算すると「水に映った太陽」と「空の太陽」が縦にずれ、一目で
+         * 嘘だと分かる。11-environment.js の注記(円板と光芒は必ず同じ
+         * sunAnchorDir を使うこと)と同じ理由でここも合わせる。
+         * 真の sunPos を使う案も試したが、夕(仰角12度)では反射方向が
+         * 届く水面が視界の外(城の裏)になり、きらめきが一切出なかった。*/
+        var sk = (CUR_TIME.sunIntensity != null ? CUR_TIME.sunIntensity : 1) * (e.sunMul != null ? e.sunMul : 1);
+        var sc = CUR_TIME.sunColor;
+        if (sc) uSunCol.value.set(sc.r * sk, sc.g * sk, sc.b * sk);
+        if (CUR_TIME.sunPos && typeof camera !== 'undefined' && camera){
+          if (typeof sunAnchorDir === 'function') sunAnchorDir(_wSunV);
+          else _wSunV.copy(CUR_TIME.sunPos).normalize();
+          _wSunV.transformDirection(camera.matrixWorldInverse);
+          uSunDirV.value.copy(_wSunV);
+        }
+      }
+    });
+  })();
+
+  /* ---- テクスチャ密度に合わせて UV をメートル単位へ書き直す --------
+   * すべてのメッシュを組み終えた **あと** に1回だけ走らせる。 */
+  applyWorldUVs(group);
+
   var labelGroup = buildLabelGroup(group, pickables);
 
   /* ---- resident life data (section 6.5 住人システムが読む任意フィールド)
