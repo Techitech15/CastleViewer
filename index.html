@@ -35,7 +35,12 @@
     font-family:inherit;outline:none}
   #castleSelect option{background:#1b1d18;color:var(--ink)}
 
-  #envPanel{position:absolute;right:16px;top:96px;padding:11px 14px;z-index:5;min-width:200px}
+  /* 効果トグル3行(被写界深度/ブルーム/光芒)を足したぶんパネルが約90px
+     伸び、実測で 600x400 のとき下端が 426px = ビューポート外に出て BGM
+     スライダーが切れた。上端(96px)と下16pxの余白を引いた高さで頭打ちに
+     し、あふれたらパネル内スクロールに逃がす。 */
+  #envPanel{position:absolute;right:16px;top:96px;padding:11px 14px;z-index:5;min-width:200px;
+    max-height:calc(100vh - 112px);overflow-y:auto;overscroll-behavior:contain}
   .segRow{margin-top:9px}
   .segRow:first-child{margin-top:0}
   .segRow label{display:block;font-size:10px;letter-spacing:.6px;color:var(--ink2);
@@ -114,7 +119,7 @@
     #infoPanel h1{font-size:15px}
     #infoPanel p{font-size:11.5px}
     #castlePanel{min-width:150px}
-    #envPanel{min-width:150px;top:88px;padding:9px 12px}
+    #envPanel{min-width:150px;top:88px;padding:9px 12px;max-height:calc(100vh - 104px)}
     #hudInner{gap:10px;padding:8px 12px}
     #hudInner .guide{font-size:10px}
     #tooltip{max-width:210px;padding:8px 11px}
@@ -174,6 +179,30 @@
       </span>
     </div>
     <div class="segRow toggleRow">
+      <label for="dofToggle">被写界深度</label>
+      <span class="switch">
+        <input type="checkbox" id="dofToggle">
+        <span class="track"></span>
+        <span class="knob"></span>
+      </span>
+    </div>
+    <div class="segRow toggleRow">
+      <label for="bloomToggle">ブルーム</label>
+      <span class="switch">
+        <input type="checkbox" id="bloomToggle">
+        <span class="track"></span>
+        <span class="knob"></span>
+      </span>
+    </div>
+    <div class="segRow toggleRow">
+      <label for="raysToggle">光芒</label>
+      <span class="switch">
+        <input type="checkbox" id="raysToggle">
+        <span class="track"></span>
+        <span class="knob"></span>
+      </span>
+    </div>
+    <div class="segRow toggleRow">
       <label for="bgmToggle">BGM</label>
       <span class="switch">
         <input type="checkbox" id="bgmToggle">
@@ -212,6 +241,25 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- ポストプロセス一式(r128 用クラシックスクリプト)。将来のオフライン配布の
+     ため CDN ではなく vendor/ にローカル同梱している。
+     ★読み込み順が命: THREE.Pass / THREE.FullScreenQuad は EffectComposer.js が
+     定義する。ShaderPass / MaskPass / RenderPass / BokehPass / UnrealBloomPass は
+     いずれも `class X extends THREE.Pass` をスクリプト評価時に解決するので、
+     EffectComposer.js は必ずそれらより **前**。後ろに置くと
+     "Class extends value undefined" で即死する。EffectComposer が
+     CopyShader / ShaderPass を参照するのはコンストラクタ実行時だけなので、
+     CopyShader だけ先行させれば足りる。 -->
+<script src="vendor/CopyShader.js"></script>
+<script src="vendor/EffectComposer.js"></script>
+<script src="vendor/ShaderPass.js"></script>
+<script src="vendor/MaskPass.js"></script>
+<script src="vendor/RenderPass.js"></script>
+<script src="vendor/BokehShader.js"></script>
+<script src="vendor/BokehPass.js"></script>
+<script src="vendor/LuminosityHighPassShader.js"></script>
+<script src="vendor/UnrealBloomPass.js"></script>
+<script src="vendor/FXAAShader.js"></script>
 <!-- ラベル連動クリップの一覧 -> window.CASTLE_CLIPS。file:// では fetch / XHR が
      使えないため manifest.json ではなくクラシックスクリプトで読む
      (HANDOVER_VIDEO.md §10.2)。読めなくても js/13-pick.js 側が
@@ -232,6 +280,7 @@
 <script src="castles/castel-del-monte.js"></script>
 <script src="js/15-nature.js"></script>
 <script src="js/16-audio.js"></script>
+<script src="js/17-postfx.js"></script>
 <script src="js/90-main.js"></script>
 </body>
 </html>

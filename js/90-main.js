@@ -216,7 +216,7 @@ function frame(now){
   updateMountains();
   updateWeatherParticles(dt, camera.position.x, camera.position.z);
   updateAudio(dt); // BGMのクロスフェード/フェードイン・アウトを進める
-  renderer.render(scene, camera);
+  renderFrame();
   requestAnimationFrame(frame);
 }
 document.getElementById('loading').style.display = 'none';
@@ -236,7 +236,7 @@ window.__setZoom = function(t){
   updateFade(reveal, 1);
   updateRevealUI(reveal);
   updateLabelVisibility();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__setOrbit = function(az, el){
   orbAz = az; orbEl = Math.max(EL_MIN, Math.min(EL_MAX, el));
@@ -246,7 +246,7 @@ window.__setOrbit = function(az, el){
   lastReveal = reveal;
   updateFade(reveal, 1);
   updateLabelVisibility();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__applyCastle = applyCastle;
 window.__setLabels = function(on){
@@ -255,7 +255,7 @@ window.__setLabels = function(on){
   labelsOn = !!on;
   document.getElementById('labelToggle').checked = labelsOn;
   updateLabelVisibility();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__setResidents = function(on){
   // testing helper: toggles the 住人 (residents) system + syncs the UI
@@ -263,7 +263,7 @@ window.__setResidents = function(on){
   residentsOn = !!on;
   document.getElementById('residentToggle').checked = residentsOn;
   regenerateResidents();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__findPickScreen = function(nameSubstr){
   // testing helper: projects the first pickable whose tooltip name
@@ -286,7 +286,7 @@ window.__setEnv = function(timeKey, weatherKey, instant){
   }
   stepTransitions(0); applyEnvironment(); updateMountains();
   updateWeatherParticles(0, camera.position.x, camera.position.z);
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__pickAt = function(clientX, clientY){ doPick(clientX, clientY); };
 window.__setPan = function(x, z){
@@ -295,7 +295,7 @@ window.__setPan = function(x, z){
   orbTgtX = x; orbTgtZ = z; clampPan();
   curTgtX = orbTgtX; curTgtZ = orbTgtZ;
   placeCamera(1); updateCamDir();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__panBy = function(dx, dy){
   // testing helper: runs the exact drag-delta pan path (panBy) real
@@ -304,7 +304,7 @@ window.__panBy = function(dx, dy){
   panBy(dx, dy);
   curTgtX = orbTgtX; curTgtZ = orbTgtZ;
   placeCamera(1); updateCamDir();
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__debugState = function(){
   return {
@@ -326,7 +326,7 @@ window.__stepResidents = function(steps, dt){
   // instead of hoping a burst of screenshots lands on the right frame.
   steps = steps || 1; dt = dt || 0.1;
   for (var i=0;i<steps;i++) updateResidents(dt);
-  renderer.render(scene, camera);
+  renderFrame();
 };
 window.__residentStates = function(){
   // testing helper: dumps each resident's kind/state/position so a QA

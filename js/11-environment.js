@@ -38,7 +38,8 @@ var TIME_STATES = {
     ambientColor: col(0xfff2df), ambientIntensity: 0.20,
     fogColor: col(0xd9c9b0), fogNear: 90, fogFar: 650,
     sky: [col(0x3f6a92), col(0x7d9dc0), col(0xb9c8c9), col(0xe3c9a0), col(0xf2d9ae), col(0xfbe6c2)],
-    waterColor: col(0x2c4854), windowGlow: 0.0, mountainColor: col(0x93a2a0)
+    waterColor: col(0x2c4854), windowGlow: 0.0, mountainColor: col(0x93a2a0),
+    waterSpecular: col(0x9fd4e0), sunDisk: 1.0
   },
   day: {
     sunPos: new T.Vector3(60, 85, 40), sunColor: col(0xfff2d8), sunIntensity: 1.55,
@@ -46,7 +47,10 @@ var TIME_STATES = {
     ambientColor: col(0xffffff), ambientIntensity: 0.22,
     fogColor: col(0xcdddE3), fogNear: 140, fogFar: 900,
     sky: [col(0x4f8dc7), col(0x7fb1de), col(0xa7c7e2), col(0xbcd7ea), col(0xd3d8c5), col(0xe7e2c9)],
-    waterColor: col(0x203a3c), windowGlow: 0.0, mountainColor: col(0x7fa898)
+    waterColor: col(0x203a3c), windowGlow: 0.0, mountainColor: col(0x7fa898),
+    // 昼の太陽は仰角 49.7 度。sunAnchorDir のクランプで地平線近くへ降ろすと
+    // 「真昼なのに夕日の位置に太陽がある」絵になるので円板は出さない。
+    waterSpecular: col(0x9fd4e0), sunDisk: 0.0
   },
   dusk: {
     sunPos: new T.Vector3(-78, 20, -52), sunColor: col(0xff9a56), sunIntensity: 1.05,
@@ -54,7 +58,8 @@ var TIME_STATES = {
     ambientColor: col(0xffb37a), ambientIntensity: 0.18,
     fogColor: col(0xaa6f66), fogNear: 90, fogFar: 760,
     sky: [col(0x1c2350), col(0x3a3468), col(0x7a4f74), col(0xc96a52), col(0xe8935a), col(0xf0b378)],
-    waterColor: col(0x363340), windowGlow: 0.4, mountainColor: col(0x4a3c52)
+    waterColor: col(0x363340), windowGlow: 0.4, mountainColor: col(0x4a3c52),
+    waterSpecular: col(0x9fd4e0), sunDisk: 1.0
   },
   night: {
     sunPos: new T.Vector3(40, 60, -70), sunColor: col(0xaebfe6), sunIntensity: 0.62,
@@ -62,7 +67,23 @@ var TIME_STATES = {
     ambientColor: col(0x8fa0cf), ambientIntensity: 0.15,
     fogColor: col(0x0b1220), fogNear: 80, fogFar: 560,
     sky: [col(0x02040c), col(0x050a18), col(0x0a1428), col(0x0d1a34), col(0x111f3c), col(0x182742)],
-    waterColor: col(0x111a26), windowGlow: 1.0, mountainColor: col(0x0a1220)
+    waterColor: col(0x111a26), windowGlow: 1.0, mountainColor: col(0x0a1220),
+    /* ★夜だけ水面の specular を落とす(実測に基づく)。
+     * 水面は MeshPhongMaterial + shininess 90 + specular 0x9fd4e0 で、月光
+     * (dir 0.62 / 0xaebfe6)の鏡面ローブが夜のフレームで **輝度 0.84** に
+     * 達していた(fx_night_off.png を実測、該当画素 約6万)。一方その夜に
+     * 光らせたい窓明かりは中央値 0.51・最大 0.66、ステンドグラスは 0.40 が
+     * 上限。つまり「窓より水面のほうが明るい」ので、輝度しきい値では
+     * 両者を絶対に分離できない(しきい値を上げれば水面だけが残り、
+     * 下げれば水面が先に飽和する = ブルームが水面で暴発していた原因)。
+     * 彩度で分ける案も、鏡面の裾が (95,141,187) と十分に青いため不可。
+     * 唯一の分離手段は水面側の輝度を下げること。0x9fd4e0 の約 16% まで
+     * 落とすと鏡面ピークは 0.84 -> 0.24 前後になり、窓(0.51)/ステンド
+     * グラス(0.40)の下に十分な余裕をもって潜る。月明かりの照り返し
+     * 自体は周囲の水面(0.13)の 2 倍弱として残るので消えはしない。
+     * 朝/昼/夕は 0x9fd4e0 のまま = 素材側の既定値と同一で、実測で
+     * 調整済みの waterColor の見えには一切影響しない。 */
+    waterSpecular: col(0x1a2325), sunDisk: 0.0
   }
 };
 var WEATHER_STATES = {
@@ -79,7 +100,8 @@ function cloneTimeState(s){
     ambientColor: s.ambientColor.clone(), ambientIntensity: s.ambientIntensity,
     fogColor: s.fogColor.clone(), fogNear: s.fogNear, fogFar: s.fogFar,
     sky: s.sky.map(function(c){ return c.clone(); }),
-    waterColor: s.waterColor.clone(), windowGlow: s.windowGlow, mountainColor: s.mountainColor.clone()
+    waterColor: s.waterColor.clone(), windowGlow: s.windowGlow, mountainColor: s.mountainColor.clone(),
+    waterSpecular: s.waterSpecular.clone(), sunDisk: s.sunDisk
   };
 }
 function blendTime(dst, a, b, t){
@@ -98,6 +120,8 @@ function blendTime(dst, a, b, t){
   dst.waterColor.copy(a.waterColor).lerp(b.waterColor, t);
   dst.windowGlow = a.windowGlow + (b.windowGlow - a.windowGlow) * t;
   dst.mountainColor.copy(a.mountainColor).lerp(b.mountainColor, t);
+  dst.waterSpecular.copy(a.waterSpecular).lerp(b.waterSpecular, t);
+  dst.sunDisk = a.sunDisk + (b.sunDisk - a.sunDisk) * t;
 }
 function cloneWeatherState(s){
   return { sunMul:s.sunMul, ambientMul:s.ambientMul, fogNearMul:s.fogNearMul, fogFarMul:s.fogFarMul, skySatMul:s.skySatMul, rain:s.rain, snow:s.snow };
@@ -180,6 +204,148 @@ function paintSky(){
   skyTex.needsUpdate = true;
 }
 
+/* ====================================================================
+ * 3.6 太陽円板(sun disk)
+ *
+ * なぜ要るか
+ * ----------
+ * 光芒(js/17-postfx.js)は「画面内の明るい点を太陽方向へ引き伸ばす」
+ * 放射ブラーなので、引き伸ばす **種** が画面に無ければ何も起きない。
+ * この空は 8x512 のグラデーション(paintSky)だけで太陽が一切描かれて
+ * いなかったため、光芒をONにしても画面がわずかに暖色へ寄るだけだった。
+ * ここで実体のある円板を1枚置くことで、初めて光条になる。
+ *
+ * 実装方針
+ * --------
+ * ・Sprite 1枚 = 1 draw call。加算合成なので空を暗くすることはない。
+ * ・depthTest は残す。地形・山・城は不透明で先に深度を書くので、
+ *   太陽はそれらに **正しく隠れる**。城の輪郭で光条が途切れるのは
+ *   この深度テストの結果で、god ray らしさはここから出る。
+ * ・fog:false。カメラ far の 0.72 倍という遠方に置くので、fog を効かせる
+ *   と芯まで霧の色に染まって種として使えなくなる。
+ * ・frustumCulled:false。画面端で Sprite のバウンディング球判定により
+ *   ぱっと消えるのを避ける(1 draw call なので常時描いて構わない)。
+ *
+ * 位置(★仰角クランプを外せるかの再評価結果)
+ * ---------------------------------------------
+ * 厳密投影には戻せない。このビューアの軌道カメラは必ず城を見下ろすため、
+ * 視軸のピッチは orbEl(下限 EL_MIN=0.05)よりさらに下を向く:
+ *   pitch = atan((TARGET_Y*0.45 + dist*sin el) / (dist*cos el)) > el
+ * 縦半画角は 21 度(fov 42)なので、太陽が画面に入る条件は
+ *   太陽仰角 + pitch < 21 度。
+ * 朝の sunPos は仰角 18.1 度で、pitch は最小でも 2.9 度を超えるため
+ * 18.1 + 2.9 = 21.0 度 = ちょうど画面上端。つまり **朝はどんな視点でも
+ * 厳密投影では太陽が画面内に入らない**(実測: 最良条件で sy=1.044)。
+ * 夕は仰角 12.0 度なので el<=0.10 前後まで下げれば厳密でも入る(sy=0.89)。
+ * 朝を捨てられない以上クランプは残す。なお空自体が「カメラ姿勢に依らない
+ * 画面空間のグラデーション」でありもともと物理的な天球ではないので、
+ * 仰角だけを圧縮しても破綻は生じない。方位は sunPos のままなので、
+ * 太陽は必ず正しい側(影と反対側)に出る。
+ * ★重要: 円板と光芒の中心は必ずこの同じ sunAnchorDir を使うこと。
+ *   別々に計算すると光条が円板からずれて一瞬で嘘だと分かる。
+ *
+ * クランプ値 0.13rad(7.4度)の決め方(撮って選んだ)
+ * ---------------------------------------------------
+ *   0.20 … 太陽が画面のかなり上に出る。地平線の太陽に見えない。
+ *   0.09 … 山の稜線すれすれまで下がるが、視点によっては稜線に完全に
+ *          隠れて種が消え、光芒が出なくなる。
+ *   0.13 … 稜線のすぐ上・雲の帯に掛かる高さ。雲に部分的に遮られるので
+ *          遮蔽由来の粗密も乗る。朝(el=0.06, zoom=0.5)で sy=0.79、
+ *          夕で sy=0.77 と、どちらも余裕をもって画面内に入る。
+ * なお太陽が画面内に入るのはカメラ仰角が低いとき(概ね orbEl<=0.15)。
+ * 既定の見下ろし視点(orbEl=0.42)では太陽は画面上端の外にあり、光芒は
+ * 意図どおり出ない ―― これは不具合ではなく、画面外の光源から光条を
+ * 出さないという要件そのもの。
+ * ================================================================== */
+var SUN_ANCHOR_ELEV_MAX = 0.13; // rad ≒ 7.4 度
+var SUN_DISK_ANGLE = 0.20;      // 円板+ハロの見かけの直径(rad)。縦画角 0.733rad
+function sunAnchorDir(out){
+  out.copy(CUR_TIME.sunPos).normalize();
+  var hLen = Math.sqrt(out.x*out.x + out.z*out.z);
+  var elev = Math.asin(Math.max(-1, Math.min(1, out.y)));
+  var e = Math.min(elev, SUN_ANCHOR_ELEV_MAX);
+  if (hLen > 1e-6){
+    var ch = Math.cos(e) / hLen;
+    out.set(out.x * ch, Math.sin(e), out.z * ch);
+  }
+  return out;
+}
+
+function makeSunDiskTexture(){
+  var c = document.createElement('canvas');
+  c.width = c.height = 128;
+  var ctx = c.getContext('2d');
+  var g = ctx.createRadialGradient(64,64,0,64,64,64);
+  // 芯は完全な白。放射ブラーのしきい値(その時間帯の空のピーク輝度基準)
+  // を確実に超えさせるのが目的なので、色付けは material.color に任せる。
+  g.addColorStop(0.00, 'rgba(255,255,255,1)');
+  g.addColorStop(0.13, 'rgba(255,255,255,1)');
+  g.addColorStop(0.19, 'rgba(255,247,226,0.34)');
+  g.addColorStop(0.34, 'rgba(255,226,178,0.09)');
+  g.addColorStop(0.66, 'rgba(255,206,150,0.02)');
+  g.addColorStop(1.00, 'rgba(255,196,140,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,128,128);
+  /* ★放射状のスポーク(光条の種)
+   * 円板が完全に等方だと、放射ブラーは「等方な芯」を「等方に」引き伸ばす
+   * だけなので、出てくるのは光条ではなく円い滲みになる(実測: 円板だけを
+   * 入れた段階では、太陽の周りが均一に明るくなるだけで筋が一本も出ない)。
+   * 本来この手法で筋が出るのは、雲や建物が太陽を **部分的に遮って** 種に
+   * 角度方向の粗密ができたときだけで、太陽が開けた空にある構図では
+   * 原理的に何も起きない。
+   * そこで円板そのものに角度方向の粗密を持たせる。長短のスポークを
+   * 交互に 12 本、芯から外側へ落ちる線形グラデーションで薄く重ねる。
+   * 加算合成なので空の上では飽和して明部抽出のしきい値を超え、放射
+   * ブラーがこれを引き伸ばして光条になる。遮蔽物がある構図では、
+   * それによる粗密も従来どおりそのまま乗る。 */
+  ctx.globalCompositeOperation = 'lighter';
+  for (var i = 0; i < 12; i++){
+    var a = i * Math.PI / 6 + 0.16;
+    var len = (i % 2 === 0) ? 60 : 38;     // 長短交互
+    var half = (i % 2 === 0) ? 0.050 : 0.075;
+    var sg = ctx.createLinearGradient(64, 64, 64 + Math.cos(a)*len, 64 + Math.sin(a)*len);
+    sg.addColorStop(0.00, 'rgba(255,252,242,0.50)');
+    sg.addColorStop(0.30, 'rgba(255,242,212,0.20)');
+    sg.addColorStop(1.00, 'rgba(255,232,196,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(64, 64);
+    ctx.arc(64, 64, len, a - half, a + half);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  return new T.CanvasTexture(c);
+}
+var SUN_DISK = new T.Sprite(new T.SpriteMaterial({
+  map: makeSunDiskTexture(), color: 0xffffff, transparent: true,
+  blending: T.AdditiveBlending, depthWrite: false, fog: false, opacity: 0
+}));
+SUN_DISK.frustumCulled = false;
+SUN_DISK.visible = false;
+scene.add(SUN_DISK);
+
+var _sunAnchorTmp = new T.Vector3();
+function updateSunDisk(){
+  /* 天候: 曇/雨/雪では隠す。CUR_WEATHER.sunMul は 晴1.00/曇0.50/雨0.38/
+   * 雪0.58 なので、0.62〜0.95 の smoothstep で晴だけが 1、他は 0 になる
+   * (天候トランジション中は滑らかに消える)。時間帯側は sunDisk が
+   * 朝1/昼0/夕1/夜0。夜に月を出さないのも、昼に地平線の太陽を出さないのも
+   * ここで決まる。 */
+  var vis = CUR_TIME.sunDisk * smoothstep01(0.62, 0.95, CUR_WEATHER.sunMul);
+  SUN_DISK.visible = vis > 0.01;
+  if (!SUN_DISK.visible) return;
+  // カメラ相対で置くので、camera.matrixWorld の更新状況に依存しない
+  // (position だけ見る)。far の内側に必ず収まる距離を使う。
+  var dist = camera.far * 0.72;
+  sunAnchorDir(_sunAnchorTmp);
+  SUN_DISK.position.copy(camera.position).addScaledVector(_sunAnchorTmp, dist);
+  var size = dist * SUN_DISK_ANGLE;
+  SUN_DISK.scale.set(size, size, 1);
+  SUN_DISK.material.opacity = vis;
+  SUN_DISK.material.color.copy(CUR_TIME.sunColor);
+}
+
 var WARM_GLOW = col(0xffb066);
 function applyEnvironment(){
   paintSky();
@@ -196,11 +362,28 @@ function applyEnvironment(){
   scene.fog.near = CUR_TIME.fogNear * CUR_WEATHER.fogNearMul * FOG_NEAR_SCALE;
   scene.fog.far = Math.max(scene.fog.near + 20, CUR_TIME.fogFar * CUR_WEATHER.fogFarMul * FOG_FAR_SCALE);
   if (current){
-    (current.waterMats || []).forEach(function(m){ m.color.copy(CUR_TIME.waterColor); });
+    (current.waterMats || []).forEach(function(m){
+      m.color.copy(CUR_TIME.waterColor);
+      // 堀は Phong 前提だが、将来 Lambert/Basic の水面を返す城が来ても
+      // ここで落とさない(specular を持つものにだけ配る)。
+      if (m.specular) m.specular.copy(CUR_TIME.waterSpecular);
+    });
     if (current.windowMat){
       current.windowMat.emissive.copy(WARM_GLOW).multiplyScalar(CUR_TIME.windowGlow * 0.85);
     }
   }
+  /* 湖(js/15-nature.js)の水面は堀と同じ Phong + specular 0x9fd4e0 だが、
+   * 湖ごとにマテリアルを複製しているため current.waterMats には入らない。
+   * 夜の specular 抑制を堀にだけ効かせると、湖のある城(ヴァンセンヌ/
+   * マルボルク)で同じ白飛びが残るので、NAT.lakes 側にも同じ値を配る。
+   * updateNature が触るのは L.mat.color だけなので競合しない。 */
+  if (typeof NAT !== 'undefined' && NAT && NAT.lakes){
+    for (var li = 0; li < NAT.lakes.length; li++){
+      var lm = NAT.lakes[li].mat;
+      if (lm && lm.specular) lm.specular.copy(CUR_TIME.waterSpecular);
+    }
+  }
+  updateSunDisk();
 }
 
 /* ---- background mountains: 2-3 low-poly ridgeline rings, one draw call

@@ -1532,7 +1532,7 @@ window.__setNature = function(on){
   natureOn = !!on;
   natureGroup.visible = natureOn;
   regenerateNature();
-  if (typeof renderer !== 'undefined') renderer.render(scene, camera);
+  if (typeof renderFrame === 'function') renderFrame();
 };
 window.__natureStats = function(){
   return {

@@ -266,11 +266,11 @@ function updateLabelVisibility(){
   if (key === _lblKey) return; // view unchanged -> last frame's layout still holds
   _lblKey = key;
   // project() reads camera.matrixWorldInverse, which is only refreshed by
-  // renderer.render(). On the boot solve (and on any solve that runs before
-  // this frame's render) it is still the *previous* frame's -- at boot,
-  // literally the identity, which threw every anchor to a garbage screen
-  // point: measured, Bodiam placed 3 of 24 pills and put the NW tower's at
-  // (812,508) instead of (201,145), and with a static camera the fingerprint
+  // renderFrame() -> renderer.render(). On the boot solve (and on any solve
+  // that runs before this frame's render) it is still the *previous*
+  // frame's -- at boot, literally the identity, which threw every anchor
+  // to a garbage screen point: measured, Bodiam placed 3 of 24 pills and
+  // put the NW tower's at (812,508) instead of (201,145), and with a static camera the fingerprint
   // never changed so that layout stuck. Refreshing both matrices here costs
   // one matrix invert on solve frames only, and makes the boxes recorded
   // below exactly the boxes that get drawn.
