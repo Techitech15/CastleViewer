@@ -48,7 +48,13 @@ function buildBodiam(){
   var TIMBER_COL   = 0x5b4530;
   var WINDOW_COL   = 0x1c150e;
   var FLOOR_COL    = 0xa89a80;
-  var STUB_COL     = 0x7c6c50;
+  /* 内壁の漆喰(ライムウォッシュ)。外壁の切石 0xd8c093 より明度を
+   * 落とし、彩度もわずかに下げてある -- 石灰は塗った直後こそ白いが、
+   * 煤と埃で数年もすれば骨色に落ち着く。外壁と同系色にしておくのは
+   * わざとで、内壁を灰色に振ると屋内がコンクリートに見えた。
+   * PARTITION は部屋境の高い仕切り、STUB は中庭側の低い腰壁。 */
+  var PARTITION_COL= 0x978869;
+  var STUB_COL     = 0x8b7e61;
   var WOOD_COL     = 0x6b4f34;
   var METAL_COL    = 0x2a2925;
   var WATER_COL    = 0x3d6257;
@@ -496,9 +502,273 @@ function buildBodiam(){
       return t;
     }
 
+    /* ============================================================ *
+     * 9. 漆喰(ライムウォッシュ)-- 内壁
+     * ============================================================ *
+     * 考証: 中世の城で切石(ashlar)を使うのは外壁と要所だけで、部屋を
+     * 仕切る内壁は瓦礫積み(rubble)の上に石灰を塗って仕上げるのが普通
+     * だった。したがって内壁に外壁と同じ目地の格子を出してはいけない。
+     * ここで描くのは
+     *   - 鏝(こて)でならした低周波のうねり
+     *   - 石灰のムラ・雨染みの斑(格子にならない有機的な形)
+     *   - 剥がれて下地の瓦礫が透けた箇所(まばら、輪郭はぼかす)
+     *   - 乾燥収縮のヘアクラック(数本だけ)
+     * 256px = 3.2m。石(2.4m)と非通約にして、隣り合う壁で模様の周期が
+     * 揃って見えるのを避ける。
+     *
+     * ★ 法線について: 漆喰は元々なだらかなので、高さマップのほぼ全画素
+     * が傾いている。石積みのように「目地際の 1px だけが立っている」状態
+     * とは逆で、strength を上げなくても面全体が起きる。逆に上げすぎると
+     * 発泡スチロールに見えるので strength は石の半分以下に抑える。 */
+    var PLASTER_M = 3.2;
+    function makePlaster(){
+      var N = 256, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var r = rnd(0x9CE10F);
+
+      A.fillStyle = '#ffffff'; A.fillRect(0,0,N,N);
+
+      /* -- 鏝むら: 低周波のうねり。これが高さの主成分になる ---------- */
+      var trowel = octaves(N, 0x2B41, [[3,1.0],[6,0.62],[13,0.30],[27,0.13]]);
+      /* -- 石灰の塗りムラ・雨染み。albedo 側だけに効く別シード -------- */
+      var stain  = octaves(N, 0x77C2, [[2,1.0],[5,0.70],[11,0.34],[26,0.15]]);
+      /* -- 骨材のざらつき(ごく細かい) ------------------------------- */
+      var grit   = octaves(N, 0x1F5A, [[52,1.0],[110,0.55]]);
+      /* -- 透けた瓦礫そのものの粒(丸みのある小石) ------------------- */
+      var rub    = octaves(N, 0x66B3, [[30,1.0],[64,0.6]]);
+
+      /* -- 剥落: 下地の瓦礫が透ける箇所。格子を作らないよう、ばらまいた
+       *    種点までの巻き込み距離で不定形の斑を作る。半径はまちまち、
+       *    輪郭は smoothstep でぼかす(縁が立つと「穴」に見える)。 */
+      var SPALL = 14, sx = [], sy = [], sr = [], si;
+      for (si=0; si<SPALL; si++){ sx.push(r()*N); sy.push(r()*N); sr.push(9 + r()*20); }
+
+      /* -- ヘアクラック: 別キャンバスに巻き込みで描いてマスクにする --- */
+      var cm = cvs(N), CM = cm.getContext('2d');
+      CM.fillStyle = '#000'; CM.fillRect(0,0,N,N);
+      CM.strokeStyle = '#fff'; CM.lineCap = 'round';
+      for (var ci=0; ci<5; ci++){
+        var px = r()*N, py = r()*N, ang = r()*Math.PI*2, segs = 3 + Math.floor(r()*4);
+        var pts = [[px,py]];
+        for (var sgi=0; sgi<segs; sgi++){
+          ang += (r()-0.5)*1.5;
+          var L = 8 + r()*22;
+          px += Math.cos(ang)*L; py += Math.sin(ang)*L;
+          pts.push([px,py]);
+        }
+        CM.lineWidth = 0.55 + r()*0.45;
+        /* 3x3 のオフセットで描けばタイル境界をまたぐ亀裂も継ぎ目なし */
+        for (var ox=-1; ox<=1; ox++) for (var oy=-1; oy<=1; oy++){
+          CM.beginPath();
+          CM.moveTo(pts[0][0]+ox*N, pts[0][1]+oy*N);
+          for (var k=1;k<pts.length;k++) CM.lineTo(pts[k][0]+ox*N, pts[k][1]+oy*N);
+          CM.stroke();
+        }
+      }
+      var crack = CM.getImageData(0,0,N,N).data;
+
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var y=0;y<N;y++) for (var x=0;x<N;x++){
+        var p = y*N+x;
+        /* 剥落の強さ(0=健全, 1=下地が完全に露出) */
+        var sp = 0;
+        for (si=0; si<SPALL; si++){
+          var dx = Math.abs(x-sx[si]); if (dx > N/2) dx = N-dx;
+          var dy = Math.abs(y-sy[si]); if (dy > N/2) dy = N-dy;
+          /* 半径を中周波ノイズで揺らす。素の円だと水玉模様に見えて
+           * 「壁のカビ」にしか読めなかった。剥落は縁がぎざぎざになる。 */
+          var rr = sr[si] * (0.55 + rub[p]*0.95);
+          var t = 1 - Math.sqrt(dx*dx+dy*dy)/rr;
+          if (t > sp) sp = t;
+        }
+        sp = Math.max(0, Math.min(1, sp));
+        sp = sp*sp*(3-2*sp) * 0.50;           // 上限を抑える(剥がれすぎない)
+        sp = Math.min(1, sp * (0.45 + stain[p]*1.1)); // 濃淡も染みでばらつかせる
+
+        var ck = crack[p*4]/255;
+
+        /* --- albedo ---------------------------------------------- */
+        var mul = 0.90 + trowel[p]*0.13 + (stain[p]-0.5)*0.24 + (grit[p]-0.5)*0.05;
+        mul *= (1 - sp*0.26);                 // 露出した瓦礫は少し暗い
+        mul *= (1 - ck*0.11);                 // 亀裂の影(ごく薄く。濃いと落書きに見える)
+        var R = 255*mul, G = 255*mul, B = 255*mul;
+        /* 石灰は青白く、染みと露出部は下地の土色に寄る */
+        var warm = sp*0.40 + (1-stain[p])*0.10;
+        R *= 1.0 + warm*0.10;
+        G *= 1.0 + warm*0.02;
+        B *= 1.0 - warm*0.14;
+        d[p*4]   = Math.max(0, Math.min(255, R));
+        d[p*4+1] = Math.max(0, Math.min(255, G));
+        d[p*4+2] = Math.max(0, Math.min(255, B));
+
+        /* --- height ---------------------------------------------- *
+         * 主成分は鏝むら(なだらか)。剥落部は一段落ち込み、そのなかに
+         * 瓦礫の粒が戻ってくる。亀裂は溝。 */
+        var h = 0.62 + (trowel[p]-0.5)*0.30 + (grit[p]-0.5)*0.05;
+        h -= sp*0.16;
+        h += sp*(rub[p]-0.5)*0.40;            // 露出した瓦礫の丸み
+        h -= ck*0.09;
+        hgt[p] = Math.max(0, Math.min(1, h));
+      }
+      A.putImageData(im,0,0);
+      /* 白飛び対策: 内壁は面積が大きく、しかも明るい色を載せるので
+       * 石(0.90)よりさらに低い平均に落とす。 */
+      normaliseMean(a, 0.86);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 1.9)), metres: PLASTER_M };
+    }
+
+    /* ============================================================ *
+     * 10. 藁 / 藺草 -- 干し草・敷き藺草・飼い葉
+     * ============================================================ *
+     * 繊維が一方向(U 軸)に流れる。128px = 1.1m。茎の太さ 1-2px は
+     * 実寸 1cm 前後で、藺草(rush)としてはおおむね妥当。
+     * 茎は「後から描いたものが上に載る」ので、Canvas の 2D API では
+     * なく自前のバッファに深度付きで書き込む(高さと albedo を同時に
+     * 確定させたいため)。 */
+    var STRAW_M = 1.1;
+    function makeStraw(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var lum = new Float32Array(N*N);        // 0 = まだ茎が載っていない
+      var top = new Float32Array(N*N);        // その画素で一番上にある茎の高さ
+      var r = rnd(0x57A1B0);
+
+      var STALKS = 620;
+      for (var s=0;s<STALKS;s++){
+        var x0 = r()*N, y0 = r()*N;
+        var len = 26 + r()*74;
+        var drift = (r()-0.5)*6;                            // 端までの上下ずれ
+        var th = 1.0 + r()*1.5;                             // 半幅(px)
+        var v = 176 + r()*79;                               // 茎の明度
+        var hv = 0.50 + r()*0.46;                           // 茎の高さ
+        for (var t=0;t<len;t+=0.5){
+          var xx = Math.floor(x0 + t) % N; if (xx<0) xx += N;
+          var yc = y0 + drift*(t/len);
+          for (var q=-th; q<=th; q+=0.5){
+            var yq = Math.floor(yc+q); yq = ((yq%N)+N)%N;
+            var p = yq*N+xx;
+            var e = 1 - Math.abs(q)/(th+0.5);               // 断面の丸み
+            if (e <= 0) continue;
+            e = e*e*(3-2*e);
+            var hh = 0.22 + (hv-0.22)*(0.45 + 0.55*e);
+            if (hh > top[p]){                               // 上に載った茎が勝つ
+              top[p] = hh;
+              hgt[p] = hh;
+              lum[p] = v*(0.72 + 0.28*e);
+            }
+          }
+        }
+      }
+      /* 束のまとまり(低周波の明暗)。平らな干し草に見えないように */
+      var clump = octaves(N, 0x3D92, [[3,1.0],[8,0.55],[17,0.25]]);
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var p2=0;p2<N*N;p2++){
+        var L = lum[p2] > 0 ? lum[p2] : 104;                // 茎の隙間 = 影
+        if (top[p2] === 0) hgt[p2] = 0.18;
+        var m2 = 0.80 + clump[p2]*0.40;
+        d[p2*4]   = Math.min(255, L*m2);
+        d[p2*4+1] = Math.min(255, L*m2*0.995);
+        d[p2*4+2] = Math.min(255, L*m2*0.93);               // 藁は黄色に寄る
+        d[p2*4+3] = 255;
+        hgt[p2] = Math.max(0, Math.min(1, hgt[p2] + (clump[p2]-0.5)*0.22));
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.92);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.6)), metres: STRAW_M };
+    }
+
+    /* ============================================================ *
+     * 11. 土 -- 菜園の畝。耕された粗い粒
+     * ============================================================ *
+     * 128px = 0.85m。鋤で起こした塊(clod)と細かい粒。方向は持たせない
+     * (畝の向きは配置側でまちまちなので、等方にしておくのが無難)。 */
+    var SOIL_M = 0.85;
+    function makeSoil(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      var r = rnd(0x2E7744);
+      A.fillStyle = '#ffffff'; A.fillRect(0,0,N,N);
+      var lump = octaves(N, 0x8811, [[7,1.0],[15,0.70],[33,0.42]]);   // 塊
+      var fine = octaves(N, 0x44C9, [[46,1.0],[96,0.62]]);            // 粒
+      var damp = octaves(N, 0x1AB6, [[3,1.0],[6,0.5]]);               // 湿りの斑
+
+      /* 鋤で起こした塊を丸い山として重ねる。ノイズだけだと「もやもや」で
+       * 耕された感じにならない。粒が見えることが土らしさの本体。 */
+      var CLODS = 90, cxs = [], cys = [], crs = [], chs = [], ci;
+      for (ci=0; ci<CLODS; ci++){
+        cxs.push(r()*N); cys.push(r()*N); crs.push(3.5 + r()*7.5); chs.push(0.18 + r()*0.30);
+      }
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var y=0;y<N;y++) for (var x=0;x<N;x++){
+        var p = y*N+x;
+        var cl = 0;
+        for (ci=0; ci<CLODS; ci++){
+          var dx = Math.abs(x-cxs[ci]); if (dx>N/2) dx = N-dx;
+          var dy = Math.abs(y-cys[ci]); if (dy>N/2) dy = N-dy;
+          var t = 1 - (dx*dx+dy*dy)/(crs[ci]*crs[ci]);
+          if (t > 0){ var v = Math.sqrt(t)*chs[ci]; if (v > cl) cl = v; }
+        }
+        hgt[p] = Math.max(0, Math.min(1,
+          0.34 + cl + (lump[p]-0.5)*0.26 + (fine[p]-0.5)*0.14));
+        /* albedo: 塊の天端は乾いて明るく、間は湿って暗い */
+        var mul = 0.72 + cl*0.85 + (lump[p]-0.5)*0.30 + (fine[p]-0.5)*0.22;
+        mul *= 0.88 + damp[p]*0.24;
+        mul = Math.max(0.30, Math.min(1.45, mul));
+        d[p*4]   = Math.min(255, 255*mul);
+        d[p*4+1] = Math.min(255, 255*mul*0.975);
+        d[p*4+2] = Math.min(255, 255*mul*0.94);
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.90);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 3.0)), metres: SOIL_M };
+    }
+
+    /* ============================================================ *
+     * 12. 布 -- タペストリー・麻袋の平織り
+     * ============================================================ *
+     * 128px = 0.62m。縦糸/横糸が 4px(約 2cm)ごとに上下する平織り。
+     * 紋様は入れない -- 織り目だけでも「布」には読めるし、柄を入れると
+     * タペストリーと麻袋で同じ絵が出てしまう(色は material.color 側で
+     * 赤/青/生成りに分かれる)。 */
+    var CLOTH_M = 0.62;
+    function makeCloth(){
+      var N = 128, a = cvs(N), A = a.getContext('2d');
+      var hgt = new Float32Array(N*N);
+      A.fillStyle = '#ffffff'; A.fillRect(0,0,N,N);
+      var P = 4;                                            // 糸ピッチ(px)
+      var slub = octaves(N, 0x6B22, [[16,1.0],[38,0.6]]);   // 糸の太さむら
+      var fold = octaves(N, 0x0E57, [[2,1.0],[4,0.72],[8,0.34]]); // 布のたるみ
+      var im = A.getImageData(0,0,N,N), d = im.data;
+      for (var y=0;y<N;y++) for (var x=0;x<N;x++){
+        var p = y*N+x;
+        /* 平織り: (u+v) の偶奇で縦糸が上か横糸が上かが入れ替わる */
+        var u = Math.floor(x/P), v = Math.floor(y/P);
+        var warpUp = ((u+v) & 1) === 0;
+        var fx = (x % P)/P, fy = (y % P)/P;
+        /* 上に来ている糸の断面(sin の山)、下の糸は浅い山 */
+        var tp = warpUp ? Math.sin(Math.PI*fx) : Math.sin(Math.PI*fy);
+        var bt = warpUp ? Math.sin(Math.PI*fy) : Math.sin(Math.PI*fx);
+        hgt[p] = Math.max(0, Math.min(1,
+          0.30 + tp*0.46 + bt*0.10 + (slub[p]-0.5)*0.16 + (fold[p]-0.5)*0.46));
+        /* 陰影: 上の糸は明るく、糸の谷は暗い。織り目がうっすら出れば十分 */
+        var mul = 0.74 + tp*0.30 + bt*0.06 + (slub[p]-0.5)*0.14 + (fold[p]-0.5)*0.34;
+        mul = Math.max(0.35, Math.min(1.30, mul));
+        d[p*4]   = Math.min(255, 255*mul);
+        d[p*4+1] = Math.min(255, 255*mul*0.995);
+        d[p*4+2] = Math.min(255, 255*mul*0.985);
+      }
+      A.putImageData(im,0,0);
+      normaliseMean(a, 0.93);
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.2)), metres: CLOTH_M };
+    }
+
     var out = {
       stone: makeStone(), roof: makeRoof(), wood: makeWood(),
       pave: makePave(), turf: makeTurf(),
+      /* 内装用。外壁の石積みをそのまま流用すると内壁が外壁のコピーに
+       * 見えてしまうので、内壁は目地を持たない漆喰として別に焼く。 */
+      plaster: makePlaster(), straw: makeStraw(),
+      soil: makeSoil(), cloth: makeCloth(),
       /* 水面のさざ波は 3 スケール。poseidon のアブレーションで「カスケード
        * 3->1」が最も効果が大きかった(細かいさざ波と鋭い峰が同時に消える)
        * ので、こちらでも重ねる枚数を 2 -> 3 にしている。タイル実寸は
@@ -582,8 +852,20 @@ function buildBodiam(){
 
   var windowMat = new T.MeshLambertMaterial({ color: WINDOW_COL });
   var floorMat  = texMat(FLOOR_COL, 'pave', { nrm: 0.9 }); // stone slab under each wing -- 不定形の板石に(試作)
-  var stubMat   = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
-  var partitionMat = new T.MeshLambertMaterial({ color: 0x8a7a5e, side: T.DoubleSide }); // room-dividing stub walls
+  /* ---- 内壁 -------------------------------------------------------
+   * 部屋を仕切る内壁と正面の低い腰壁は、外壁と同じ切石ではなく漆喰。
+   * 外壁と分けているのは「色」ではなく「目地の有無」-- 試作で内壁を
+   * 灰白(0x93876e 前後)に振ったところ、日陰の面が hemi の空色
+   * (0xdfe9f2)を拾ってコンクリートのパネルに見えた。実測でも外壁と
+   * ほぼ同じ彩度(0.33 対 0.34)・同じ B/R(0.67 対 0.66)まで戻した
+   * 方が漆喰として読める。内壁が外壁のコピーに見えないことは、目地の
+   * 格子を出さない makePlaster 側が担保する。
+   * ★ どちらも DoubleSide。r128 は DOUBLE_SIDED のとき法線を
+   *   faceDirection で反転させてから接空間の摂動を掛けるので、
+   *   normalMap は裏面でも正しい向きに出る(実際に両面が見える
+   *   カットアウェイのスクショで確認済み)。 */
+  var stubMat   = texMat(STUB_COL, 'plaster', { nrm: 0.5, side: T.DoubleSide });
+  var partitionMat = texMat(PARTITION_COL, 'plaster', { nrm: 0.55, side: T.DoubleSide }); // room-dividing stub walls
   var woodMat   = texMat(WOOD_COL, 'wood', { nrm: 0.8 });   // 橋・扉・家具の板目(試作)
   var metalMat  = new T.MeshLambertMaterial({ color: METAL_COL });
   var tileMat   = texMat(TILE_COL, 'roof', { nrm: 0.8 });
@@ -603,20 +885,20 @@ function buildBodiam(){
    * turns into a flat, over-saturated poster colour. Every base colour
    * below is kept at or under 0x77 per channel so that base x 1.98
    * lands under 235 and the shading gradient survives. */
-  var oakMat     = new T.MeshLambertMaterial({ color: 0x5a4128 }); // 家具の樫材(既存 woodMat より濃い)
+  var oakMat     = texMat(0x5a4128, 'wood', { nrm: 0.7 }); // 家具の樫材(既存 woodMat より濃い)
   var oakLtMat   = texMat(0x6f5334, 'wood', { nrm: 0.6 }); // 板材・棚・柵
   var ashlarMat  = texMat(0x6f6858, 'stone', { nrm: 0.7 }); // 屋内の切石(柱・ヴォールト)
-  var ashlarDkMat= new T.MeshLambertMaterial({ color: 0x554f42 }); // 柱頭・礎盤
-  var strawMat   = new T.MeshLambertMaterial({ color: 0x6e6234 }); // 藁・干し草・床の藺草
-  var soilMat    = new T.MeshLambertMaterial({ color: 0x463527 }); // 菜園の畝の土
+  var ashlarDkMat= texMat(0x554f42, 'stone', { nrm: 0.55 }); // 柱頭・礎盤
+  var strawMat   = texMat(0x6e6234, 'straw', { nrm: 0.7 }); // 藁・干し草・床の藺草
+  var soilMat    = texMat(0x463527, 'soil', { nrm: 0.9 }); // 菜園の畝の土
   var cropMat    = new T.MeshLambertMaterial({ color: 0x4e6b38 }); // 野菜の葉
   var herbMat    = new T.MeshLambertMaterial({ color: 0x5a6b46 }); // 薬草(灰緑)
   var leafDkMat  = new T.MeshLambertMaterial({ color: 0x3d5a2e }); // 樹冠(下層)
   var leafMdMat  = new T.MeshLambertMaterial({ color: 0x4c6b38 }); // 樹冠(上層)
   var barkMat    = new T.MeshLambertMaterial({ color: 0x4a3a2a }); // 幹・薪
-  var clothRedMat= new T.MeshLambertMaterial({ color: 0x6a2b26 }); // タペストリー(赤)
-  var clothBluMat= new T.MeshLambertMaterial({ color: 0x2f3f60 }); // タペストリー(青)
-  var clothCrmMat= new T.MeshLambertMaterial({ color: 0x6f6a4c }); // 麻布・穀物袋
+  var clothRedMat= texMat(0x6a2b26, 'cloth', { nrm: 0.5 }); // タペストリー(赤)
+  var clothBluMat= texMat(0x2f3f60, 'cloth', { nrm: 0.5 }); // タペストリー(青)
+  var clothCrmMat= texMat(0x6f6a4c, 'cloth', { nrm: 0.5 }); // 麻布・穀物袋
   var potMat     = new T.MeshLambertMaterial({ color: 0x6a4331 }); // 素焼きの甕・鉢
   var hearthMat  = new T.MeshLambertMaterial({ color: 0x2a1c14 }); // 炉の火床(既存の炉と同色)
   var emberMat   = new T.MeshBasicMaterial({ color: 0xb4471a });   // 熾火(ライティング非依存)
@@ -989,7 +1271,7 @@ function buildBodiam(){
   // through it). A dark soffit and dark reveals turn it back into a
   // tunnel, while leaving the walk-through itself completely clear.
   (function buildGatePassage(){
-    var passDark = new T.MeshLambertMaterial({ color: 0x6b5c45 });
+    var passDark = texMat(0x6b5c45, 'stone', { nrm: 0.6 });
     // run the vault the whole way through the north range to the
     // courtyard, so the view through the arch is a dark tunnel with light
     // at the far end rather than a bright green rectangle
@@ -1003,7 +1285,7 @@ function buildBodiam(){
       place(jamb, s*(GATE_GAP/2-0.15), (ARCH_TOP-1.0)/2, passMid, 0);
       tG1.group.add(jamb);
     });
-    var floorSlab = mkBox(GATE_GAP-0.2, 0.2, passLen, new T.MeshLambertMaterial({color:0x8b7c60}));
+    var floorSlab = mkBox(GATE_GAP-0.2, 0.2, passLen, texMat(0x8b7c60, 'pave', { nrm: 0.8 }));
     place(floorSlab, 0, 0.06, passMid, 0);
     tG1.group.add(floorSlab);
   })();
