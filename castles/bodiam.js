@@ -249,15 +249,31 @@ function buildBodiam(){
         A.fillStyle = 'rgba(60,50,36,0.30)';                  // 下端の影(目地の落ち)
         fillWrap(A, N, b.x+J, b.y+b.h-J-2.0, b.w-2*J, 2.0);
       });
-      // 高さ: ブロックごとに少し飛び出す量を変える(斜光で段が波打つ)
+      /* 高さ: ブロックごとに少し飛び出す量を変える(斜光で段が波打つ)。
+       * ★ 面を平らにしない ------------------------------------------
+       * 変更前の高さマップは「目地 0.30 / 面 0.72-0.98」の階段で、
+       * 傾いている画素は目地際の 1px だけだった。そこは bakeNormal の
+       * strength 2.6 の時点ですでに 52 度あり、strength を上げても
+       * atan が寝るだけで見た目はほとんど変わらない(実測: 2.6 -> 4.4
+       * で朝の斜光の壁面 high-pass sd は +1% しか動かなかった)。
+       * 法線を「深く」するには、傾きを強くするのではなく **傾いた画素を
+       * 増やす** しかない。実物の切石も縁は面取りと風化で丸い。
+       * そこで縁から BEV px かけて目地の高さへ落とす。 */
+      var BEV = 5.0;                                          // 面取り幅(px) = 約4.7cm
       blocks.forEach(function(b){
         var hv = 0.72 + r()*0.26;
-        for (var yy=Math.ceil(b.y+J); yy<b.y+b.h-J; yy++){
-          for (var xx=Math.ceil(b.x+J); xx<b.x+b.w-J; xx++){
-            hgt[((yy%N)*N) + (((xx%N)+N)%N)] = hv;
+        var bx0 = b.x+J, bx1 = b.x+b.w-J, by0 = b.y+J, by1 = b.y+b.h-J;
+        for (var yy=Math.ceil(by0); yy<by1; yy++){
+          for (var xx=Math.ceil(bx0); xx<bx1; xx++){
+            var e = Math.min(1, Math.min(Math.min(xx-bx0, bx1-xx),
+                                         Math.min(yy-by0, by1-yy)) / BEV);
+            e = e*e*(3-2*e);
+            hgt[((yy%N)*N) + (((xx%N)+N)%N)] = 0.30 + (hv - 0.30) * (0.52 + 0.48*e);
           }
         }
       });
+      /* 面そのものにも、のみ跡くらいの中周波の凹凸を足す。 */
+      var tool = octaves(N, 0x71EE, [[18,1.0],[40,0.6],[86,0.32]]);
 
       // 風化: 低周波の斑を albedo と高さの両方へ
       var stain = octaves(N, 0x5AA1, [[4,1.0],[9,0.6],[20,0.35],[48,0.18]]);
@@ -268,11 +284,11 @@ function buildBodiam(){
         d[p*4]   = Math.min(255, d[p*4]  *mul);
         d[p*4+1] = Math.min(255, d[p*4+1]*(mul*0.995));
         d[p*4+2] = Math.min(255, d[p*4+2]*(mul*0.985));       // 汚れは寒色に寄る
-        hgt[p] = Math.max(0, Math.min(1, hgt[p] + (s-0.5)*0.16));
+        hgt[p] = Math.max(0, Math.min(1, hgt[p] + (s-0.5)*0.16 + (tool[p]-0.5)*0.11));
       }
       A.putImageData(im,0,0);
       normaliseMean(a, 0.90);
-      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.6)), metres: STONE_M };
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 4.4)), metres: STONE_M };
     }
 
     /* ============================================================ *
@@ -293,12 +309,20 @@ function buildBodiam(){
         A.fillRect(x, 0, 2.5, N);
         A.fillStyle = 'rgba(255,255,255,0.42)';               // ロールの峰
         A.fillRect(x+2.5, 0, 2.5, N);
+        /* ロール(立ちはぜ)は角柱ではなく丸い。8px かけて山を作る。 */
         for (var yy=0;yy<N;yy++){
-          for (var dx=0;dx<6;dx++){
-            var xx = Math.floor(x+dx) % N;
-            hgt[yy*N+xx] = dx<3 ? 0.92 : 0.62;
+          for (var dx=-1;dx<7;dx++){
+            var xx = (((Math.floor(x+dx)) % N) + N) % N;
+            hgt[yy*N+xx] = 0.50 + 0.45 * Math.sin(Math.PI * (dx+1)/8);
           }
         }
+      }
+      /* 鉛板はロールとロールの間でわずかに垂れる。まだ 0.50 のままの
+       * 画素(= ロールでも継ぎ手でもない平場)だけを cos 一つぶん
+       * 沈ませると、面全体に緩い傾きができて斜光で丸みが出る。 */
+      for (var sy=0; sy<N; sy++) for (var sx=0; sx<N; sx++){
+        if (hgt[sy*N+sx] === 0.50)
+          hgt[sy*N+sx] = 0.50 - 0.15 * Math.sin(Math.PI * ((sx % rw) / rw));
       }
       A.fillStyle = 'rgba(40,36,30,0.26)';                    // 横の継ぎ手(板の重ね)
       A.fillRect(0, N-3, N, 3);
@@ -313,7 +337,7 @@ function buildBodiam(){
       }
       A.putImageData(im,0,0);
       normaliseMean(a, 0.93);
-      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.0)), metres: ROOF_M };
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 3.3)), metres: ROOF_M };
     }
 
     /* ============================================================ *
@@ -346,11 +370,15 @@ function buildBodiam(){
         var g = grain[(((py*3)%N)*N) + px];
         var mul = 0.80 + g*0.36;
         d[p*4] = Math.min(255,d[p*4]*mul); d[p*4+1] = Math.min(255,d[p*4+1]*mul*0.99); d[p*4+2] = Math.min(255,d[p*4+2]*mul*0.97);
-        if (hgt[p] > 0.3) hgt[p] = Math.max(0, Math.min(1, 0.72 + (g-0.5)*0.4));
+        /* 乾いた板は樋状に反る(cupping)。板幅方向に cos 一つぶん
+         * 凹ませると、板ごとの丸みが斜光で出る。木目だけでは高さが
+         * ほぼ平らで、法線マップが継ぎ目の 1px にしか効いていなかった。 */
+        if (hgt[p] > 0.3) hgt[p] = Math.max(0, Math.min(1,
+          0.72 + (g-0.5)*0.4 - 0.17 * Math.sin(Math.PI * ((px % pw) / pw))));
       }
       A.putImageData(im,0,0);
       normaliseMean(a, 0.92);
-      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 1.5)), metres: WOOD_M };
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.5)), metres: WOOD_M };
     }
 
     /* ============================================================ *
@@ -376,9 +404,15 @@ function buildBodiam(){
         fillWrap(A, N, x, y, w, 1.4);
         A.fillStyle = 'rgba(50,44,34,0.26)';
         fillWrap(A, N, x, y+h-1.6, w, 1.6);
-        var hv = 0.66 + r()*0.3;
-        for (var yy=Math.ceil(y); yy<y+h; yy++) for (var xx=Math.ceil(x); xx<x+w; xx++)
-          hgt[((((yy%N)+N)%N)*N) + (((xx%N)+N)%N)] = hv;
+        /* 石と同じ理由で、板石も縁を落として丸みを付ける(踏まれて
+         * 角が取れた敷石)。BEVP は N=128・セル 32px に対する面取り幅。 */
+        var hv = 0.66 + r()*0.3, BEVP = 3.2;
+        for (var yy=Math.ceil(y); yy<y+h; yy++) for (var xx=Math.ceil(x); xx<x+w; xx++){
+          var ep = Math.min(1, Math.min(Math.min(xx-x, x+w-xx),
+                                        Math.min(yy-y, y+h-yy)) / BEVP);
+          ep = ep*ep*(3-2*ep);
+          hgt[((((yy%N)+N)%N)*N) + (((xx%N)+N)%N)] = 0.28 + (hv - 0.28) * (0.50 + 0.50*ep);
+        }
       }
       var wear = octaves(N, 0x4411, [[3,1.0],[10,0.6],[30,0.3]]);
       var im = A.getImageData(0,0,N,N), d = im.data;
@@ -389,7 +423,7 @@ function buildBodiam(){
       }
       A.putImageData(im,0,0);
       normaliseMean(a, 0.91);
-      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 2.2)), metres: PAVE_M };
+      return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), 3.7)), metres: PAVE_M };
     }
 
     /* ============================================================ *
@@ -515,6 +549,7 @@ function buildBodiam(){
   }
   /* テクスチャ付きマテリアルを作る唯一の入口。density を userData に
    * 覚えさせておき、ビルド末尾の走査(applyWorldUVs)がそれを読む。 */
+  var NRM_BOOST = 1.70;                  // 法線マップ全体の深さ(1.0 = 変更前)
   function texMat(colorHex, kind, opt){
     opt = opt || {};
     var t = TEX[kind];
@@ -525,7 +560,12 @@ function buildBodiam(){
       side: opt.side || T.FrontSide
     });
     if (t.normal && opt.nrm !== 0){
-      var ns = opt.nrm != null ? opt.nrm : 1.0;
+      /* NRM_BOOST: 全マテリアル共通の法線の深さ。呼び出し側の nrm は
+       * 「素材どうしの相対的な深さ」を決めるための重みなので、全体を
+       * 深くしたいときは個々を書き換えるのではなくここを動かす。
+       * 高さマップ側(面取り・板の反り)で傾いた画素を増やしたうえで
+       * これを掛けると、目地の 1px だけでなく面全体が起きてくる。 */
+      var ns = (opt.nrm != null ? opt.nrm : 1.0) * NRM_BOOST;
       m.normalMap = t.normal;
       m.normalScale = new T.Vector2(ns, ns);
     }
@@ -1797,6 +1837,11 @@ function buildBodiam(){
   var GROUND_Y = -0.55;
   var WATER_Y = GROUND_Y - 1.0; // 1.0m below the field -- within the 0.8-1.2m spec
 
+  /* 水面が頂点変位で上下するようになったので(B-4)、水鳥は板の上に
+   * 置きっぱなしにできない。生成時にここへ集めておき、毎フレーム
+   * 同じ波の式で y を引き直す。 */
+  var waterBirds = [];
+
   var moatSys = buildWaterMoatSystem({
     group: group,
     groundY: GROUND_Y, waterY: WATER_Y,
@@ -2093,6 +2138,7 @@ function buildBodiam(){
      * flattened body sphere is half submerged exactly like a real bird. */
     function waterBird(host, x, y, z, ry, kind){
       var g = spawn(host, x, y, z, ry);
+      waterBirds.push({ g: g, y0: y });   // B-4: 水面が上下するので、鳥も波に乗せる
       var B  = [aMat(0x5a5348), aMat(0x584a38), aMat(0x767470), aMat(0x6a6658)][kind];
       var H  = [aMat(0x27452e), aMat(0x584a38), aMat(0x767470), aMat(0x3a352c)][kind];
       var BK = [aMat(0x6a6a2c), aMat(0x585030), aMat(0x763a18), aMat(0x6a6a2c)][kind];
@@ -2558,11 +2604,143 @@ function buildBodiam(){
     var uProjY  = { value: 2.6 };
     var uAmp    = { value: 1.0 };
     var uSkyGain= { value: 0.86 };
-    var uGlint  = { value: 1.70 };
+    var uGlint  = { value: 1.20 };
     var uFog    = { value: new T.Vector3(0, 0, 0) };
     var uHaze   = { value: 0.75 };
     var uEdge   = { value: new T.Vector2(moatSys.waterInnerHalf, moatSys.waterHalf) };
     var uFoam   = { value: 0.30 };
+    var uTime   = { value: 0 };
+    var uSpark  = { value: 0.20 };
+    var uCaus   = { value: 0.72 };
+
+    /* ================================================================ *
+     * B-4. 頂点変位(本物の起伏)
+     * ================================================================ *
+     * 【なぜ法線マップだけでは駄目だったか】
+     * 前任者は 3 枚の法線マップの重みを 2.4 倍まで上げたが、真上から
+     * 見たさざ波は薄いままだった。理由は 2 つある。
+     *  (1) 水のフレネルは F0 = 0.02。真上からは空の反射がほぼ効かない
+     *      ので、法線を振っても反射項が動かない。
+     *  (2) 焼いた法線マップは等方的な value noise なので、傾きを上げる
+     *      と「波」ではなく「まだらな染み」が濃くなるだけだった。
+     *      実際、変更前のスクショを等倍で見ると水面は雲状のシミで、
+     *      波の稜線が1本も無い。
+     * つまり不足していたのは *振幅* ではなく **方向性のある構造** で、
+     * これは 2D ノイズを足しても出ない。
+     *
+     * 【対策】 水面板を細かい格子に張り替え、頂点シェーダで 3 本の
+     * 方向波(正弦波)を実際に上下させる。
+     *  - 本物の起伏なので、真上からでも拡散光の N・L が波の稜線に沿って
+     *    帯状に変わる = 「まだら」ではなく「波」に見える。
+     *  - 水際のシルエット(岸との境界線)も波打つ。
+     *  - 傾きは解析的に出せる(sin の微分)ので、法線マップに足すだけ。
+     * 細かいさざ波は従来どおり法線マップ側が受け持つ(ミップマップが
+     * 効くので遠景でエイリアスしない)。格子で表現するのは、格子間隔で
+     * 十分にサンプルできる波長 4m 以上の 3 本だけにしてある。
+     *
+     * 【岸辺】 変位は岸から 3.2m でゼロへ落とす(smoothstep)。土手に
+     * めり込ませないため。同じ係数を傾きにも掛けるので、シェーディング
+     * と実形状がずれない。
+     * ---------------------------------------------------------------- */
+    /* dx,dz は単位ベクトル。lam=波長(m)、amp=振幅(m)、spd=位相速度(m/s)。
+     * 波長は互いに非通約(15 / 6.6 / 4.2)。速度は既存の法線マップの
+     * 流速(0.10-0.26 m/s)より速いが、うねりは速く見えるほうが自然。 */
+    var WAVES = [
+      { dx:  0.9406, dz:  0.3395, lam: 15.0, amp: 0.130, spd: 0.60 },
+      { dx: -0.4191, dz:  0.9080, lam:  6.6, amp: 0.070, spd: 0.50 },
+      { dx:  0.7779, dz: -0.6283, lam:  4.2, amp: 0.036, spd: 0.42 }
+    ];
+    /* コースティクスの正規化係数。 -Laplacian(h) = Σ A k^2 sin(位相) の最大値。 */
+    var W_CAUS_NORM = (function(){
+      var t = 0;
+      for (var i = 0; i < WAVES.length; i++){
+        var k = 2 * Math.PI / WAVES[i].lam;
+        t += WAVES[i].amp * k * k;
+      }
+      return t;
+    })();
+    var W_CELL = 0.85;                 // 格子間隔(m)。最短波長 4.2m を 5 分割
+    var W_FADE = 3.2;                  // 岸から何メートルで振幅ゼロにするか
+
+    /* GLSL は JS のテーブルから組み立てる。数値を 2 か所に書くと必ず
+     * ずれるので、波の定義はこの WAVES だけが持つ(鳥の上下も同じ配列
+     * から計算する)。 */
+    function waveGLSL(px, pz){
+      var out = [];
+      for (var i = 0; i < WAVES.length; i++){
+        var w = WAVES[i], k = 2 * Math.PI / w.lam, om = k * w.spd;
+        out.push(
+          '  { float wp = ' + (w.dx * k).toFixed(6) + ' * ' + px + ' + ' +
+                              (w.dz * k).toFixed(6) + ' * ' + pz + ' - ' +
+                              om.toFixed(6) + ' * uWTime;',
+          '    float ws = sin( wp );',
+          '    wWH += ' + w.amp.toFixed(4) + ' * ws;',
+          '    wWC += ' + (w.amp * k * k).toFixed(6) + ' * ws;',
+          '    wWG += ( ' + (w.amp * k).toFixed(6) + ' * cos( wp ) ) * vec2( ' +
+                            w.dx.toFixed(4) + ', ' + w.dz.toFixed(4) + ' ); }'
+        );
+      }
+      return out;
+    }
+    /* JS 側の同じ式(水鳥用)。GLSL と同一の定数を使う。 */
+    function waveHeightJS(x, z, t){
+      var h = 0;
+      for (var i = 0; i < WAVES.length; i++){
+        var w = WAVES[i], k = 2 * Math.PI / w.lam;
+        h += w.amp * Math.sin(k * (w.dx * x + w.dz * z) - k * w.spd * t);
+      }
+      return h;
+    }
+    function waveShoreJS(x, z){
+      var d = Math.max(Math.abs(x), Math.abs(z));
+      var u = Math.max(0, Math.min(1, Math.min(uEdge.value.y - d, d - uEdge.value.x) / W_FADE));
+      return u * u * (3 - 2 * u);
+    }
+
+    /* ---- 水面板を細かい格子へ張り替える ----------------------------
+     * 元の ShapeGeometry(穴あき四角形 = 三角形わずか数枚)では頂点が
+     * 足りない。堀は「内側の正方形をくり抜いた正方形」なので、重なり
+     * なく 4 本の帯に分割できる。境界の頂点は帯ごとに重複するが、変位が
+     * ワールド xz の純関数なので継ぎ目は開かない。
+     * UV は既存のフラグメント側の約束( uv.x = worldX, uv.y = -worldZ )
+     * をそのまま踏襲する。 */
+    (function rebuildWaterGrid(){
+      var IN = moatSys.waterInnerHalf, OUT = moatSys.waterHalf;
+      var pos = [], uvs = [], nor = [], idx = [];
+      function strip(x0, x1, z0, z1){
+        var nx = Math.max(1, Math.round((x1 - x0) / W_CELL));
+        var nz = Math.max(1, Math.round((z1 - z0) / W_CELL));
+        var base = pos.length / 3, i, j;
+        for (j = 0; j <= nz; j++){
+          var z = z0 + (z1 - z0) * j / nz;
+          for (i = 0; i <= nx; i++){
+            var x = x0 + (x1 - x0) * i / nx;
+            pos.push(x, 0, z); nor.push(0, 1, 0); uvs.push(x, -z);
+          }
+        }
+        for (j = 0; j < nz; j++) for (i = 0; i < nx; i++){
+          var a = base + j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+          idx.push(a, c, b, b, c, d);   // +Y を向く巻き
+        }
+      }
+      strip(-OUT, OUT, -OUT, -IN);   // 北
+      strip(-OUT, OUT,   IN,  OUT);  // 南
+      strip(-OUT,  -IN,  -IN,  IN);  // 西
+      strip(  IN,  OUT,  -IN,  IN);  // 東
+
+      var g = new T.BufferGeometry();
+      g.setIndex(idx);
+      g.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal',   new T.Float32BufferAttribute(nor, 3));
+      g.setAttribute('uv',       new T.Float32BufferAttribute(uvs, 2));
+      g.computeBoundingSphere();
+      g.boundingSphere.radius += 1.0;      // 変位のぶん余裕を持たせる
+      var mw = moatSys.moatWater;
+      if (mw.geometry && mw.geometry.dispose) mw.geometry.dispose();
+      mw.geometry = g;
+      /* 頂点変位は UV には触らないので、末尾の applyWorldUVs は
+       * waterMat に uvDensity が無い = このメッシュを素通りする。 */
+    })();
 
     waterMat.onBeforeCompile = function(sh){
       /* 差し替え対象のチャンク名は three のバージョンに依存する。3つとも
@@ -2571,9 +2749,13 @@ function buildBodiam(){
        * エラーになる(前任者が踏んだ罠なのでそのまま踏襲する)。 */
       var SPM = '#include <specularmap_fragment>',
           NFM = '#include <normal_fragment_maps>',
-          FOG = '#include <fog_fragment>';
-      var fs = sh.fragmentShader;
+          FOG = '#include <fog_fragment>',
+          BGV = '#include <begin_vertex>';
+      var fs = sh.fragmentShader, vs = sh.vertexShader;
       if (fs.indexOf(SPM) < 0 || fs.indexOf(NFM) < 0 || fs.indexOf(FOG) < 0) return;
+      /* 頂点変位と varying は対で入れる。片方だけ入るとリンクエラーで
+       * 水面が消えるので、begin_vertex が無いときは両方あきらめる。 */
+      if (vs.indexOf(BGV) < 0) return;
 
       sh.uniforms.uWN2 = uN2;         sh.uniforms.uWN3 = uN3;
       sh.uniforms.uWOff1 = uOff1;     sh.uniforms.uWOff2 = uOff2;   sh.uniforms.uWOff3 = uOff3;
@@ -2583,6 +2765,37 @@ function buildBodiam(){
       sh.uniforms.uWSkyGain = uSkyGain; sh.uniforms.uWGlint = uGlint;
       sh.uniforms.uWEdge = uEdge;     sh.uniforms.uWFoam = uFoam;
       sh.uniforms.uWFog = uFog;       sh.uniforms.uWHaze = uHaze;
+      sh.uniforms.uWTime = uTime;     sh.uniforms.uWSpark = uSpark;
+      sh.uniforms.uWCaus = uCaus;
+
+      /* --- 頂点シェーダ: 実際に水面を上下させる ---------------------
+       * transformed は begin_vertex が position から作ったオブジェクト
+       * 座標。このメッシュは回転していない(位置 y = WATER_Y だけ)ので
+       * transformed.xz はそのままワールド xz。vViewPosition は
+       * project_vertex が transformed から作るので、変位はそのあとの
+       * 反射・フレネル計算にも正しく効く。
+       * 傾きは sin の微分そのもの。法線マップと同じ約束
+       * ( wS.x -> Nworld.x, -wS.y -> Nworld.z )に合わせて渡すため、
+       *   N は ( -dH/dx, 1, -dH/dz ) に比例 -> vWWave = ( -dH/dx, +dH/dz )
+       * としてある。 */
+      vs = [
+        'uniform float uWTime;',
+        'uniform float uWAmp;',
+        'uniform vec2 uWEdge;',
+        'varying vec3 vWWave;'
+      ].join('\n') + '\n' + vs;
+      vs = vs.replace(BGV, [
+        BGV,
+        '  float wWD = max( abs( transformed.x ), abs( transformed.z ) );',
+        '  float wWs = clamp( min( uWEdge.y - wWD, wWD - uWEdge.x ) / ' + W_FADE.toFixed(2) + ', 0.0, 1.0 );',
+        '  wWs = wWs * wWs * ( 3.0 - 2.0 * wWs );',              // 岸で振幅ゼロ
+        '  float wWA = wWs * ( 0.62 + 0.38 * uWAmp );',          // 雨で少し高くなる
+        '  float wWH = 0.0, wWC = 0.0; vec2 wWG = vec2( 0.0 );'
+      ].concat(waveGLSL('transformed.x', 'transformed.z')).concat([
+        '  transformed.y += wWH * wWA;',
+        '  vWWave = vec3( -wWG.x, wWG.y, wWC * ' + (1 / W_CAUS_NORM).toFixed(4) + ' ) * wWA;'
+      ]).join('\n'));
+      sh.vertexShader = vs;
 
       /* --- 前置き: ユニフォーム宣言と空グラデーションの評価関数 -------
        * uWSky/ストップ位置は 11-environment.js の SKY_STOPS_POS と
@@ -2609,6 +2822,9 @@ function buildBodiam(){
         'uniform float uWFoam;',
         'uniform vec3 uWFog;',
         'uniform float uWHaze;',
+        'uniform float uWSpark;',
+        'uniform float uWCaus;',
+        'varying vec3 vWWave;',
         'float wRamp( float a, float b, float p ){ return clamp( ( p - a ) / ( b - a ), 0.0, 1.0 ); }',
         'vec3 wSkyAt( float p ){',
         '  vec3 c = mix( uWSky[0], uWSky[1], wRamp( 0.00, 0.30, p ) );',
@@ -2637,10 +2853,13 @@ function buildBodiam(){
          * 再現して実測)。最初 0.30/0.22/0.15 で組んだら合計の傾きが
          * 中央値 3.4 度しかなく、真上から見てさざ波が1本も見えなかった。
          * 2.4 倍して中央値 8.2 度 / 95 パーセンタイル 15.6 度にしてある。*/
-        '  vec2 wS  = ( texture2D( normalMap, vUv * 0.05263 + uWOff1 ).xy * 2.0 - 1.0 ) * 0.72;',
-        '  wS      += ( texture2D( uWN2,      vUv * 0.15625 + uWOff2 ).xy * 2.0 - 1.0 ) * 0.52;',
-        '  wS      += ( texture2D( uWN3,      vUv * 0.38462 + uWOff3 ).xy * 2.0 - 1.0 ) * 0.36;',
+        '  vec2 wS  = ( texture2D( normalMap, vUv * 0.05263 + uWOff1 ).xy * 2.0 - 1.0 ) * 1.30;',
+        '  wS      += ( texture2D( uWN2,      vUv * 0.15625 + uWOff2 ).xy * 2.0 - 1.0 ) * 0.80;',
+        '  wS      += ( texture2D( uWN3,      vUv * 0.38462 + uWOff3 ).xy * 2.0 - 1.0 ) * 0.50;',
         '  wS *= uWAmp;',
+        /* 頂点で計算した方向波の傾き。ノイズ 3 枚と違ってこれは
+         * 「稜線」を持つので、真上から見たときに波が線として読める。 */
+        '  wS += vWWave.xy;',
         '  vec3 wNW = normalize( vec3( wS.x, 1.0, -wS.y ) );',
         '  normal = normalize( mat3( viewMatrix ) * wNW );'
       ].join('\n'));
@@ -2664,6 +2883,17 @@ function buildBodiam(){
          * 「傾いていない場合の N・V」との差だけを使う(視点に依らない)。*/
         '  float wFlt = clamp( dot( wUp, wV ), 0.0, 1.0 );',
         '  gl_FragColor.rgb *= 1.0 + clamp( ( wNdv - wFlt ) * 6.0, -0.30, 0.30 );',
+        /* 焦線(コースティクス)。上の屈折項は「傾いた面ほど水中を長く
+         * 通る」なので、真上から見ると N・V <= up・V となり **必ず暗く
+         * なる方向にしか動かない**。だから変更前の水面は真上から見ると
+         * 「暗いシミ」ばかりで、峰が明るくならず波に見えなかった。
+         * 水面を通った光は峰の下で収束し谷の下で発散する(浅い水ほど
+         * 顕著)。その強さは高さのラプラシアンに比例し、正弦波なら
+         *   -Laplacian(h) = Σ A k^2 sin(位相) = 峰で正・谷で負
+         * になる。頂点側で解析的に出して渡してあるので、ここは掛ける
+         * だけ。峰が明るく谷が暗い **対称な** 変化なので、初めて
+         * 「波の筋」として読める。 */
+        '  gl_FragColor.rgb *= 1.0 + uWCaus * vWWave.z;',
         '  vec3  wR   = reflect( -wV, normal );',
         '  float wP   = clamp( 0.5 - 0.5 * ( uWProjY * wR.y / max( -wR.z, 1e-3 ) ), 0.0, 1.0 );',
         '  float wF   = 0.02 + 0.98 * pow( 1.0 - wNdv, 5.0 );',
@@ -2686,21 +2916,35 @@ function buildBodiam(){
          * ただの薄い染みになる ―― さざ波が法線を散らすので、明るく
          * しても「面」ではなく「粒」にしかならない。上限は clamp で
          * 押さえて白飛びを防ぐ。 */
-        '  vec3  wGl  = min( uWSunCol * uWGlint * ( pow( wSd, 160.0 ) + 0.30 * pow( wSd, 16.0 ) ), vec3( 1.30 ) );',
+        '  vec3  wGl  = min( uWSunCol * uWGlint * ( pow( wSd, 160.0 ) + 0.30 * pow( wSd, 16.0 ) ), vec3( 0.95 ) );',
         '  vec3  wRef = mix( wSkyAt( wP ) * uWSkyGain, uWFog, wHz ) + wGl;',
         '  gl_FragColor.rgb = mix( gl_FragColor.rgb, wRef, wF );',
+        /* 真上寄りの視点では wF が 0.02 まで落ちるので、上の mix では
+         * きらめきが 1/50 に潰れて一切見えない。太陽を映す向きに立った
+         * 波面だけが光る項なので、フレネルの外側にも一定割合を足す。
+         * (物理的には過剰だが、これを入れないと「真上からは波が光ら
+         *  ない」という前任者の指摘がそのまま残る。) */
+        '  gl_FragColor.rgb += wGl * ( uWSpark * ( 1.0 - wF ) );',
         '  float wD   = max( abs( vUv.x ), abs( vUv.y ) );',
         '  float wEg  = max( wRamp( uWEdge.x + 1.5, uWEdge.x, wD ), wRamp( uWEdge.y - 1.5, uWEdge.y, wD ) );',
         '  float wFn  = texture2D( uWN3, vUv * 0.31 + uWOff3 * 1.7 ).x;',
         '  float wFm  = uWFoam * wEg * wEg * clamp( wFn * 1.9 - 0.62, 0.0, 1.0 );',
         '  gl_FragColor.rgb = mix( gl_FragColor.rgb, wSkyAt( 0.92 ) * 0.80, wFm );',
         '  gl_FragColor.a = clamp( gl_FragColor.a + wF * 0.20 + wFm * 0.5, 0.0, 1.0 );',
+        /* 水面だけの白飛び止め。さざ波を大胆にすると、太陽のきらめきが
+         * 「線」から「粒の帯」に広がるぶん飽和画素が増える(朝の斜光で
+         * 実測 +0.22 ポイント)。このビューアはトーンマッピングを掛けて
+         * いない = gl_FragColor がほぼそのまま 0-255 になるので、水面の
+         * 出力だけ 0.96 (245/255) で頭を打たせておけば、きらめきの形を
+         * 保ったまま水が 254 に到達しなくなる。fog はこのあと霧色へ
+         * 寄せるだけなので、この上限を破らない。 */
+        '  gl_FragColor.rgb = min( gl_FragColor.rgb, vec3( 0.96 ) );',
         '#include <fog_fragment>'
       ].join('\n'));
 
       sh.fragmentShader = fs;
     };
-    waterMat.customProgramCacheKey = function(){ return 'bodiam-moat-fresnel-v1'; };
+    waterMat.customProgramCacheKey = function(){ return 'bodiam-moat-fresnel-v4'; };
     waterMat.needsUpdate = true;
 
     /* ---- 毎フレームの更新 -------------------------------------------
@@ -2725,6 +2969,18 @@ function buildBodiam(){
       uOff1.value.set(  t * 0.00526 * sp,  t * 0.00311 * sp );
       uOff2.value.set( -t * 0.02031 * sp,  t * 0.01750 * sp );
       uOff3.value.set(  t * 0.04100 * sp, -t * 0.09231 * sp );
+      uTime.value = t * sp;
+
+      /* 水鳥は水面に浮いている。水面が本当に上下するようになった以上、
+       * 板の上に置きっぱなしにすると波の谷で宙に浮き、峰では体が水に
+       * 沈む。頂点シェーダと同じ WAVES / 同じ岸フェードで y を引き直す
+       * (12 羽 x sin 3 回 = 毎フレーム 36 sin。無視できる)。 */
+      var wbAmp = 0.62 + 0.38 * uAmp.value;
+      for (var wb = 0; wb < waterBirds.length; wb++){
+        var wbr = waterBirds[wb], wbp = wbr.g.position;
+        wbp.y = wbr.y0 + waveHeightJS(wbp.x, wbp.z, uTime.value)
+                       * waveShoreJS(wbp.x, wbp.z) * wbAmp;
+      }
 
       if (typeof camera !== 'undefined' && camera && camera.projectionMatrix){
         // 反射ベクトルを画面 v へ落とすのに使う縦方向の投影係数
