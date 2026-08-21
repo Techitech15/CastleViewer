@@ -267,6 +267,11 @@
 <script src="media/manifest.js"></script>
 <script src="js/00-core.js"></script>
 <script src="js/01-moat.js"></script>
+<!-- 手続き的テクスチャ工房(CastleTex)。城ファイルが buildXxx() の中で
+     CastleTex.kit(...) を呼ぶので、castles/*.js より **前** に置く。
+     T (= THREE) を使うのは関数の実行時だけなので js/00-core.js より
+     後ろでありさえすればよい。 -->
+<script src="js/02-texture.js"></script>
 <script src="js/10-scene.js"></script>
 <script src="js/11-environment.js"></script>
 <script src="js/12-camera.js"></script>
