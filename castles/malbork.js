@@ -71,7 +71,10 @@ function buildMalborkPlan(){
   var pickables = [];
 
   function mpMakeFadeGroup(name, dir, isRoof, colorHex, tier){
-    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    /* mpSurfMat は色から素材(brick / roof / stone)を選ぶ。宣言は
+     * このファイルの下の方(テクスチャ工房の直後)だが、実際に呼ばれる
+     * のは工房が組まれたあとなので巻き上げで足りる。 */
+    var mat = mpSurfMat(colorHex);
     var g = new T.Group();
     g.name = name;
     root.add(g);
@@ -104,15 +107,24 @@ function buildMalborkPlan(){
    * key light and ambient fill were applied, i.e. a pastel salmon castle.
    * The base tones are therefore pre-divided so the LIT result lands on
    * the photographed colour instead of overshooting it. */
-  var BRICK_WALL   = 0x6c402f; // sunlit brick range wall
-  var BRICK_WALL_V = 0x5a3325; // deeper tone for towers / vertical accents
-  var BRICK_DARK   = 0x402016;
-  var TOWER_BRICK  = 0x8b5c3d; // main tower: a visibly paler, yellower brick,
+  /* ★テクスチャ導入にともなう再基準化。map は material.color に乗算
+   * されるので、平均 0.76 のレンガテクスチャを載せると壁が 24% 暗くなる。
+   * 工房のコメントどおり **色は色定数側で戻す**(テクスチャ側の mean を
+   * 上げると、面より明るい石灰目地から先に 255 で頭を打ってレンガの読み
+   * そのものが壊れる)。したがってレンガ系は 1/0.76 ≒ 1.32 …ではなく
+   * 1.25 倍に留めてある -- 完全に戻すと今度は日向の目地(map ≒ 0.98)が
+   * 昼の約1.95倍の露出を受けて赤チャンネルで飽和するため。実測で
+   * chanClip が 0 のまま、変更前とほぼ同じ明るさに乗る値。 */
+  var BRICK_WALL   = 0x87503b; // sunlit brick range wall (was 0x6c402f)
+  var BRICK_WALL_V = 0x71402e; // deeper tone for towers / vertical accents (was 0x5a3325)
+  var BRICK_DARK   = 0x50281c; // (was 0x402016)
+  var TOWER_BRICK  = 0xae734c; // main tower: a visibly paler, yellower brick, (was 0x8b5c3d)
                                // exactly as it reads in the courtyard photo
-  var ROOF_COL     = 0x7d3f2c; // terracotta pantile
-  var ROOF_COL2    = 0x633326; // weathered / older tile, mixed in for variety
+  /* 瓦テクスチャは平均 0.87 なので 1.13 倍で元の明るさに戻す。 */
+  var ROOF_COL     = 0x9e5136; // terracotta pantile (was 0x7d3f2c)
+  var ROOF_COL2    = 0x7d4130; // weathered / older tile, mixed in for variety (was 0x633326)
   var NICHE_COL    = 0x31180f; // recessed blind-arcade niches (read as shadow)
-  var WHITE_TRIM   = 0xa08f74; // light stone copings / string courses. NOT a
+  var WHITE_TRIM   = 0xb29f81; // light stone copings / string courses (was 0xa08f74). NOT a
                                // true white: at 0xd9cdb2 the step copings and
                                // pinnacles read as icing on every gable and
                                // the skyline turned into white sawteeth
@@ -133,17 +145,115 @@ function buildMalborkPlan(){
   var TREE_LEAF_COL1 = 0x4f7038;
   var TREE_LEAF_COL2 = 0x3f6b3a;
 
+  /* ================================================================ *
+   * 手続き的テクスチャ -- 共有工房 CastleTex(js/02-texture.js)
+   * ================================================================ *
+   * 【この城だけ石ではなくレンガ】
+   * マルボルクは世界最大のレンガ造建築で、外壁も塔も切石ではない。
+   * 工房の既定 kind `stone` は「ランダム幅・ランダム位相の切石」なので、
+   * blockW を細かくしてもレンガにはならない(小さい切石になるだけ)。
+   * そこで js/02-texture.js に **opt-in の kind `brick`** を足した。
+   * フランドル積み(長手と小口を交互、段ごとにちょうど半周期ずらす)、
+   * 目地は面より明るい石灰目地、そして焼過ぎ小口(zendrówka)の斑。
+   * `brick` を渡さない城には resolve() がキーごと生やさないので、他の
+   * 4城のテクスチャ・キャッシュキー・出力は 1 ビットも変わらない。
+   *
+   * 【寸法の根拠】クロスターフォーマート(中世北ドイツ〜プロイセンの
+   * 標準レンガ)は概ね 30 x 14 x 9cm。目地 1.5cm を足すと
+   *   1段 = 10.6cm / 長手 = 31.5cm / 小口 = 15.5cm
+   * になる。タイル 1.70m に 16 段(10.6cm)・4 周期(42.5cm = 長手
+   * 28.3cm + 小口 14.2cm)で、実測写真の目地密度とほぼ一致する。
+   * これ以上細かくすると遠景でモアレになり(この城は 500m 超なので
+   * 引きの絵が主役)、これ以上粗くすると近景で切石に見える。
+   *
+   * 【屋根】急勾配の大屋根が支配的な城なので瓦の効果が大きい。工房の
+   * `roof` は鉛葺きの立ちはぜ(縦のロール + タイル下端に横継ぎ手1本)
+   * だが、瓦は 30cm ごとに段が来る。タイル実寸を詰めると低周波の汚れ
+   * まで細かく繰り返してしまうので、代わりに **seams(横の継ぎ手の
+   * 本数)** を工房側に足して 1.2m タイルに 4 本引いている。
+   * 縦のロール 4 本と合わせて 30cm 角の瓦目になる。
+   *
+   * 【法線】nrmBoost はボディアム既定の 1.70 ではなく 1.40。レンガは
+   * 目地が石積みの 3 倍近く密なので、同じ深さだと壁一面が凹凸だらけに
+   * 見えて「編み籠」になる。実測でもこの城は最重量(drawCall 9千超)
+   * なので、塗りつぶし負荷を無駄に増やさない意味もある。
+   * ================================================================ */
+  var TEXKIT = CastleTex.kit({
+    id: 'malbork',
+    nrmBoost: 1.40,
+    brick: {
+      /* ★実寸 10.6cm から 17cm へ「意図的に粗く」してある。理由は
+       * 画面解像度で、考証を曲げたわけではない。このビューアの
+       * マルボルクは view.zMin = 70m まで **しか** 寄れない(城が 500m
+       * 級なので、それ以上寄ると全体が把握できない)。70m / 画角42度 /
+       * 縦609px では 1px = 8.8cm、少し離れた棟なら 1px = 20cm を超える。
+       * 実寸どおり 1段 10.6cm にすると 1段が 0.4-1.2px にしかならず、
+       * ミップマップに完全に均されて「赤いざらつき」になる。実際、最初の
+       * 焼き上げの近景クロップでは目地が1本も読めず、代わりに焼過ぎ小口
+       * だけが斑点として残り、しかも斜めの壁面でモアレの山形が出た。
+       * 1段 17cm(長手 37.8cm / 小口 18.9cm)まで粗くすると最寄りで
+       * 約2px となり、横目地の縞が読めるようになる。実物の 1.6 倍だが、
+       * 「石積みに見えないこと」の方が優先度が高い。
+       * ※ courses は偶数であること -- 段ごとに半周期ずらすので、奇数だと
+       *   タイル上下端で同じ位相の段が隣接して芋目地になる。 */
+      metres: 1.70, courses: 10, periods: 3,   // 1段17cm / 周期56.7cm
+      joint: 1.5,                              // 目地 3px = 段の 12%
+      faceLum: [156, 62], darkP: 0.16,         // 斑が遠景でノイズにならない範囲
+      nrm: 3.4, mean: 0.76
+    },
+    /* 瓦: 30cm ごとの段(seams) x 30cm ごとのロール。mean を既定 0.93
+     * から下げてあるのは、屋根が画面を大きく占める城なので白飛び予算に
+     * 直接効くため(下の「白飛び」節を参照)。 */
+    roof: {
+      /* 瓦も同じ理由で 30cm ではなく 40cm 角。屋根は常に斜めから見える
+       * ぶん壁より投影が縮むので、壁のレンガより粗くしてちょうど釣り合う。*/
+      metres: 1.2, px: 128, rolls: 3, seams: 3, nrm: 2.8,
+      lead: '#c8c2b8',
+      rollLo: 'rgba(30,26,20,0.30)', rollHi: 'rgba(255,255,255,0.24)',
+      seam: 'rgba(28,20,14,0.46)',
+      warpMul: [0.84, 0.30],
+      tint: [1.0, 0.995, 0.985],
+      mean: 0.87
+    }
+    /* stone / plaster / wood / pave / turf / straw / soil / cloth は
+     * 既定のまま。既定のままにしておくと、パラメータが完全に一致する
+     * 城どうしで工房がセットを共有する…わけではない(キャッシュキーは
+     * 解決済みパラメータ全体の JSON なので brick / roof を変えた時点で
+     * 別キーになる)が、値を触らないぶん見え方の責任範囲が狭くなる。 */
+  });
+  var TEX           = TEXKIT.tex;
+  var texMat        = TEXKIT.texMat;
+  var applyWorldUVs = TEXKIT.applyWorldUVs;
+
+  /* 色から素材を引く。mpMakeFadeGroup / mpPlainGroup / mpGableRoof は
+   * どれも「色だけ」を受け取る設計なので、素材の割り当ても色で決める。
+   * isRoof フラグは使えない -- 破風(mpSteppedGable)と小塔は「屋根と
+   * 一緒に消える」ために isRoof:true で作られているが、実体はレンガ。 */
+  function mpKindFor(colorHex){
+    if (colorHex === ROOF_COL || colorHex === ROOF_COL2) return 'roof';
+    if (colorHex === WHITE_TRIM) return 'stone';    // 石の胴蛇腹・笠石
+    if (colorHex === NICHE_COL)  return null;       // 影にしか見えない窪み
+    return 'brick';
+  }
+  function mpSurfMat(colorHex, side){
+    var kind = mpKindFor(colorHex);
+    if (!kind) return new T.MeshLambertMaterial({ color: colorHex, side: side || T.FrontSide });
+    /* 屋根の法線は壁より浅く。瓦の山は 1cm ではなく 3cm 級だが、屋根は
+     * 常に斜めから見えるので同じ深さだと過剰に立つ。 */
+    return texMat(colorHex, kind, { nrm: (kind === 'roof' ? 0.85 : 1.0), side: side });
+  }
+
   var windowMat  = new T.MeshLambertMaterial({ color: WINDOW_COL });
-  var floorMat   = new T.MeshLambertMaterial({ color: FLOOR_COL });
-  var stubMat    = new T.MeshLambertMaterial({ color: STUB_COL, side: T.DoubleSide });
-  var woodMat    = new T.MeshLambertMaterial({ color: WOOD_COL });
+  var floorMat   = texMat(FLOOR_COL, 'pave', { nrm: 0.9 });
+  var stubMat    = texMat(STUB_COL, 'plaster', { nrm: 0.55, side: T.DoubleSide });
+  var woodMat    = texMat(WOOD_COL, 'wood', { nrm: 0.8 });
   var metalMat   = new T.MeshLambertMaterial({ color: METAL_COL });
-  var grassMat   = new T.MeshLambertMaterial({ color: GRASS_COL });
-  var trimMat    = new T.MeshLambertMaterial({ color: WHITE_TRIM });
+  var grassMat   = texMat(GRASS_COL, 'turf');
+  var trimMat    = texMat(WHITE_TRIM, 'stone', { nrm: 0.7 });
   var goldMat    = new T.MeshLambertMaterial({ color: GOLD_COL });
-  var darkWoodMat= new T.MeshLambertMaterial({ color: 0x2a1c14 });
-  var stoneDarkMat = new T.MeshLambertMaterial({ color: BRICK_DARK });
-  var ditchMat   = new T.MeshLambertMaterial({ color: DITCH_COL });
+  var darkWoodMat= texMat(0x2a1c14, 'wood', { nrm: 0.6 });
+  var stoneDarkMat = texMat(BRICK_DARK, 'brick', { nrm: 0.8 });
+  var ditchMat   = texMat(DITCH_COL, 'turf');
   /* Water: shininess/specular pulled WAY down (was 85 / 0x9fd4e0). With
    * the old values the single directional light -- especially the low,
    * cold moon at time=night -- laid one enormous unbroken specular streak
@@ -155,7 +265,7 @@ function buildMalborkPlan(){
   var treeTrunkMat = new T.MeshLambertMaterial({ color: TREE_TRUNK_COL });
   var treeLeafMat1 = new T.MeshLambertMaterial({ color: TREE_LEAF_COL1 });
   var treeLeafMat2 = new T.MeshLambertMaterial({ color: TREE_LEAF_COL2 });
-  var cobbleMat  = new T.MeshLambertMaterial({ color: COBBLE_COL });
+  var cobbleMat  = texMat(COBBLE_COL, 'pave', { nrm: 1.0 });
   /* Plain (non-fadeGroup) decoration materials. Wall-attached ornament --
    * plinth courses, blind-arcade pilasters, string courses -- deliberately
    * uses these rather than a fadeGroup material: a fadeGroup's material
@@ -185,12 +295,163 @@ function buildMalborkPlan(){
   var TILE_COL    = 0x74463a; // red clay floor tile
   var FLAG_COL    = 0x877c6c; // stone flag floor
   var EARTH_COL   = 0x6a5942; // packed-earth floor (service ranges)
-  var graniteMat = new T.MeshLambertMaterial({ color: GRANITE_COL });
-  var ribMat     = new T.MeshLambertMaterial({ color: RIB_COL });
-  var plasterMat = new T.MeshLambertMaterial({ color: PLASTER_COL });
-  var tileMat    = new T.MeshLambertMaterial({ color: TILE_COL });
-  var flagMat    = new T.MeshLambertMaterial({ color: FLAG_COL });
-  var earthMat   = new T.MeshLambertMaterial({ color: EARTH_COL });
+  var graniteMat = texMat(GRANITE_COL, 'stone', { nrm: 0.5 });
+  var ribMat     = texMat(RIB_COL, 'brick', { nrm: 0.5 });     // 迫石もレンガ
+  var plasterMat = texMat(PLASTER_COL, 'plaster', { nrm: 0.6, side: T.DoubleSide });
+  var tileMat    = texMat(TILE_COL, 'pave', { nrm: 0.8, density: 1/1.2 }); // 赤い敷瓦(小割)
+  var flagMat    = texMat(FLAG_COL, 'pave', { nrm: 0.9 });
+  var earthMat   = texMat(EARTH_COL, 'soil', { nrm: 0.8 });
+
+  /* ================================================================ *
+   * 毎フレーム更新のハブ(煙 / 旗 / 水面が相乗り)
+   * ================================================================ *
+   * 90-main.js のフレームループには城ごとのフックが無い。ボディアムと
+   * 同じ手を使う -- frustumCulled=false の退化三角形を1つだけ「時計」
+   * として置き、その onBeforeRender からまとめて更新する(追加
+   * drawCall は 1、面積 0 なので 1 画素も塗らない)。
+   * 更新はすべて「絶対時刻の純関数」。ポストFXが1フレームに複数回
+   * シーンを描いても二重に進まない。 */
+  var ANIM = [];
+  function mpNowSec(){
+    return (typeof performance !== 'undefined' && performance.now
+            ? performance.now() : Date.now()) / 1000;
+  }
+  function mpEnvState(){
+    var glow = 0, rain = 0, snow = 0, sunMul = 1;
+    if (typeof CUR_TIME !== 'undefined' && CUR_TIME){ glow = CUR_TIME.windowGlow || 0; }
+    if (typeof CUR_WEATHER !== 'undefined' && CUR_WEATHER){
+      rain = CUR_WEATHER.rain || 0; snow = CUR_WEATHER.snow || 0;
+      sunMul = CUR_WEATHER.sunMul != null ? CUR_WEATHER.sunMul : 1;
+    }
+    return { glow: glow, rain: rain, snow: snow, sunMul: sunMul };
+  }
+  (function mpClock(){
+    var tick = new T.Mesh(new T.BufferGeometry(),
+      new T.MeshBasicMaterial({ depthWrite:false, depthTest:false }));
+    tick.geometry.setAttribute('position', new T.BufferAttribute(new Float32Array(9), 3));
+    tick.frustumCulled = false;
+    /* transparent にしない -- three は不透明キューを先に描くので、
+     * renderOrder -1000 と合わせて「このフレームで最初に呼ばれる」ことが
+     * 保証され、旗(不透明メッシュ)も同じフレーム内で更新後に描かれる。*/
+    tick.renderOrder = -1000;
+    tick.onBeforeRender = function(){
+      var t = mpNowSec(), e = mpEnvState();
+      for (var i=0;i<ANIM.length;i++) ANIM[i](t, e);
+    };
+    group.add(tick);
+  })();
+
+  /* ---- 煙突の煙 ----------------------------------------------------
+   * この城にはパン焼き所(炉2基)・鍛冶場・厨房・大食堂・施療院・
+   * 宮殿の暖炉があり、煙突はすでに9本立っている。スプライト1枚 =
+   * 1 drawCall なので煙突あたり 4-6 枚に抑える。
+   * fg(煙突が属するフェードグループ)が消えているあいだは煙も消す。*/
+  var MP_WIND = { x: 0.72, z: 0.66 };            // 南西からの緩い風
+  function mpSmokePlume(fg, x, y0, z, opt){
+    opt = opt || {};
+    var n     = opt.count != null ? opt.count : 5;
+    var rise  = opt.rise  != null ? opt.rise  : 20.0;
+    var speed = opt.speed != null ? opt.speed : 0.12;
+    var base  = opt.base  != null ? opt.base  : 0.45;
+    var g = new T.Group();
+    g.position.set(x, y0, z);
+    (fg ? fg.group : root).add(g);
+    var puffs = [];
+    for (var i=0;i<n;i++){
+      var mat = new T.SpriteMaterial({ map: TEX.smoke, color: 0xcfcac1,
+        transparent: true, depthWrite: false, opacity: 0, fog: true });
+      var s = new T.Sprite(mat);
+      s.renderOrder = 5;
+      s.visible = false;
+      g.add(s);
+      puffs.push({ s: s, ph: i/n + (i*0.137) % 0.1 });
+    }
+    ANIM.push(function(t, e){
+      var amt  = Math.min(1.0, 0.82 + e.glow*0.18 + e.rain*0.16 + e.snow*0.12);
+      var wind = 1 + e.rain*0.9 + e.snow*0.35;
+      /* 視距離が長いぶん濃度も上げる(1.5倍)。上げすぎると昼の絵で
+       * 白い雲が城に貼り付くので、実測しながらここで止めてある。 */
+      var op0  = base * 1.5 * amt * (fg ? fg.op : 1);
+      // 昼 0x757068(空より暗い)-> 夜 0xb4afa5(淡い)
+      var cr = 0.395 + (0.706-0.395)*e.glow;
+      var cg = 0.377 + (0.686-0.377)*e.glow;
+      var cb = 0.349 + (0.647-0.349)*e.glow;
+      if (fg && (!fg.group.visible || fg.op < 0.15)) op0 = 0;
+      for (var i=0;i<puffs.length;i++){
+        var p = puffs[i];
+        var k = (t*speed + p.ph) % 1;
+        var op = op0 * Math.min(1, k*5) * Math.pow(1-k, 1.30);
+        if (op < 0.012){ p.s.visible = false; continue; }
+        var drift = wind * (0.20 + 1.6*k*k);
+        var climb = Math.pow(k, 1.35);
+        p.s.position.set(
+          Math.sin(t*0.55 + p.ph*6.28)*0.30*k + MP_WIND.x*drift,
+          climb*rise,
+          Math.cos(t*0.41 + p.ph*5.13)*0.30*k + MP_WIND.z*drift
+        );
+        /* 粒の大きさ。ボディアム(1.45 + k*5.0)より一回り大きい --
+         * この城は 300-680m から見るので、堀の城と同じ寸法だと数画素に
+         * しかならず、実測で opacity 0.25 の粒が背景に埋もれて 1本も
+         * 見えなかった。 */
+        var sc = 3.2 + k*11.0;
+        p.s.scale.set(sc, sc, 1);
+        p.s.material.opacity = op;
+        p.s.material.color.setRGB(cr, cg, cb);
+        p.s.visible = true;
+      }
+    });
+    return g;
+  }
+
+  /* ---- 旗 ----------------------------------------------------------
+   * ドイツ騎士修道会の城なので旗は自然。板を 14x7 分割し、竿からの
+   * 距離の2乗で振幅を増やす進行波(位相の違う2波の重ね合わせ)。
+   * 布は影を落とさない -- シャドウマップの描画では onBeforeRender が
+   * 呼ばれず、1フレーム前の頂点で影が焼かれてちらつくため。 */
+  function mpFlag(fg, x, z, baseY, opt){
+    opt = opt || {};
+    var poleH = opt.poleH != null ? opt.poleH : 6.0;
+    var pole = mkCyl(0.10, 0.13, poleH, 6, metalMat);
+    place(pole, x, baseY + poleH/2, z);
+    fg.group.add(pole);
+    var knob = mkCyl(0.19, 0.19, 0.19, 6, goldMat);
+    place(knob, x, baseY + poleH + 0.10, z);
+    fg.group.add(knob);
+
+    var W = opt.w != null ? opt.w : 3.6, H = opt.h != null ? opt.h : 2.3;
+    var geo = new T.PlaneGeometry(W, H, 14, 7);
+    var mat = new T.MeshLambertMaterial({ map: TEX.flag, side: T.DoubleSide });
+    var flag = new T.Mesh(geo, mat);
+    flag.castShadow = false; flag.receiveShadow = false;
+    var ry = opt.ry || 0, co = Math.cos(ry), si = Math.sin(ry);
+    flag.position.set(x + (W/2 + 0.06)*co, baseY + poleH - 0.35 - H/2, z - (W/2 + 0.06)*si);
+    flag.rotation.y = ry;
+    fg.group.add(flag);
+
+    var pos = geo.attributes.position;
+    var base = new Float32Array(pos.array);
+    var seed = opt.seed || 0;
+    ANIM.push(function(t, e){
+      if (!fg.group.visible || !flag.visible) return;
+      var gust = 0.78 + 0.34*Math.sin(t*0.31 + seed) + 0.16*Math.sin(t*0.83 + seed*2.1);
+      var strength = gust * (1 + e.rain*0.55 + e.snow*0.2);
+      var sp = 3.1 * (1 + e.rain*0.4);
+      var arr = pos.array;
+      for (var i=0;i<pos.count;i++){
+        var bx = base[i*3], by = base[i*3+1];
+        var u = (bx + W/2) / W;                  // 0 = 竿側、1 = 吹き流し端
+        var amp = u*u * 0.52 * strength;
+        var ph = u*4.6 - t*sp + by*1.05 + seed;
+        var w1 = Math.sin(ph), w2 = Math.sin(ph*0.57 + 1.7);
+        arr[i*3+2] = w1*amp + w2*amp*0.42;
+        arr[i*3]   = bx - u*amp*0.30;
+        arr[i*3+1] = by + w2*amp*0.16;
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    });
+    return flag;
+  }
 
   /* -------------------------------------------------------------- *
    * local helpers (per-file-local convention, see header)
@@ -247,7 +508,10 @@ function buildMalborkPlan(){
     var shape = new T.Shape();
     shape.moveTo(-halfWidth,0); shape.lineTo(halfWidth,0); shape.lineTo(0,ridgeRise); shape.closePath();
     var geo = new T.ShapeGeometry(shape);
-    var endMat = new T.MeshLambertMaterial({ color: mat.color.getHex(), side: T.DoubleSide });
+    /* 破風の三角形の詰め物。両面 -- カットアウェイで内側からも見える。
+     * r128 は DOUBLE_SIDED のとき faceDirection で法線を反転してから
+     * 接空間の摂動を掛けるので、normalMap は裏面でも正しい向きに出る。*/
+    var endMat = mpSurfMat(mat.color.getHex(), T.DoubleSide);
     var list = ends === 'a' ? [spanA] : (ends === 'b' ? [spanB] : [spanA, spanB]);
     list.forEach(function(s){
       var m = new T.Mesh(geo, endMat);
@@ -694,7 +958,7 @@ function buildMalborkPlan(){
   function mpPlainGroup(colorHex){
     var g = new T.Group();
     root.add(g);
-    return { group: g, mat: new T.MeshLambertMaterial({ color: colorHex }), op: 1 };
+    return { group: g, mat: mpSurfMat(colorHex), op: 1 };
   }
 
   /* --------------------------------------------------------------
@@ -837,7 +1101,7 @@ function buildMalborkPlan(){
    * far shore. They live in `group`, not `root` -- they are terrain, they
    * are uniform along Z, and like the ground plane they must not take the
    * castle's ZOFF re-centring shift. */
-  var siltMat = new T.MeshLambertMaterial({ color: 0x4a4534 });
+  var siltMat = texMat(0x4a4534, 'soil', { nrm: 0.7 });                 // 水際の泥
   var ZTERR0 = -1080, ZTERR1 = 1080;
   group.add(mpTerrainStrip([
     [-60, GROUND_Y+0.08], [W_GLACIS_X, GROUND_Y+0.08],   // castle glacis
@@ -982,6 +1246,11 @@ function buildMalborkPlan(){
   mpAddCrenellations(hcTower.group, hcTower.mat, MT_CX-mtEdgeX, MT_CZ, MT_D, Math.PI/2, MT_H, 1.0, 1.3);
   registerPick(pickables, 'structure', MT_CX, MT_H*0.42, MT_CZ, MT_D*1.5, MT_H*0.9, MT_D*1.5,
     '主塔 Main Tower', '東翼にそびえる高さ約50m(乾堀底基準では66m)の塔。平面11.7x6.0m [MH]。平頂に胸壁を戴く鐘楼兼望楼。');
+  /* ---- 主塔の旗 ---------------------------------------------------
+   * ドイツ騎士修道会の本拠なので、主塔の胸壁に団旗を1本。塔と同じ
+   * フェードグループに入れるので、カットアウェイで塔が消えれば一緒に
+   * 消える。竿は胸壁の内側(-Z 寄り)に立て、布は +X へ流す。 */
+  mpFlag(hcTower, MT_CX, MT_CZ - MT_D*0.28, MT_H + 1.3, { seed: 0.0, poleH: 7.0, w: 4.0, h: 2.5 });
 
   /* ---- St Mary's Church: north wing, east-leaning [MH]◎, length 38m
    * [MH]○, height 14.4m [MH]○ -- the one hard interior-height number in
@@ -1149,7 +1418,7 @@ function buildMalborkPlan(){
   /* ---- High Castle courtyard: cross-path + well (18-19m deep [PL]○) --
    * always visible (open-air), goes in interiorGroup like every other
    * castle's courtyard treatment. ---------------------------------- */
-  var hcGrassMat = new T.MeshLambertMaterial({ color: GRASS_COL2 });
+  var hcGrassMat = texMat(GRASS_COL2, 'turf');
   var courtLawn = mkBox(2*HC_COURT_HX, 0.28, 2*HC_COURT_HZ, hcGrassMat);
   place(courtLawn, 0, -0.16, 0);
   interiorGroup.add(courtLawn);
@@ -1169,7 +1438,7 @@ function buildMalborkPlan(){
    * interiorGroup -- it is open-air and enclosed by the wings, so it is
    * always visible, exactly like the lawn and the well already were. */
   (function hcCloister(){
-    var arcMat  = new T.MeshLambertMaterial({ color: BRICK_WALL });
+    var arcMat  = texMat(BRICK_WALL, 'brick', { nrm: 0.9 });
     var darkMat = new T.MeshLambertMaterial({ color: NICHE_COL });
     var ax0 = -HC_COURT_HX + 0.6, ax1 = HC_COURT_HX - 0.6;
     var az0 = -HC_COURT_HZ + 0.6, az1 = HC_COURT_HZ - 0.6;
@@ -1358,7 +1627,7 @@ function buildMalborkPlan(){
     var apron = mkBox(x1-x0, 0.24, z1-z0, cobbleMat);
     place(apron, (x0+x1)/2, 0.12, (z0+z1)/2);
     interiorGroup.add(apron);
-    var mcLawnMat = new T.MeshLambertMaterial({ color: GRASS_COL2 });
+    var mcLawnMat = texMat(GRASS_COL2, 'turf');
     var lawn = mkBox((x1-x0)*0.56, 0.26, (z1-z0)*0.52, mcLawnMat);
     place(lawn, (x0+x1)/2 - 2, 0.14, (z0+z1)/2 + 4);
     interiorGroup.add(lawn);
@@ -1568,6 +1837,10 @@ function buildMalborkPlan(){
   place(gateLintel2, LC_HX, LC_GATE_H+(GATE_TOWER_H-LC_GATE_H)/2, LC_GATE_Z);
   lcGateFg.group.add(gateLintel2);
   mpAddCrenellations(lcGateFg.group, lcGateFg.mat, LC_HX, LC_GATE_Z, GATE_TOWER_W, Math.PI/2, GATE_TOWER_H, GATE_TOWER_D, 1.0);
+  /* 低城の主門にも旗を2本(門は城の顔で、ここが唯一の住人の出入口)。
+   * 竿は門塔の南北の隅、布は東(城外)へ流す = ry 0 のまま +X 側。 */
+  mpFlag(lcGateFg, LC_HX, LC_GATE_Z - GATE_TOWER_W*0.34, GATE_TOWER_H + 1.0, { seed: 1.7, poleH: 5.0, w: 2.9, h: 1.8 });
+  mpFlag(lcGateFg, LC_HX, LC_GATE_Z + GATE_TOWER_W*0.34, GATE_TOWER_H + 1.0, { seed: 3.9, poleH: 5.0, w: 2.9, h: 1.8 });
   var gateRoof = mkCone(GATE_TOWER_W*0.6, 6.0, 4, lcRoofFg.mat);
   gateRoof.rotation.y = Math.PI/4;
   place(gateRoof, LC_HX, GATE_TOWER_H+0.9+3.0, LC_GATE_Z);
@@ -1770,7 +2043,7 @@ function buildMalborkPlan(){
      * face gets, a 92 x 230m slab of it came back as a blown-out lime
      * sports pitch that hijacked the whole frame. Pulled down to just
      * above the surrounding meadow so it still reads as kept ground. */
-    var lawnMat = new T.MeshLambertMaterial({ color: 0x627f4a });
+    var lawnMat = texMat(0x627f4a, 'turf');
     var lawn = mkBox(92, 0.22, LC_Z1-LC_Z0-24, lawnMat);
     place(lawn, 0, 0.11, (LC_Z0+LC_Z1)/2 - 4);
     interiorGroup.add(lawn);
@@ -1953,7 +2226,7 @@ function buildMalborkPlan(){
     var gx = -94, gz0 = MC_Z0 + 8, gz1 = MC_Z1 - 4, gy = TER_MID_Y;
     var soil = mpBoxSoup();
     soil.box(gx, gy + 0.12, (gz0+gz1)/2, 13, 0.24, gz1-gz0);
-    soil.finish(interiorGroup, new T.MeshLambertMaterial({ color: 0x4c3a2b }));
+    soil.finish(interiorGroup, texMat(0x4c3a2b, 'soil', { nrm: 0.9 }));
     var beds = mpBoxSoup();
     for (var i=0;i<6;i++){
       var bz = gz0 + 6 + i*((gz1-gz0-12)/5);
@@ -2196,12 +2469,12 @@ function buildMalborkPlan(){
     /* ---- extra materials (the stone/plaster/tile set is declared with
      * the main palette at the top of this file so the inline fittings
      * above can share it) ---------------------------------------- */
-    var strawMat = new T.MeshLambertMaterial({ color: 0x9c8548 });
+    var strawMat = texMat(0x9c8548, 'straw', { nrm: 0.9 });
     var emberMat = new T.MeshLambertMaterial({ color: 0xbf5c1e });
-    var clothMat = new T.MeshLambertMaterial({ color: 0x7c3134 });
-    var frescoMat= new T.MeshLambertMaterial({ color: 0x8d7c5a });
-    var sackMat  = new T.MeshLambertMaterial({ color: 0x9c8a68 });
-    var soilMat  = new T.MeshLambertMaterial({ color: 0x4c3a2b });
+    var clothMat = texMat(0x7c3134, 'cloth', { nrm: 0.9, side: T.DoubleSide });
+    var frescoMat= texMat(0x8d7c5a, 'plaster', { nrm: 0.5, side: T.DoubleSide });
+    var sackMat  = texMat(0x9c8a68, 'cloth', { nrm: 0.8 });
+    var soilMat  = texMat(0x4c3a2b, 'soil', { nrm: 0.8 });
     /* crop greens are deliberately DARKER and greyer than the 0x5c7a48
      * lawn they sit next to. Brighter values (0x5c8a3c / 0x7d9c46 were
      * tried first) came back off the renderer as neon stripes that read
@@ -3319,8 +3592,8 @@ function buildMalborkPlan(){
       var combMat  = new T.MeshLambertMaterial({ color: 0x7d2117 });
       var beakMat2 = new T.MeshLambertMaterial({ color: 0x7d6626 });
       var swanMat  = new T.MeshLambertMaterial({ color: 0x7f7a72 }); // 乗算後に白く見える
-      var dcWallMat= new T.MeshLambertMaterial({ color: 0x6c402f }); // 鳩小屋のレンガ
-      var dcRoofMat= new T.MeshLambertMaterial({ color: 0x7d3f2c }); // 同 瓦
+      var dcWallMat= texMat(BRICK_WALL, 'brick', { nrm: 0.8 });    // 鳩小屋のレンガ
+      var dcRoofMat= texMat(ROOF_COL, 'roof', { nrm: 0.7 });       // 同 瓦
 
       /* ---- 四足獣。pose 0=立つ / 1=草を食む / 2=伏せる ---------- */
       function beast(t, x, z, yaw, S, pose, baseY){
@@ -3694,6 +3967,22 @@ function buildMalborkPlan(){
     chimney(gblOuter, -59.0,    17.0, LC_Z0 + 186, 1.7, 5.0);      // bakehouse oven 1
     chimney(gblOuter, -51.0,    17.0, LC_Z0 + 186, 1.7, 5.0);      // bakehouse oven 2
     chimney(gblOuter, 58.5,     14.0, LC_Z0 + 156, 1.6, 4.6);      // smithy forge
+
+    /* ---- 煙 -------------------------------------------------------
+     * 煙口(chimney の vent)の高さは y + h + 0.5。そこから立ち上げる。
+     * 量は炉の性格で変える -- パン焼き窯と鍛冶炉は終日焚いているので
+     * 濃く、居室の暖炉は細い。gblInner / gblOuter は屋根ティアなので、
+     * 屋根がフェードで消えれば煙突ごと煙も消える(mpSmokePlume が
+     * fg.op を見ている)。 */
+    mpSmokePlume(gblInner.brick, chX1-2.5, 31.0+5.5+0.6, -HC_HZ, { base:0.30, rise:21, speed:0.118, count:5 }); // 参事会室
+    mpSmokePlume(gblInner.brick, -HC_HX,   31.0+5.5+0.6, 6.0,    { base:0.36, rise:22, speed:0.104, count:5 }); // 修道士食堂
+    mpSmokePlume(gblInner.brick, HC_HX,    31.0+5.0+0.6, 15.0,   { base:0.28, rise:20, speed:0.126, count:5 }); // 団長居室
+    mpSmokePlume(gblOuter.brick, MC_WX,    25.5+5.5+0.6, RF_CZ + 9.5, { base:0.40, rise:25, speed:0.100, count:6 }); // 大食堂
+    mpSmokePlume(gblOuter.brick, GMP_CX+4, 30.0+5.5+0.6, GMP_CZ + 5.0, { base:0.32, rise:22, speed:0.112, count:5 }); // 宮殿
+    mpSmokePlume(gblOuter.brick, IF_CX,    29.5+5.5+0.6, IF_CZ + 1.5,  { base:0.30, rise:21, speed:0.121, count:5 }); // 施療院
+    mpSmokePlume(gblOuter.brick, -59.0,    17.0+5.0+0.6, LC_Z0 + 186, { base:0.52, rise:28, speed:0.096, count:6 }); // パン焼き窯1
+    mpSmokePlume(gblOuter.brick, -51.0,    17.0+5.0+0.6, LC_Z0 + 186, { base:0.46, rise:25, speed:0.109, count:6 }); // パン焼き窯2
+    mpSmokePlume(gblOuter.brick, 58.5,     14.0+4.6+0.6, LC_Z0 + 156, { base:0.44, rise:22, speed:0.133, count:6 }); // 鍛冶炉
   })();
 
   /* ================================================================
@@ -3724,6 +4013,389 @@ function buildMalborkPlan(){
    * of the camera target. The town north of the road is deliberately NOT
    * counted: it is context, not the subject, and centring on it would
    * throw the castle itself off-frame. */
+  /* ================================================================ *
+   * ノガト川と堀 -- 空を映す水面(Schlick フレネル + 焦線)
+   * ================================================================ *
+   * castles/bodiam.js の moatWater を移植したもの。狙いも式も同じ:
+   *   1. Phong の鏡面ローブを殺す(specularStrength = 0)。水面の見えは
+   *      鏡面ローブではなく **空の鏡像** が本体。
+   *   2. Schlick フレネル F0 = 0.02(水の正しい値)。真上からはほぼ
+   *      水中の色、視線が浅いと F->1 で空を強く映す。この角度依存が
+   *      「水らしさ」の本体。
+   *   3. 映す空は 11-environment.js と同じ 6 段グラデーションを同じ
+   *      ストップ位置で評価する。だから水平線で空と水の色が必ず繋がる。
+   *   4. 焦線(コースティクス)= -Laplacian(h)。峰の下で光が収束し谷の
+   *      下で発散する **対称な** 明暗で、これが無いと波が「暗いシミ」に
+   *      しか見えない。
+   *
+   * 【ボディアムからの唯一の設計変更 -- 頂点変位をやめた】
+   * ボディアムは水面板を 0.85m 格子に張り替えて頂点シェーダで実際に
+   * 上下させている。堀は 44m 角なので数千頂点で済む。ノガトは
+   * **204m x 2180m** で、同じ格子密度だと約 61 万頂点になる。この城は
+   * 5城で最も重く(実測 drawCall 9,222 / フレーム 140ms)、そこへ 61 万
+   * 頂点を足す判断はできない。
+   * 代わりに、同じ 3 本の方向波を **フラグメント側でワールド座標から
+   * 解析的に**評価する。vUv をメートル座標そのものに固定してあるので、
+   * 波の位相・傾き・ラプラシアンはすべて vUv から直接出る。得られる
+   * 絵は「波の稜線が線として読める」「峰が明るく谷が暗い」という
+   * ボディアムの狙いをそのまま満たす。失うのは水際のシルエットの
+   * 波打ちだけで、200m 幅の川では 1 画素も見えない。
+   * 遠景は 1 波長が 2 画素を切るとエイリアスするので、視距離で傾きを
+   * 落とす(160m から 680m にかけて 25% まで)。
+   *
+   * 【もう一つの割り切り -- 岸の泡を入れていない】
+   * ボディアムの泡は「矩形の堀の内外の縁からの距離」を vUv から出して
+   * いる。こちらは川1枚 + 帯状の堀2枚が **同じマテリアルを共有** して
+   * いて(11-environment.js が waterMats 経由で時間帯の色を配る)、
+   * メッシュごとの中心・半径をユニフォームで分けられない。マテリアルを
+   * 複製すれば分けられるが、それは waterMats の契約を書き換えることに
+   * なるのでやめた。川の東西の岸は地形の土手の下に潜り込んでいて
+   * (RIVER の注記参照)そもそも water の縁が見えない。
+   * ================================================================ */
+  (function mpWater(){
+    var n1 = TEX.waterN1, n2 = TEX.waterN2, n3 = TEX.waterN3;
+
+    /* ---- vUv をメートル座標に固定する -----------------------------
+     * 水面はすべて PlaneGeometry を rotation.x = -PI/2 で寝かせたもの。
+     * ローカル (px, py, 0) は回転後 (px, 0, -py) になるので、
+     *   worldX = cx + px , worldZ = cz - py
+     * ボディアムの約束( uv.x = worldX, uv.y = -worldZ )に合わせると
+     *   uv = ( cx + px , py - cz )
+     * になる。root は最後に ZOFF だけ z 方向へ動くが、UV は固定値なので
+     * 影響を受けない(シェーダは vUv を「連続なメートル座標」としてしか
+     * 使っていないので、原点がどこにあっても絵は変わらない)。 */
+    function mpWaterUV(mesh){
+      var geo = mesh.geometry, pos = geo.attributes.position, uv = geo.attributes.uv;
+      if (!pos || !uv) return;
+      var cx = mesh.position.x, cz = mesh.position.z;
+      for (var i=0;i<uv.count;i++) uv.setXY(i, cx + pos.getX(i), pos.getY(i) - cz);
+      uv.needsUpdate = true;
+      geo.userData.__uvW = 1;                 // applyWorldUVs に触らせない
+    }
+    root.traverse(function(o){
+      if (o.isMesh && (o.material === riverMat || o.material === moatWaterMat)) mpWaterUV(o);
+    });
+
+    /* 3枚のさざ波法線。タイル実寸は 34 / 13 / 5.5m で互いに非通約
+     * (比 2.62 / 2.36)。堀(44m)ではなく川(204m)の尺度に合わせて
+     * ボディアムの 19 / 6.4 / 2.6m を約 1.9 倍してある。 */
+    n1.repeat.set(1, 1); n1.offset.set(0, 0);
+    [riverMat, moatWaterMat].forEach(function(m){
+      m.normalMap = n1;                       // USE_NORMALMAP と vUv を有効にするため
+      m.normalScale = new T.Vector2(1, 1);    // 自前で法線を組むので未使用
+      m.shininess = 1;                        // 鏡面はシェーダ側で完全に殺す
+    });
+
+    var uN2   = { value: n2 };
+    var uN3   = { value: n3 };
+    var uOff1 = { value: new T.Vector2(0, 0) };
+    var uOff2 = { value: new T.Vector2(0, 0) };
+    var uOff3 = { value: new T.Vector2(0, 0) };
+    var uSky  = { value: [ new T.Vector3(), new T.Vector3(), new T.Vector3(),
+                           new T.Vector3(), new T.Vector3(), new T.Vector3() ] };
+    var uSunCol = { value: new T.Vector3(0, 0, 0) };
+    var uSunDirV= { value: new T.Vector3(0, 1, 0) };
+    var uProjY  = { value: 2.6 };
+    var uAmp    = { value: 1.0 };
+    var uSkyGain= { value: 0.86 };
+    var uGlint  = { value: 1.20 };
+    var uFog    = { value: new T.Vector3(0, 0, 0) };
+    var uHaze   = { value: 0.75 };
+    var uTime   = { value: 0 };
+    var uSpark  = { value: 0.20 };
+    var uCaus   = { value: 0.72 };
+
+    /* 方向波。波長は互いに非通約(26 / 11.5 / 6.4m)。ノガトは大河なので
+     * ボディアムの堀(15 / 6.6 / 4.2m)より一回り長い。 */
+    var WAVES = [
+      { dx:  0.9406, dz:  0.3395, lam: 26.0, amp: 0.150, spd: 0.72 },
+      { dx: -0.4191, dz:  0.9080, lam: 11.5, amp: 0.085, spd: 0.58 },
+      { dx:  0.7779, dz: -0.6283, lam:  6.4, amp: 0.042, spd: 0.46 }
+    ];
+    /* 焦線の正規化係数。-Laplacian(h) = Σ A k^2 sin(位相) の最大値。 */
+    var W_CAUS_NORM = (function(){
+      var t = 0;
+      for (var i=0;i<WAVES.length;i++){
+        var k = 2*Math.PI/WAVES[i].lam;
+        t += WAVES[i].amp * k * k;
+      }
+      return t;
+    })();
+    /* GLSL は JS のテーブルから組み立てる。数値を2か所に書くと必ずずれる。
+     * px / pz はワールド xz を入れる式(ここでは vUv から作る)。 */
+    function waveGLSL(px, pz){
+      var out = [];
+      for (var i=0;i<WAVES.length;i++){
+        var w = WAVES[i], k = 2*Math.PI/w.lam, om = k*w.spd;
+        out.push(
+          '  { float wp = ' + (w.dx*k).toFixed(6) + ' * ' + px + ' + ' +
+                              (w.dz*k).toFixed(6) + ' * ' + pz + ' - ' +
+                              om.toFixed(6) + ' * uWTime;',
+          '    wWC += ' + (w.amp*k*k).toFixed(6) + ' * sin( wp );',
+          '    wWG += ( ' + (w.amp*k).toFixed(6) + ' * cos( wp ) ) * vec2( ' +
+                            w.dx.toFixed(4) + ', ' + w.dz.toFixed(4) + ' ); }'
+        );
+      }
+      return out;
+    }
+
+    function mpInstall(sh){
+      var SPM = '#include <specularmap_fragment>',
+          NFM = '#include <normal_fragment_maps>',
+          FOG = '#include <fog_fragment>';
+      var fs = sh.fragmentShader;
+      /* 差し替え対象のチャンク名は three のバージョンに依存する。3つとも
+       * 見つかったときだけ差し込む。1つでも欠けた状態で残りを入れると
+       * 未定義の変数を参照する GLSL になり、水面が真っ黒 + コンソール
+       * エラーになる(ボディアムの前任者が踏んだ罠をそのまま踏襲)。 */
+      if (fs.indexOf(SPM) < 0 || fs.indexOf(NFM) < 0 || fs.indexOf(FOG) < 0) return;
+
+      sh.uniforms.uWN2 = uN2;         sh.uniforms.uWN3 = uN3;
+      sh.uniforms.uWOff1 = uOff1;     sh.uniforms.uWOff2 = uOff2;   sh.uniforms.uWOff3 = uOff3;
+      sh.uniforms.uWSky = uSky;       sh.uniforms.uWSunCol = uSunCol;
+      sh.uniforms.uWSunDirV = uSunDirV;
+      sh.uniforms.uWProjY = uProjY;   sh.uniforms.uWAmp = uAmp;
+      sh.uniforms.uWSkyGain = uSkyGain; sh.uniforms.uWGlint = uGlint;
+      sh.uniforms.uWFog = uFog;       sh.uniforms.uWHaze = uHaze;
+      sh.uniforms.uWTime = uTime;     sh.uniforms.uWSpark = uSpark;
+      sh.uniforms.uWCaus = uCaus;
+
+      /* 前置き。uWSky のストップ位置は 11-environment.js の SKY_STOPS_POS
+       * と同じ [0, .30, .52, .68, .84, 1]。clamp した線形ランプを mix で
+       * 連鎖させると区分線形グラデーションと厳密に一致する。
+       * viewMatrix / cameraPosition は three が fragment prefix で宣言済み
+       * なので、ここで再宣言してはならない。 */
+      fs = [
+        'uniform sampler2D uWN2;',
+        'uniform sampler2D uWN3;',
+        'uniform vec2 uWOff1;',
+        'uniform vec2 uWOff2;',
+        'uniform vec2 uWOff3;',
+        'uniform vec3 uWSky[6];',
+        'uniform vec3 uWSunCol;',
+        'uniform vec3 uWSunDirV;',
+        'uniform float uWProjY;',
+        'uniform float uWAmp;',
+        'uniform float uWSkyGain;',
+        'uniform float uWGlint;',
+        'uniform vec3 uWFog;',
+        'uniform float uWHaze;',
+        'uniform float uWTime;',
+        'uniform float uWSpark;',
+        'uniform float uWCaus;',
+        'float wRamp( float a, float b, float p ){ return clamp( ( p - a ) / ( b - a ), 0.0, 1.0 ); }',
+        'vec3 wSkyAt( float p ){',
+        '  vec3 c = mix( uWSky[0], uWSky[1], wRamp( 0.00, 0.30, p ) );',
+        '  c = mix( c, uWSky[2], wRamp( 0.30, 0.52, p ) );',
+        '  c = mix( c, uWSky[3], wRamp( 0.52, 0.68, p ) );',
+        '  c = mix( c, uWSky[4], wRamp( 0.68, 0.84, p ) );',
+        '  c = mix( c, uWSky[5], wRamp( 0.84, 1.00, p ) );',
+        '  return c;',
+        '}'
+      ].join('\n') + '\n' + fs;
+
+      // 1) Phong の鏡面ローブを完全に殺す。専用の specular 項は書かない。
+      fs = fs.replace(SPM, 'float specularStrength = 0.0;');
+
+      /* 2) 法線。水面は完全な水平面なので perturbNormal2Arb(画面空間
+       * 微分から TBN を推定する近似)を通す必要が無い。uv.x = worldX,
+       * uv.y = -worldZ なので T = +X, B = -Z, N = +Y、つまり
+       *   Nworld = ( s.x, 1, -s.y )
+       * 3枚の法線マップ(34 / 13 / 5.5m)に、解析的な方向波の傾きを足す。
+       * ノイズ3枚は等方なので「まだらな染み」にしかならないが、方向波は
+       * 稜線を持つので真上から見ても波が線として読める。 */
+      fs = fs.replace(NFM, [
+        /* 重みはボディアムの実測値をそのまま(焼いた法線マップの |xy|
+         * 中央値 0.082 / 0.079 / 0.117 に対する係数)。 */
+        /* ★遠景の帯域制限。この城の視距離は 70-940m もあり、細かい波は
+         * 遠くで 1 波長が 2 画素を切って必ずモアレになる(最初の焼き
+         * 上げでは 680m の引きの絵で川が「トタン板」に見えた)。
+         * ミップマップが効く法線マップと違って、解析的な正弦波には
+         * フィルタが無いので自分で落とすしかない。細かい成分ほど早く
+         * 落とす -- 60m から 460m にかけて、細波は 8%、方向波は 12% まで。*/
+        /* 距離だけでなく **視線の伏せ角** も効く。1画素が水面に落とす
+         * フットプリントは 距離 / (up・V) に比例するので、水平近くから
+         * 見た遠くの水面では 1 画素が何十メートルもの水面を覆う。実際、
+         * 距離だけで落としていた版は夕方(仰角14度)の引きの絵で川が
+         * 「編んだ茣蓙」の格子に見えた -- 距離減衰はすでに底を打って
+         * いたのに、残った 45% の傾きがフレネルの立った浅い角度で拡大
+         * されていたため。フットプリントで測ると正しく落ちる。 */
+        '  float wD0  = length( vViewPosition );',
+        '  float wGrz = clamp( dot( normalize( mat3( viewMatrix )[ 1 ] ), normalize( vViewPosition ) ), 0.0, 1.0 );',
+        '  float wFoot = wD0 / max( wGrz, 0.03 );',
+        '  float wAt = 1.0 - clamp( ( wFoot - 120.0 ) / 900.0, 0.0, 1.0 );',
+        '  float wA2 = 0.25 + 0.75 * wAt;',      // 中スケール
+        '  float wA3 = 0.06 + 0.94 * wAt * wAt;',// 細スケール(フットプリントの2乗で落とす)
+        '  vec2 wS  = ( texture2D( normalMap, vUv * 0.02941 + uWOff1 ).xy * 2.0 - 1.0 ) * 1.30;',
+        '  wS      += ( texture2D( uWN2,      vUv * 0.07692 + uWOff2 ).xy * 2.0 - 1.0 ) * 0.80 * wA2;',
+        '  wS      += ( texture2D( uWN3,      vUv * 0.18182 + uWOff3 ).xy * 2.0 - 1.0 ) * 0.50 * wA3;',
+        /* さらに全体を距離で凪がせる。遠くの水面は実際にもさざ波が
+         * 平均化されて凪いで見える。 */
+        '  wS *= uWAmp * ( 0.25 + 0.75 * wAt );',
+        /* 方向波を vUv(= メートル)から解析的に。vUv.y = -worldZ なので
+         * ワールド z は -vUv.y。 */
+        '  float wWC = 0.0; vec2 wWG = vec2( 0.0 );'
+      ].concat(waveGLSL('vUv.x', '( -vUv.y )')).concat([
+        '  float wAw = ( 0.10 + 0.90 * wAt ) * uWAmp;',
+        '  wWC *= wAw * ' + (1/W_CAUS_NORM).toFixed(4) + ';',
+        '  wS += vec2( -wWG.x, wWG.y ) * wAw;',
+        '  vec3 wNW = normalize( vec3( wS.x, 1.0, -wS.y ) );',
+        '  normal = normalize( mat3( viewMatrix ) * wNW );'
+      ]).join('\n'));
+
+      /* 3) 合成。fog の直前なので gl_FragColor には拡散光だけが入って
+       * いる(= 水中の色。時間帯で変わる CUR_TIME.waterColor 由来)。 */
+      fs = fs.replace(FOG, [
+        '  vec3  wUp  = normalize( mat3( viewMatrix )[ 1 ] );',   // ワールド +Y のビュー空間での向き
+        '  vec3  wV   = normalize( vViewPosition );',
+        '  float wNdv = clamp( dot( normal, wV ), 0.0, 1.0 );',
+        /* 濁った水の「見かけの深さ」。視線側に傾いた波面は水中を通る
+         * 距離が短くなるので明るく、逆に傾けば暗く見える。平らな面で
+         * 差が 0 になるよう、同じ視線に対する「傾いていない場合の N・V」
+         * との差だけを使う(視点に依らない)。 */
+        '  float wFlt = clamp( dot( wUp, wV ), 0.0, 1.0 );',
+        /* ★ゲインはボディアム(x6.0 / 上限 0.30)から落としてある。
+         * ボディアムの堀は 44m 角を至近から見るが、ノガトは 204m x 2180m
+         * で引きの絵に大きく写る。x6.0 のままだと法線マップのわずかな傾き
+         * でこの項が常に上下限に張り付き、川が「コーデュロイ」の畝に
+         * 見えた(実測: 680m の引きで高コントラストの斜め縞)。 */
+        '  gl_FragColor.rgb *= 1.0 + clamp( ( wNdv - wFlt ) * 3.5, -0.20, 0.20 );',
+        /* 焦線。上の屈折項は真上から見ると必ず暗くなる方向にしか動か
+         * ないので、これが無いと水面は「暗いシミ」ばかりになる。
+         * -Laplacian(h) は峰で正・谷で負の **対称な** 変化なので、
+         * 初めて「波の筋」として読める。 */
+        '  gl_FragColor.rgb *= 1.0 + uWCaus * wWC;',
+        '  vec3  wR   = reflect( -wV, normal );',
+        '  float wP   = clamp( 0.5 - 0.5 * ( uWProjY * wR.y / max( -wR.z, 1e-3 ) ), 0.0, 1.0 );',
+        '  float wF   = 0.02 + 0.98 * pow( 1.0 - wNdv, 5.0 );',
+        '  float wSd  = max( dot( wR, uWSunDirV ), 0.0 );',
+        /* 反射光路のかすみ。反射ベクトルが水平に近いほど長い大気を通って
+         * 来た光なので霧色へ寄る。これを入れないと「浅い角度で水が暗い」
+         * 絵になる -- 地平線の帯を作っているのは scene.fog.color の方な
+         * ので、そこへ寄せて初めて水平線で色が繋がる。 */
+        '  float wRy  = dot( wR, wUp );',
+        '  float wHz  = ( 1.0 - clamp( wRy * 4.0, 0.0, 1.0 ) ) * uWHaze;',
+        /* 太陽は「空側に置いた円板」で、専用の specular 項ではない。
+         * 芯 pow(sd,160) + 裾 pow(sd,16)。上限は clamp で押さえて白飛びを
+         * 防ぐ。 */
+        '  vec3  wGl  = min( uWSunCol * uWGlint * ( pow( wSd, 160.0 ) + 0.30 * pow( wSd, 16.0 ) ), vec3( 0.95 ) );',
+        '  vec3  wRef = mix( wSkyAt( wP ) * uWSkyGain, uWFog, wHz ) + wGl;',
+        '  gl_FragColor.rgb = mix( gl_FragColor.rgb, wRef, wF );',
+        /* 真上寄りの視点では wF が 0.02 まで落ち、上の mix ではきらめきが
+         * 1/50 に潰れて見えない。太陽を映す向きに立った波面だけが光る項
+         * なので、フレネルの外側にも一定割合を足す。 */
+        '  gl_FragColor.rgb += wGl * ( uWSpark * ( 1.0 - wF ) );',
+        '  gl_FragColor.a = clamp( gl_FragColor.a + wF * 0.20, 0.0, 1.0 );',
+        /* 水面だけの白飛び止め。このビューアはトーンマッピングを掛けて
+         * いない = gl_FragColor がほぼそのまま 0-255 になるので、水面の
+         * 出力だけ 0.96 (245/255) で頭を打たせておけば、きらめきの形を
+         * 保ったまま水が 254 に到達しなくなる。fog はこのあと霧色へ
+         * 寄せるだけなので、この上限を破らない。 */
+        '  gl_FragColor.rgb = min( gl_FragColor.rgb, vec3( 0.96 ) );',
+        '#include <fog_fragment>'
+      ].join('\n'));
+
+      sh.fragmentShader = fs;
+    }
+    riverMat.onBeforeCompile = mpInstall;
+    moatWaterMat.onBeforeCompile = mpInstall;
+    riverMat.customProgramCacheKey =
+      moatWaterMat.customProgramCacheKey = function(){ return 'malbork-water-fresnel-v1'; };
+    riverMat.needsUpdate = moatWaterMat.needsUpdate = true;
+
+    /* ---- 毎フレームの更新(すべて絶対時刻 t の純関数) -------------- */
+    var _wSkyC = new T.Color(), _wGray = new T.Color(), _wSunV = new T.Vector3();
+    /* paintSky と同じ彩度落とし(共有ファイルを変えないためのローカル
+     * コピー。式を変えると空と水で彩度がずれるので必ず同じにする)。 */
+    function wDesat(c, satMul){
+      if (satMul >= 0.999) return c;
+      var lum = c.r*0.299 + c.g*0.587 + c.b*0.114;
+      _wGray.setRGB(lum, lum, lum);
+      c.lerp(_wGray, 1 - satMul);
+      return c;
+    }
+    ANIM.push(function(t, e){
+      var rain = e.rain || 0;
+      var sp = 1 + rain * 1.30;
+      uAmp.value = 1 + rain * 0.80;
+      // 単位はタイル/秒。実速度 = 速度 x タイル実寸 -> 0.10 / 0.17 / 0.26 m/s
+      uOff1.value.set(  t * 0.00294 * sp,  t * 0.00174 * sp );
+      uOff2.value.set( -t * 0.01000 * sp,  t * 0.00862 * sp );
+      uOff3.value.set(  t * 0.01939 * sp, -t * 0.04364 * sp );
+      uTime.value = t * sp;
+
+      if (typeof camera !== 'undefined' && camera && camera.projectionMatrix){
+        // 反射ベクトルを画面 v へ落とすのに使う縦方向の投影係数
+        uProjY.value = camera.projectionMatrix.elements[5];
+      }
+      /* 霧色。11-environment.js が毎フレーム天候の彩度落としまで済ませて
+       * scene.fog.color に入れているので、それをそのまま読む(= 山や
+       * 遠景と完全に同じ色。だから水平線で必ず繋がる)。 */
+      if (typeof scene !== 'undefined' && scene && scene.fog){
+        uFog.value.set(scene.fog.color.r, scene.fog.color.g, scene.fog.color.b);
+      }
+      if (typeof CUR_TIME !== 'undefined' && CUR_TIME){
+        var sat = (typeof CUR_WEATHER !== 'undefined' && CUR_WEATHER && CUR_WEATHER.skySatMul != null)
+                  ? CUR_WEATHER.skySatMul : 1;
+        if (CUR_TIME.sky){
+          for (var i=0;i<6;i++){
+            _wSkyC.copy(CUR_TIME.sky[i]);
+            wDesat(_wSkyC, sat);
+            uSky.value[i].set(_wSkyC.r, _wSkyC.g, _wSkyC.b);
+          }
+        }
+        /* ★向きは 11-environment.js の sunAnchorDir をそのまま使う。
+         * このビューアの太陽円板と光芒は「仰角をクランプした見かけの
+         * 方向」に描かれている。水面のきらめきは太陽の鏡像なので、円板と
+         * 別の向きで計算すると縦にずれて一目で嘘だと分かる。 */
+        var sk = (CUR_TIME.sunIntensity != null ? CUR_TIME.sunIntensity : 1) * (e.sunMul != null ? e.sunMul : 1);
+        var sc = CUR_TIME.sunColor;
+        if (sc) uSunCol.value.set(sc.r * sk, sc.g * sk, sc.b * sk);
+        if (CUR_TIME.sunPos && typeof camera !== 'undefined' && camera){
+          if (typeof sunAnchorDir === 'function') sunAnchorDir(_wSunV);
+          else _wSunV.copy(CUR_TIME.sunPos).normalize();
+          _wSunV.transformDirection(camera.matrixWorldInverse);
+          uSunDirV.value.copy(_wSunV);
+        }
+      }
+    });
+  })();
+
+  /* ---- UV を持たないジオメトリに UV を生やす ----------------------
+   * ★これが無いとテクスチャが「1テクセルの単色」になる。
+   * この城は drawCall を減らすために溶接ジオメトリを多用している
+   * (mpBoxSoup で城壁を1本のメッシュに融合、mpTerrainStrip で川岸の
+   * 段丘を1枚に押し出す、アーチのリブ、動物の体…)。それらは
+   * position / normal / index しか作っていない。
+   * three は USE_UV が立つと `attribute vec2 uv;` を要求し、属性が無い
+   * バッファでは全頂点 (0,0) になるので、**メッシュ全体がテクスチャの
+   * 左上 1 テクセルで塗りつぶされる**(色は付くのでパッと見は気付かない
+   * が、レンガの目地も瓦の段も一切出ない)。
+   * 工房側(js/02-texture.js の uvWorldize)は uv が無ければ何もせずに
+   * 帰る -- そこを変えると他4城の溶接メッシュの見え方まで変わって
+   * しまうので、**この城の中で** 空の uv 属性を用意してから
+   * applyWorldUVs に平面投影を書かせる。 */
+  (function mpEnsureUVs(){
+    var made = 0;
+    group.traverse(function(o){
+      if (!o.isMesh || !o.material) return;
+      if (!o.material.userData || !o.material.userData.uvDensity) return;
+      var g = o.geometry;
+      if (!g || !g.attributes || !g.attributes.position) return;
+      if (g.attributes.uv) return;
+      g.setAttribute('uv', new T.Float32BufferAttribute(
+        new Float32Array(g.attributes.position.count * 2), 2));
+      made++;
+    });
+    return made;
+  })();
+
+  /* ---- テクスチャ密度に合わせて UV をメートル単位へ書き直す --------
+   * すべてのメッシュを組み終えた **あと** に1回だけ走らせる。
+   * 水面は uvDensity を持たないので素通りする(上で自前に書いた
+   * メートル UV は保存される)。 */
+  applyWorldUVs(group);
+
   var MODEL_CZ = (LC_Z1 + OB_SZ) / 2;
   var ZOFF = -MODEL_CZ;
   root.position.z = ZOFF;

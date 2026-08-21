@@ -38,8 +38,22 @@
  *     .tex            テクスチャセット。キー:
  *                     stone / roof / wood / pave / turf / plaster /
  *                     straw / soil / cloth  … { map, normal, metres }
+ *                     brick                       … opt-in(下記)
  *                     waterN1 / waterN2 / waterN3 … THREE.Texture(法線)
  *                     smoke / flag                … THREE.Texture
+ *
+ *  ■ opt-in の kind: brick(レンガ)
+ *     kit(opts) に **brick を渡したときにだけ** 焼かれる。渡さない城の
+ *     cacheKey は変わらないので、既存4城のテクスチャは一切影響を受け
+ *     ない。中身はフランドル積み(長手と小口を交互 + 段ごとに半周期
+ *     ずらし + 焼過ぎ小口)で、makeStone のランダム幅・ランダム位相とは
+ *     構造そのものが違う。詳細は makeBrick の頭のコメント。
+ *       brick: { metres: 1.7, courses: 16, periods: 4, mortar: '#e0dccf', … }
+ *
+ *  ■ roof の seams(既定 1)
+ *     1タイルに引く横の継ぎ手の本数。鉛葺きは板が長いので 1 のまま
+ *     (= 切り出し前と同一出力)。**瓦(pantile)は 30cm ごとに段が来る**
+ *     ので、タイル実寸を詰めずに段の密度だけ上げたいときに 2 以上を渡す。
  *     .texMat(colorHex, kind, opt)
  *                     テクスチャ付き MeshPhongMaterial を作る唯一の入口。
  *                     opt.nrm     素材どうしの相対的な法線の深さ(既定 1.0、
@@ -473,6 +487,158 @@ var CastleTex = (function(){
   }
 
   /* ============================================================ *
+   * 1b. レンガ -- ゴシックのフランドル積み(opt-in の追加 kind)
+   * ============================================================ *
+   * 【なぜ makeStone のパラメータでは足りなかったか】
+   * makeStone は「段ごとに幅の合計が N になるまでランダム幅の切石を
+   * 並べ、段の位相もランダムにずらす」。blockW を細かくすれば石は小さく
+   * なるが、**幅がばらばらで位相もばらばら**という構造は変わらない。
+   * それは切石積み(ashlar)の定義そのもので、レンガとは逆である。
+   * レンガの読みを決めているのは大きさではなく
+   *   (1) 単位が完全に均一(長手 ≒ 小口x2 + 目地)
+   *   (2) 段ごとに「ちょうど半単位」ずれる = 目地が縦一直線に並ぶ
+   *   (3) 目地が面より **明るい**(石灰目地 対 赤レンガ。石積みは逆)
+   *   (4) 焼過ぎで黒光りする小口(zendrówka)がまだらに混じる
+   *       -- マルボルクの壁面の斑はこれが正体で、風化の染みではない
+   * の4点で、(1)(2)(4) は makeStone の乱数構造とは相容れない。だから
+   * kind を分けた。
+   *
+   * 【既存 kind への影響をゼロにするために】
+   * BRICK_DEF は DEF の *外* に置いてある。resolve() は opts.brick が
+   * 与えられたときだけ P.brick を生やすので、レンガを使わない城では
+   *   - resolve() の戻り値のキーが増えない
+   *   - したがって cacheKey(JSON)も1文字も変わらない
+   *   - bake() も makeBrick を呼ばない
+   * ボディアム/ヴァンセンヌ/ボーマリス/カステル・デル・モンテは、この
+   * 追加を入れる前とまったく同じテクスチャを同じキーで共有し続ける。
+   *
+   * 【実寸】既定 256px = 1.70m。1段 10.6cm(実物のクロスターフォーマート
+   * は厚さ 9cm + 目地 1.5cm)、周期 42.5cm = 長手 28.3cm + 小口 14.2cm。
+   * 実測写真のマルボルクとほぼ同じ密度になる。 */
+  var BRICK_DEF = {
+    px: 256, metres: 1.70, courses: 16, periods: 4, ratio: 2.0, seed: 0x8B12C7,
+    /* 目地は面より明るい。ここが石積みと決定的に違う所なので、
+     * normaliseMean の頭打ちに当てないよう mean 側で余裕を見ておく
+     * (下の makeBrick の注記を参照)。 */
+    mortar: '#f0ece0', mortarH: 0.24,
+    joint: 1.15,                                // 目地の半幅(px)= 実寸 1.5cm
+    faceLum: [150, 78], faceRGB: [0, -3, -9],   // 面の明度 [基準, 振れ幅] と RGB オフセット
+    /* 焼過ぎ小口: 窯の火に近かった小口が黒く硝子化したもの。マルボルク
+     * では意図的に模様(ダイアパー)として見せている。小口だけに出す。 */
+    darkP: 0.20, darkMul: [0.48, 0.30],
+    edgeHi: 'rgba(255,255,255,0.20)', edgeLo: 'rgba(38,26,18,0.40)',
+    bevel: 1.6, faceH: [0.76, 0.14],
+    gritSeed: 0x2C71, gritSpec: [[40,1.0],[92,0.5]], gritH: 0.09,
+    stainSeed: 0x64B9, stainSpec: [[3,1.0],[7,0.55],[16,0.28]],
+    stainMul: [0.90, 0.20], stainH: 0.06,
+    tint: [1.0, 0.99, 0.975],
+    mean: 0.76, nrm: 3.4
+  };
+
+  /* レンガごとの乱数は「並べた順に LCG を引く」のではなく、(段, 位置) の
+   * 整数ハッシュから引く。理由: 1段あたりの引く回数が固定(= 一定ストライド)
+   * だと、LCG は x_{n+s} が x_n のアフィン関数になるので **段をまたいで
+   * 相関が残り、焼過ぎ小口が縦一列に並んでしまう**(実際に最初の焼き上げで
+   * そうなった)。ハッシュならストライド相関が出ない。 */
+  function bhash(a, b, s){
+    var x = (Math.imul(a|0, 374761393) + Math.imul(b|0, 668265263) + (s|0)) | 0;
+    x = (x ^ (x >>> 13)) | 0;
+    x = Math.imul(x, 1274126177);
+    return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+  }
+
+  function makeBrick(P){
+    var N = P.px, C = P.courses;
+    var a = cvs(N), A = a.getContext('2d');
+    var hgt = new Float32Array(N*N);
+
+    A.fillStyle = P.mortar; A.fillRect(0,0,N,N);
+    for (var i=0;i<hgt.length;i++) hgt[i] = P.mortarH;
+
+    /* 1周期 = 長手1本 + 小口1本。periods 本ちょうどで N を割り切るので
+     * 横方向は必ず継ぎ目なくタイルできる。段は交互に半周期ずらす
+     * -- これで小口の中心が下の段の長手の中心に載る(フランドル積みの
+     * 定義)。makeStone のランダム位相と違い、ずれは常にちょうど半周期
+     * なので、目地が縦方向に規則正しく並ぶ。 */
+    var PER = N/P.periods;
+    var HW  = PER/(1 + P.ratio);              // 小口 header
+    var SW  = PER - HW;                       // 長手 stretcher
+    var J   = P.joint;
+    var C2  = (C % 2) ? C+1 : C;              // 段数は偶数でないと上下端で位相が衝突する
+    var ch2 = N/C2;
+
+    var units = [];
+    for (var c=0;c<C2;c++){
+      var phase = (c & 1) ? PER*0.5 : 0;
+      for (var k=0;k<P.periods;k++){
+        var x0 = phase + k*PER;
+        units.push({ x:((x0%N)+N)%N,      y:c*ch2, w:SW, h:ch2, hdr:false, c:c, k:2*k   });
+        units.push({ x:(((x0+SW)%N)+N)%N, y:c*ch2, w:HW, h:ch2, hdr:true,  c:c, k:2*k+1 });
+      }
+    }
+
+    units.forEach(function(b){
+      var v = P.faceLum[0] + Math.floor(bhash(b.c, b.k, P.seed)*P.faceLum[1]);
+      /* 焼過ぎ小口。dk は 0..1 の一様値。dk < darkP の小口だけが黒くなり、
+       * 暗さは dk を darkP で割り戻した値で散らす(全部同じ黒だと
+       * 「塗った」ように見える)。 */
+      var dk = bhash(b.c, b.k, P.seed ^ 0x5AC31);
+      var mul = (b.hdr && dk < P.darkP)
+              ? (P.darkMul[0] + (dk/P.darkP)*P.darkMul[1]) : 1.0;
+      var vr = Math.round((v+P.faceRGB[0])*mul),
+          vg = Math.round((v+P.faceRGB[1])*mul),
+          vb = Math.round((v+P.faceRGB[2])*mul);
+      A.fillStyle = 'rgb('+vr+','+vg+','+vb+')';
+      fillWrap(A, N, b.x+J, b.y+J, b.w-2*J, b.h-2*J);
+      A.fillStyle = P.edgeHi;                                 // 上端の受光
+      fillWrap(A, N, b.x+J, b.y+J, b.w-2*J, 1.1);
+      A.fillStyle = P.edgeLo;                                 // 下端の落ち影
+      fillWrap(A, N, b.x+J, b.y+b.h-J-1.4, b.w-2*J, 1.4);
+    });
+
+    /* 高さ: レンガは切石ほど角が丸くないので面取りは 2px 程度。面の
+     * 出入りも小さい(型で抜いているので厚みが揃っている)。 */
+    var BEV = P.bevel;
+    units.forEach(function(b){
+      var hv = P.faceH[0] + bhash(b.c, b.k, P.seed ^ 0x1D77B)*P.faceH[1];
+      var bx0 = b.x+J, bx1 = b.x+b.w-J, by0 = b.y+J, by1 = b.y+b.h-J;
+      for (var yy=Math.ceil(by0); yy<by1; yy++){
+        for (var xx=Math.ceil(bx0); xx<bx1; xx++){
+          var e = Math.min(1, Math.min(Math.min(xx-bx0, bx1-xx),
+                                       Math.min(yy-by0, by1-yy)) / BEV);
+          e = e*e*(3-2*e);
+          hgt[((((yy%N)+N)%N)*N) + (((xx%N)+N)%N)] = P.mortarH + (hv - P.mortarH) * (0.55 + 0.45*e);
+        }
+      }
+    });
+
+    var grit  = octaves(N, P.gritSeed,  P.gritSpec);          // 焼き肌のざらつき
+    var stain = octaves(N, P.stainSeed, P.stainSpec);         // 雨だれ・苔の低周波
+    var im = A.getImageData(0,0,N,N), d = im.data;
+    for (var p=0;p<N*N;p++){
+      var s = stain[p];
+      var m2 = P.stainMul[0] + s*P.stainMul[1];
+      d[p*4]   = Math.min(255, d[p*4]  *(m2*P.tint[0]));
+      d[p*4+1] = Math.min(255, d[p*4+1]*(m2*P.tint[1]));
+      d[p*4+2] = Math.min(255, d[p*4+2]*(m2*P.tint[2]));
+      hgt[p] = Math.max(0, Math.min(1,
+        hgt[p] + (s-0.5)*P.stainH + (grit[p]-0.5)*P.gritH));
+    }
+    A.putImageData(im,0,0);
+    /* ★白飛び予算: 目地が面より明るい素材なので、normaliseMean が平均を
+     * 押し上げると **一番明るい目地から先に 255 で頭を打つ**。頭打ちする
+     * と目地/面のコントラストが失われて、せっかくの「明るい目地」が
+     * ただの白い格子になる。条件は おおよそ
+     *     mortar * mean <= 目地面積比*mortar + 残り*面の平均
+     * になる。既定値(mortar 236 / 面の平均 ≒ 189 / 目地の面積 12%)では
+     * mean 0.76 で焼いた画像の飽和画素が 3.7%(= 目地の峰だけ)。0.86 まで
+     * 上げると 16% になり、目地が「白い格子」に潰れる。mean を上げるときは
+     * 必ず焼いた画像を目視すること -- 数字だけでは潰れに気付けない。 */
+    normaliseMean(a, P.mean);
+    return { map: mkTex(a), normal: mkTex(bakeNormal(heightCanvas(N,hgt), P.nrm)), metres: P.metres };
+  }
+
+  /* ============================================================ *
    * 2. 屋根 -- 鉛葺きの立ちはぜ(standing seam)+ 板の継ぎ目
    * ============================================================ *
    * ROOF_COL / roofCaps はどちらもグレー = 鉛葺きの読み。128px = 1.8m。
@@ -504,9 +670,18 @@ var CastleTex = (function(){
       if (hgt[sy*N+sx] === 0.50)
         hgt[sy*N+sx] = 0.50 - 0.15 * Math.sin(Math.PI * ((sx % rw) / rw));
     }
-    A.fillStyle = P.seam;                                   // 横の継ぎ手(板の重ね)
-    A.fillRect(0, N-3, N, 3);
-    for (var yy2=N-3; yy2<N; yy2++) for (var xx2=0; xx2<N; xx2++) hgt[yy2*N+xx2] = 0.24;
+    /* 横の継ぎ手(板の重ね)。既定 seams=1 = タイル下端に1本 = 切り出し
+     * 前とまったく同じ。seams>1 を渡すと 1タイルに複数本引く -- 鉛葺きは
+     * 板が長いので 1本でよいが、**瓦(pantile)は 30cm ごとに段が来る**
+     * ので、瓦としてタイル寸を詰めずに段の密度だけ上げられるようにした。
+     * seams=1 のとき y0 = N-3 になるので既存の城の出力は 1px も動かない。*/
+    var SEAMS = P.seams || 1;
+    for (var sm=0; sm<SEAMS; sm++){
+      var sy0 = Math.round((sm+1)*N/SEAMS) - 3;
+      A.fillStyle = P.seam;
+      A.fillRect(0, sy0, N, 3);
+      for (var yy2=sy0; yy2<sy0+3; yy2++) for (var xx2=0; xx2<N; xx2++) hgt[yy2*N+xx2] = 0.24;
+    }
     // 鉛の緩い波打ちと汚れ
     var w = octaves(N, P.seed, P.warpSpec);
     var im = A.getImageData(0,0,N,N), d = im.data;
@@ -959,13 +1134,17 @@ var CastleTex = (function(){
         P[k] = (opts[k] != null ? opts[k] : base);
       }
     }
+    /* opt-in の kind。**opts に無ければキーごと生やさない** ので、
+     * レンガを使わない城の cacheKey は 1 文字も変わらない(= 既存4城の
+     * テクスチャは同じキーで同じセットを共有し続ける)。 */
+    if (opts.brick) P.brick = shallow(BRICK_DEF, opts.brick);
     return P;
   }
 
   /* ---- テクスチャセットの生成 ------------------------------------- */
   function bake(P){
     ANISO = P.aniso;
-    return {
+    var out = {
       stone: makeStone(P.stone), roof: makeRoof(P.roof), wood: makeWood(P.wood),
       pave: makePave(P.pave), turf: makeTurf(P.turf),
       /* 内装用。外壁の石積みをそのまま流用すると内壁が外壁のコピーに
@@ -977,6 +1156,9 @@ var CastleTex = (function(){
       waterN3: makeWaterNormal(P.water[2].seed, P.water[2].nrm, P.water[2].spec, P.water[2].px),
       smoke: makeSmoke(P.smoke), flag: makeFlag(P.flag)
     };
+    /* opt-in。P.brick は kit(opts) に brick が渡されたときにしか生えない。*/
+    if (P.brick) out.brick = makeBrick(P.brick);
+    return out;
   }
 
   /* ---- キャッシュ --------------------------------------------------
