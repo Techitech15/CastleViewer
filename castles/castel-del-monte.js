@@ -94,7 +94,14 @@ function buildCastelDelMonte(){
   var pickables = [];
 
   function makeFadeGroup(name, dir, isRoof, colorHex){
-    var mat = new T.MeshLambertMaterial({ color: colorHex });
+    /* 壁・塔は切石(stone)、屋根は石畳(pave)。この城の屋根は瓦でも
+     * 鉛葺きでもなく「石を敷いたテラス」なので、共有工房の 'roof'
+     * (鉛の立ちはぜ)ではなく不定形の板石 'pave' を使う。
+     * Lambert -> Phong(shininess 0 / specular 黒)に変わるが、
+     * カットアウェイが触るのは .opacity / .transparent / .depthWrite
+     * だけなので、フェードの挙動は Lambert のときと同一。 */
+    var mat = isRoof ? texMat(colorHex, 'pave', { nrm: 0.40 })
+                     : texMat(colorHex, 'stone', { nrm: 1.0 });
     var g = new T.Group();
     g.name = name;
     group.add(g);
@@ -193,38 +200,134 @@ function buildCastelDelMonte(){
   var HILL_SCRUB   = 0x3e4b27; // 風衝低木(明)。中景の木より沈んだオリーブ系の緑
   var HILL_SCRUB_D = 0x333e1f; // 風衝低木(暗)
 
+  /* ================================================================ *
+   * 手続き的テクスチャ -- 共有工房 CastleTex(js/02-texture.js)
+   * ================================================================ *
+   * 既定値はボディアム(サセックスの風化した砂岩)。この城は正反対で、
+   * フリードリヒ2世が精緻に整形させた**端正な切石**なので、既定から
+   * 次の方向へ振ってある。撮り比べながら決めた値の根拠を残す:
+   *
+   *  (a) 目地を細く   joint 1.5px -> 1.0px(タイル実寸 2.6m / 256px な
+   *      ので 1px ≒ 1.0cm。既定の約3cm幅から約2cm幅へ)。実物写真
+   *      (Commons: "11 Castel del Monte (Andria), façana sud-est.jpg")
+   *      では目地はほとんど線にしか見えない。
+   *  (b) 面取りを浅く bevel 5.0px -> 2.6px。稜が丸いと風化した粗石に
+   *      見える。この城の石は角が立っている。
+   *  (c) 風化の斑を弱く stainMul [0.84,0.30] -> [0.94,0.11]、
+   *      のみ跡の高さ toolH 0.11 -> 0.055。既定のままだと面が
+   *      まだらに汚れ、「粗く風化した石」に読めてしまう。
+   *  (d) 石の高さの散らばりを抑える faceH [0.72,0.26] -> [0.80,0.11]。
+   *      切石は面が揃っている。
+   *  (e) 石の寸法 タイル 2.6m を 7 段 = 1段 0.37m、ブロック幅 0.78-1.21m。
+   *      写真で数えた段数(壁高19.8m におよそ50段)と整合する。
+   *  (f) 全体の法線ブースト 1.70 -> 1.28。既定のままだと平滑なはずの
+   *      面が凸凹に見えた(1周目のスクリーンショットで実測)。
+   *
+   *  屋根は 'roof'(鉛の立ちはぜ)ではなく 'pave'(不定形の板石)。
+   *  この城の屋根は瓦も切妻も持たない「石を敷いたテラス」なので、
+   *  立ちはぜの縦線が出ると別の建物になってしまう。
+   *
+   *  plaster は既定の 3.2m から 2.9m へ。石(2.6m)と非通約に保つのが
+   *  条件(工房のコメント参照)なので 2.9 を選んだ。 */
+  var TEXKIT = CastleTex.kit({
+    id: 'castel-del-monte',
+    nrmBoost: 1.28,
+    stone: {
+      metres: 2.6, courses: 7, nrm: 3.4,
+      blockMin: 77, blockW: [77, 42],
+      joint: 1.0, bevel: 2.6, mortarH: 0.22,
+      mortar: '#9a948a',
+      faceLum: [234, 19], faceRGB: [0, -1, -3],
+      faceH: [0.80, 0.11],
+      stainMul: [0.94, 0.11], stainH: 0.075, toolH: 0.055,
+      edgeHi: 'rgba(255,255,255,0.24)', edgeLo: 'rgba(60,50,36,0.22)',
+      tint: [1.0, 1.0, 0.995],
+      mean: 0.915
+    },
+    /* 平屋根 / 中庭の石畳 / 各室の石床。切石の城なので敷石も端正に:
+     * 目地を細くし、摩耗のむらを弱める。3.2m を 4x4 = 0.8m 角の板石。
+     * 1周目は 0.55m 角・既定のコントラストで焼いたところ、遠景の平屋根が
+     * 「砂利敷き」に見えた(r1_towertops.png)。板石を大きくし、面の
+     * 明度差(faceLum の振れ)と摩耗の斑(wearMul)を半分以下に落として、
+     * 目地の色も面に寄せてある。
+     * ★ 屋根は上を向いた面なので昼の直射で約1.93倍が乗る。既定の
+     *   mean 0.91 でも笠石が飽和したので 0.875 まで落とした -- 変更前は
+     *   屋根も塔の笠石も (255,255,255) に張り付いて真っ白だった
+     *   (b_towertops.png で実測)。 */
+    pave: {
+      metres: 3.2, grid: 4, nrm: 2.2,
+      mortar: '#c9c2b7', mortarH: 0.56, bevel: 2.0,
+      faceLum: [231, 12], faceH: [0.78, 0.11],
+      wearSpec: [[3,1.0],[10,0.6],[30,0.3]], wearMul: [0.94, 0.09],
+      edgeHi: 'rgba(255,255,255,0.16)', edgeLo: 'rgba(50,44,34,0.20)',
+      tint: [1.0, 0.995, 0.975],
+      mean: 0.875
+    },
+    /* 内壁の漆喰。石(2.6m)と非通約に保つ。 */
+    plaster: { metres: 2.9, nrm: 1.7 },
+    /* 丘の乾いた牧草。既定 3.0m だと丘(直径236m)で細かすぎたので粗く。
+     * 刈りむらの振れ(mowMul)は既定の半分。既定のままだと斜面に黒い
+     * 短い線が散らばって「草」ではなく「落ちている枝」に見えた
+     * (r7_rocks_z.png で確認)。 */
+    turf: { metres: 4.2, mowMul: [0.93, 0.11, 0.05], tint: [1.0, 1.0, 0.96] },
+    /* プーリアの乾いた石灰岩質の土。既定より白っぽく(黄色に振らない)。 */
+    soil: { metres: 0.95, nrm: 2.6, tint: [1.0, 0.985, 0.965] },
+    wood: { metres: 1.5, nrm: 2.3 }
+  });
+  var TEX           = TEXKIT.tex;            // TEX.smoke / TEX.waterN1..3
+  var texMat        = TEXKIT.texMat;         // (colorHex, kind, opt) -> MeshPhongMaterial
+  var applyWorldUVs = TEXKIT.applyWorldUVs;  // (root) ビルド末尾で1回だけ走らせる
+
   var windowMat  = new T.MeshLambertMaterial({ color: WINDOW_COL });
-  var floorMat   = new T.MeshLambertMaterial({ color: FLOOR_COL, side: T.DoubleSide });
-  var courtMat   = new T.MeshLambertMaterial({ color: COURT_COL, side: T.DoubleSide });
+  var floorMat   = texMat(FLOOR_COL, 'pave', { nrm: 0.85, side: T.DoubleSide });
+  var courtMat   = texMat(COURT_COL, 'pave', { nrm: 0.95, side: T.DoubleSide });
   var roofMat0   = new T.MeshLambertMaterial({ color: ROOF_COL, side: T.DoubleSide }); // 未使用(roofCapsのmatを使う), 予備
-  var partitionMat = new T.MeshLambertMaterial({ color: PARTITION_COL, side: T.DoubleSide });
-  var woodMat    = new T.MeshLambertMaterial({ color: WOOD_COL });
-  var marbleMat  = new T.MeshLambertMaterial({ color: MARBLE_COL });
-  var trimMat    = new T.MeshLambertMaterial({ color: TRIM_COL });
-  var darkMat    = new T.MeshLambertMaterial({ color: STONE_DARK });
-  var cisternMat = new T.MeshBasicMaterial({ color: CISTERN_COL });
-  var hillFieldMat = new T.MeshLambertMaterial({ color: FIELD_COL });
+  var partitionMat = texMat(PARTITION_COL, 'plaster', { nrm: 0.55, side: T.DoubleSide });
+  var woodMat    = texMat(WOOD_COL, 'wood', { nrm: 0.8 });
+  /* ポータル・扉枠・暖炉の袖石に使う角礫岩。壁と同じ 'stone' だが密度を
+   * 倍にして(タイル 1.3m)ブロックを小さくしてある -- 装飾石は壁の切石
+   * より一回り小さな石を精密に組むので、density だけで質感が変わる。
+   * 法線も浅くして磨いた面に見せる。 */
+  var marbleMat  = texMat(MARBLE_COL, 'stone', { nrm: 0.45, density: 1/1.3 });
+  /* 窓の縁取りの白っぽい大理石。目地をほとんど見せたくないので更に細かく、
+   * 法線はほぼ平ら。 */
+  var trimMat    = texMat(TRIM_COL, 'stone', { nrm: 0.28, density: 1/0.95 });
+  var darkMat    = texMat(STONE_DARK, 'stone', { nrm: 0.7 });
+  /* 水面(中庭の水盤 / 貯水槽の口 / 貯水塔)。この城には堀が無いので
+   * 水はこの3か所だけ。MeshBasicMaterial は法線マップを持てない(r128)
+   * ので Phong に替え、さざ波の法線を1枚載せる。スクロールは後段の
+   * stillWater() が ANIM で動かす。夜に真っ暗な穴にならないよう、元の
+   * Basic の見え方へ寄せる emissive を少しだけ残してある。 */
+  var cisternMat = new T.MeshPhongMaterial({
+    color: CISTERN_COL,
+    emissive: new T.Color(CISTERN_COL).multiplyScalar(0.20),
+    specular: 0x74949b, shininess: 72,
+    normalMap: TEX.waterN1, normalScale: new T.Vector2(1.15, 1.15)
+  });
+  var hillFieldMat = texMat(FIELD_COL, 'turf', { density: 1/7.0 });
   /* 内装用マテリアル。床系は「下から見上げると天井面」になるので必ず
    * DoubleSide -- 1階の部屋の天井は2階の床メッシュそのものだから。 */
-  function floorMatOf(hex){ return new T.MeshLambertMaterial({ color: hex, side: T.DoubleSide }); }
-  var floorWoodMat   = floorMatOf(FLOOR_WOOD);
-  var floorStrawMat  = floorMatOf(FLOOR_STRAW);
-  var floorMarbleMat = floorMatOf(FLOOR_MARBLE);
-  var floorTileMat   = floorMatOf(FLOOR_TILE);
-  var cellarMat      = floorMatOf(CELLAR_COL);
-  var ribMat     = new T.MeshLambertMaterial({ color: RIB_COL });
-  var woodDkMat  = new T.MeshLambertMaterial({ color: WOOD_DK_COL });
-  var clothRMat  = new T.MeshLambertMaterial({ color: CLOTH_R_COL });
-  var clothBMat  = new T.MeshLambertMaterial({ color: CLOTH_B_COL });
-  var strawMat   = new T.MeshLambertMaterial({ color: STRAW_COL });
-  var soilMat    = new T.MeshLambertMaterial({ color: SOIL_COL });
+  function floorMatOf(hex, kind, nrm){
+    return texMat(hex, kind || 'pave', { nrm: nrm != null ? nrm : 0.85, side: T.DoubleSide });
+  }
+  var floorWoodMat   = floorMatOf(FLOOR_WOOD, 'wood', 0.75);
+  var floorStrawMat  = floorMatOf(FLOOR_STRAW, 'straw', 0.7);
+  var floorMarbleMat = floorMatOf(FLOOR_MARBLE, 'stone', 0.35);   // 磨いた大理石 = 目地細かく浅い
+  var floorTileMat   = floorMatOf(FLOOR_TILE, 'pave', 0.7);
+  var cellarMat      = floorMatOf(CELLAR_COL, 'pave', 1.0);        // 地階は粗い石敷き
+  var ribMat     = texMat(RIB_COL, 'stone', { nrm: 0.55, density: 1/1.5 });
+  var woodDkMat  = texMat(WOOD_DK_COL, 'wood', { nrm: 0.7 });
+  var clothRMat  = texMat(CLOTH_R_COL, 'cloth', { nrm: 0.5 });
+  var clothBMat  = texMat(CLOTH_B_COL, 'cloth', { nrm: 0.5 });
+  var strawMat   = texMat(STRAW_COL, 'straw', { nrm: 0.7 });
+  var soilMat    = texMat(SOIL_COL, 'soil', { nrm: 0.9 });
   var leafMat    = new T.MeshLambertMaterial({ color: LEAF_COL });
   var leafHiMat  = new T.MeshLambertMaterial({ color: LEAF_HI_COL });
   var fruitMat   = new T.MeshLambertMaterial({ color: FRUIT_COL });
   var terraMat   = new T.MeshLambertMaterial({ color: TERRA_COL });
   var metalMat   = new T.MeshLambertMaterial({ color: METAL_COL });
   var goldMat    = new T.MeshLambertMaterial({ color: GOLD_COL });
-  var linenMat   = new T.MeshLambertMaterial({ color: LINEN_COL });
+  var linenMat   = texMat(LINEN_COL, 'cloth', { nrm: 0.45 });
   // 炉の火だけは Basic -- 夜も光って見えてほしいので陰影を受けない。
   var fireMat    = new T.MeshBasicMaterial({ color: 0xff7d24 });
 
@@ -330,6 +433,30 @@ function buildCastelDelMonte(){
   // から computeVertexNormals() すると、各面の4頂点が同じ面法線を持つ。
   // 頂点単位ライティングでも面内で法線が一定になるので、結果としてフラット
   // シェーディングと同じ見え方になる(r128 の Lambert でも確実に効く)。
+  /* -------------------------------------------------------------- *
+   * 手組みの水平面(屋根の環・中庭の扇・台形の床)に UV を張る
+   * -------------------------------------------------------------- *
+   * この城は屋根も中庭も部屋の床も、earcut を避けるために自前の
+   * BufferGeometry で組んである(下の ringQuad / octagonFan /
+   * mkTrapFloor のコメント参照)。それらは position しか持たないので、
+   * テクスチャを載せると **全画素が UV(0,0) の1テクセル** になり、
+   * 「テクスチャが効かない」ではなく「単色に潰れる」という分かりにくい
+   * 壊れ方をする(1周目のスクリーンショットで実際にそうなった:屋根の
+   * 環だけが無地のベタ塗りになっていた)。
+   * どれも水平面なので、ワールド XZ をそのままメートル単位の UV にする。
+   * 密度は texMat が material.userData に入れた値(1m あたり何タイル)を
+   * 使うので、箱で作った煙突や笠石と石の大きさが揃う。
+   * __uvW を立てて、ビルド末尾の applyWorldUVs に二重処理させない。 */
+  function worldPlanarUV(geo, mat, arr){
+    var d = mat && mat.userData ? mat.userData.uvDensity : 0;
+    if (!d) return geo;
+    var n = arr.length/3, uv = new Float32Array(n*2), i;
+    for (i=0;i<n;i++){ uv[i*2] = arr[i*3]*d; uv[i*2+1] = arr[i*3+2]*d; }
+    geo.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
+    geo.userData.__uvW = 1;
+    return geo;
+  }
+
   function flatFacets(mesh){
     var g = mesh.geometry.toNonIndexed();
     g.computeVertexNormals();
@@ -654,6 +781,7 @@ function buildCastelDelMonte(){
     [oa,ib,ob, oa,ia,ib].forEach(function(pnt,i){ arr[i*3]=pnt.x; arr[i*3+1]=pnt.y; arr[i*3+2]=pnt.z; });
     geo.setAttribute('position', new T.Float32BufferAttribute(arr,3));
     geo.computeVertexNormals();
+    worldPlanarUV(geo, mat, arr);
     var mesh = new T.Mesh(geo, mat);
     mesh.receiveShadow = true; mesh.castShadow = true;
     return mesh;
@@ -669,6 +797,7 @@ function buildCastelDelMonte(){
       [center,p1,p2].forEach(function(pnt,j){ arr[j*3]=pnt.x; arr[j*3+1]=pnt.y; arr[j*3+2]=pnt.z; });
       geo.setAttribute('position', new T.Float32BufferAttribute(arr,3));
       geo.computeVertexNormals();
+      worldPlanarUV(geo, mat, arr);
       var mesh = new T.Mesh(geo, mat);
       mesh.receiveShadow = true;
       g.add(mesh);
@@ -830,6 +959,7 @@ function buildCastelDelMonte(){
     [p0,p1,p2,p0,p2,p3].forEach(function(v,i){ arr[i*3]=v.x; arr[i*3+1]=v.y; arr[i*3+2]=v.z; });
     geo.setAttribute('position', new T.Float32BufferAttribute(arr,3));
     geo.computeVertexNormals();
+    worldPlanarUV(geo, mat, arr);
     var mesh = new T.Mesh(geo, mat);
     mesh.receiveShadow = true;
     return mesh;
@@ -1545,6 +1675,148 @@ function buildCastelDelMonte(){
   })();
 
   /* ================================================================ *
+   * 毎フレームの更新(煙・水面)-- メインループには手を入れられない
+   * ---------------------------------------------------------------- *
+   * js/90-main.js は編集できないので、更新は **mesh.onBeforeRender** に
+   * 載せる。three は「visible=false / 視錐台の外」のオブジェクトには
+   * onBeforeRender を呼ばないので、煙のスプライトを個別に消すと二度と
+   * 復活できない。そこで frustumCulled=false の退化メッシュを1つだけ
+   * 「時計」として置き、そこから煙と水面をまとめて更新する
+   * (追加 drawCall は 1。面積0なので1画素も塗らない)。
+   * 更新はすべて「絶対時刻の純関数」なので、ポストFXが1フレームに複数回
+   * シーンを描いても二重進行しない。 (ボディアムと同じ作り) */
+  var ANIM = [];
+  function nowSec(){
+    return (typeof performance !== 'undefined' && performance.now
+            ? performance.now() : Date.now()) / 1000;
+  }
+  /* 時間帯・天候の読み取り(共有ファイルのグローバルを読むだけ。書かない) */
+  function envState(){
+    var glow = 0, rain = 0, snow = 0, sunMul = 1;
+    if (typeof CUR_TIME !== 'undefined' && CUR_TIME){ glow = CUR_TIME.windowGlow || 0; }
+    if (typeof CUR_WEATHER !== 'undefined' && CUR_WEATHER){
+      rain = CUR_WEATHER.rain || 0; snow = CUR_WEATHER.snow || 0;
+      sunMul = CUR_WEATHER.sunMul != null ? CUR_WEATHER.sunMul : 1;
+    }
+    return { glow: glow, rain: rain, snow: snow, sunMul: sunMul };
+  }
+  (function(){
+    var tick = new T.Mesh(new T.BufferGeometry(),
+      new T.MeshBasicMaterial({ depthWrite:false, depthTest:false }));
+    tick.geometry.setAttribute('position', new T.BufferAttribute(new Float32Array(9), 3));
+    tick.frustumCulled = false;
+    tick.renderOrder = -1000;
+    tick.onBeforeRender = function(){
+      var t = nowSec(), e = envState();
+      for (var i=0;i<ANIM.length;i++) ANIM[i](t, e);
+    };
+    group.add(tick);
+  })();
+
+  /* ================================================================ *
+   * 煙突の煙
+   * ---------------------------------------------------------------- *
+   * 屋根に出ている煙突は2本(k=1 / k=5、buildRoofTerrace)。この城の
+   * 暖炉は3基あるが(1階 k=1 の厨房、2階 k=0 の大広間、2階 k=1 の
+   * 皇帝の寝室)、煙突の本数と位置は既存のシルエットを崩さないため
+   * 動かさない -- k=1 の煙突が厨房と寝室の2基を、k=5 の煙突が残りを
+   * 束ねている、という読みで煙を2本立てる。
+   * 丘の上の乾いた台地なので、ボディアムより煙は薄く・細く・まっすぐに。
+   * スプライト1枚 = 1 drawCall なので煙突あたり5枚に抑える。
+   * 煙は roofMain(屋根)にぶら下げる。屋根がフェードで消えると煙突も
+   * 消えるので、同時に煙も消さないと空中に煙だけが残る。
+   * ================================================================ */
+  var WIND = { x: 0.62, z: 0.78 };      // 北西からの緩い風(単位ベクトルでなくてよい)
+  function smokePlume(fg, x, y0, z, opt){
+    opt = opt || {};
+    var n     = opt.count != null ? opt.count : 5;
+    var rise  = opt.rise  != null ? opt.rise  : 12.0;
+    var speed = opt.speed != null ? opt.speed : 0.12;
+    var base  = opt.base  != null ? opt.base  : 0.40;
+    var g = new T.Group();
+    g.position.set(x, y0, z);
+    (fg ? fg.group : group).add(g);
+    var puffs = [];
+    for (var i=0;i<n;i++){
+      var mat = new T.SpriteMaterial({ map: TEX.smoke, color: 0xcfcac1,
+        transparent: true, depthWrite: false, opacity: 0, fog: true });
+      var s = new T.Sprite(mat);
+      s.renderOrder = 5;
+      s.visible = false;
+      g.add(s);
+      puffs.push({ s: s, ph: i/n + (i*0.137) % 0.1 });
+    }
+    ANIM.push(function(t, e){
+      var amt = Math.min(1.0, 0.84 + e.glow*0.16 + e.rain*0.18 + e.snow*0.14);
+      var wind = 1 + e.rain*0.9 + e.snow*0.35;
+      var op0 = base * amt * (fg ? fg.op : 1);
+      // 昼は空より暗い灰 -> 夜は淡く
+      var cr = 0.395 + (0.706-0.395)*e.glow;
+      var cg = 0.377 + (0.686-0.377)*e.glow;
+      var cb = 0.349 + (0.647-0.349)*e.glow;
+      if (fg && (!fg.group.visible || fg.op < 0.15)) op0 = 0;
+      for (var i=0;i<puffs.length;i++){
+        var p = puffs[i];
+        var k2 = (t*speed + p.ph) % 1;                   // 0..1 の寿命
+        var op = op0 * Math.min(1, k2*5) * Math.pow(1-k2, 1.30);
+        if (op < 0.012){ p.s.visible = false; continue; }
+        var drift = wind * (0.18 + 1.35*k2*k2);
+        var climb = Math.pow(k2, 1.35);
+        p.s.position.set(
+          Math.sin(t*0.55 + p.ph*6.28)*0.26*k2 + WIND.x*drift,
+          climb*rise,
+          Math.cos(t*0.41 + p.ph*5.13)*0.26*k2 + WIND.z*drift
+        );
+        var sc = 1.35 + k2*4.6;                          // 隣の粒と必ず重なる大きさ
+        p.s.scale.set(sc, sc, 1);
+        p.s.material.opacity = op;
+        p.s.material.color.setRGB(cr, cg, cb);
+        p.s.visible = true;
+      }
+    });
+    return g;
+  }
+  /* 煙突の座標は buildRoofTerrace と同じ数式で出す(重複だが、あちらを
+   * 書き換えずに済ませるためのローカル複製)。 */
+  [[1, 0.56, 16, 0.104], [5, 0.46, 14, 0.122]].forEach(function(sp){
+    var ct = wTheta(sp[0]), cd2 = dirAt(ct), rr = OCT_APOTH_OUT - 2.2;
+    smokePlume(roofMain, cd2.x*rr, WALL_H + 2.3, cd2.z*rr,
+      { base: sp[1], rise: sp[2], speed: sp[3], count: 5 });
+  });
+
+  /* ================================================================ *
+   * 水面 -- 中庭の八角形の水盤と貯水槽の口だけ
+   * ---------------------------------------------------------------- *
+   * この城には堀も跳ね橋も無い(史実。それがこの城最大の特徴)。水が
+   * 見えるのは中庭の水盤・貯水槽の口・貯水塔の水面の3か所だけで、
+   * どれも直径1〜2m しかない。したがってボディアムの堀のような
+   * 「空を映すフレネル水面 + 頂点変位」は割に合わない(専用シェーダの
+   * コンパイルとユニフォーム更新のコストが、画面上2〜3%の面積に対して
+   * 見合わない)。ここでは工房の法線マップ waterN1/N2 を2枚、互いに
+   * 非通約な速度でスクロールさせるだけの軽い実装にとどめる。
+   *
+   * MeshBasicMaterial は法線マップを持てない(r128)ので Phong に替える。
+   * ただし夜に真っ暗な穴になると「水が無くなった」ように見えるので、
+   * わずかな emissive を残して元の Basic の見え方に寄せてある。
+   * ================================================================ */
+  (function stillWater(){
+    /* r128 の Phong は normalMap を1枚しか持てないので、2枚重ねる代わりに
+     * 1枚の offset を「一定の流れ + 遅いゆらぎ」の合成で動かし、周期が
+     * 読めないようにする。repeat は水盤の直径(約2.3m)に対して 5 タイル
+     * 入る程度。★ この waterN1 は工房のキャッシュに載った共有テクスチャ
+     * だが、堀を持つ他城(ボディアム)は kit のパラメータが違うので別
+     * セットが焼かれる = ここで repeat/offset を動かしても他城の水面には
+     * 影響しない。 */
+    var n1 = TEX.waterN1;
+    n1.repeat.set(5, 5);
+    var off = n1.offset;
+    ANIM.push(function(t){
+      off.set( 0.031*t + 0.017*Math.sin(t*0.23),
+              -0.024*t + 0.019*Math.cos(t*0.17) );
+    });
+  })();
+
+  /* ================================================================ *
    * 孤立丘(モンテ)-- 標高約540m、ムルジェ台地から独立して盛り上がる
    * 石灰岩(カルスト)の丘。
    * ---------------------------------------------------------------- *
@@ -1679,7 +1951,16 @@ function buildCastelDelMonte(){
     var cGully = new T.Color(HILL_GULLY);
     var tmp = new T.Color();
     var RINGS = FLAT_F.length + SLOPE_RINGS;
-    var pos = [0, 0, 0], col = [cTop.r, cTop.g, cTop.b], idx = [];
+    /* 丘の UV。頂点カラーだけだと「一色の斜面」に見えるので、乾いた
+     * 牧草(turf)のテクスチャを重ねる。この BufferGeometry は自前で
+     * 組んでいて uv 属性を持たないため、ここでワールド XZ からメートル
+     * 単位の UV を作る -- 属性が無いまま map を付けると全画素が UV(0,0)
+     * の1テクセルになり、テクスチャが「効かない」のではなく「単色に
+     * 潰れる」という分かりにくい壊れ方をする。
+     * 密度は共有工房と同じ約束(1m あたり何タイル)= 1/tex.turf.metres。
+     * 斜面は最大でも約14度なので、上向きの平面投影で伸びは目立たない。 */
+    var HILL_UV_D = 1/TEX.turf.metres;
+    var pos = [0, 0, 0], col = [cTop.r, cTop.g, cTop.b], uvs = [0, 0], idx = [];
     var i, j, k;
     for (j=0;j<RINGS;j++){
       for (i=0;i<A_SEG;i++){
@@ -1689,6 +1970,7 @@ function buildCastelDelMonte(){
         else { u = (j - FLAT_F.length + 1) / SLOPE_RINGS; r = rc + (rb - rc)*u; }
         var x = ca*r, z = sa*r;
         pos.push(x, hillY(a, u, x, z, r), z);
+        uvs.push(x*HILL_UV_D, z*HILL_UV_D);
         // 高度による基本色: 頂上=乾いた牧草 -> 中腹=土と岩 -> 裾=中景の草地
         if (u < 0.34) tmp.copy(cTop).lerp(cMid, smoothstep01(0, 0.34, u));
         else tmp.copy(cMid).lerp(cEdge, smoothstep01(0.34, 0.82, u));
@@ -1721,8 +2003,17 @@ function buildCastelDelMonte(){
     hillGeo.setIndex(idx);
     hillGeo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
     hillGeo.setAttribute('color', new T.Float32BufferAttribute(col, 3));
+    hillGeo.setAttribute('uv', new T.Float32BufferAttribute(uvs, 2));
+    hillGeo.userData.__uvW = 1;      // UV は上で作った。末尾の applyWorldUVs に触らせない
     hillGeo.computeVertexNormals();
-    var hill = new T.Mesh(hillGeo, new T.MeshLambertMaterial({ vertexColors: true }));
+    /* material.color は白のまま = 色は今までどおり頂点カラーが決める。
+     * turf の albedo は平均輝度 0.94 に正規化されているので、テクスチャを
+     * 掛けても丘は「わずかに暗くなる方向」にしか動かない(白飛びが増え
+     * ない)。法線マップは turf には無い(makeTurf は normal を返さない)
+     * ので、ここは陰影ではなく刈りむらの模様だけが乗る。 */
+    var hillMat = texMat(0xffffff, 'turf', { density: HILL_UV_D });
+    hillMat.vertexColors = true;
+    var hill = new T.Mesh(hillGeo, hillMat);
     hill.receiveShadow = true;      // castShadow は付けない(丘自身は影を落とす相手がいない)
     group.add(hill);
 
@@ -1744,8 +2035,14 @@ function buildCastelDelMonte(){
       _qJit.setFromEuler(_eJit);
       mesh.quaternion.copy(_qAlign).multiply(_qJit).multiply(_qSpin);
     }
-    var rockMat  = new T.MeshLambertMaterial({ color: HILL_ROCK });
-    var rockMatD = new T.MeshLambertMaterial({ color: HILL_ROCK_D });
+    /* 石灰岩の露頭。1周目は城と同じ 'stone' を使ったが、目地の格子が
+     * そのまま出て、斜面に転がる板状の岩が「積んだ石垣の欠片」に見えた
+     * (r7_rocks_z.png で実測)。自然の岩に目地はあってはならないので、
+     * 目地を持たない粒状の 'soil' に替え、density を粗く(タイル 2.4m)
+     * して粒を岩のスケールに合わせる。色は HILL_ROCK のままなので
+     * 「白っぽい石灰岩」という読みは変わらない。 */
+    var rockMat  = texMat(HILL_ROCK,   'soil', { nrm: 1.1, density: 1/2.4 });
+    var rockMatD = texMat(HILL_ROCK_D, 'soil', { nrm: 1.1, density: 1/2.4 });
     for (k=0;k<52;k++){
       // u<=0.90 に抑えるのは、岩の外接が裾(最大118m)を越えて 15-nature.js の
       // 除外ボックスを広げてしまわないようにするため(中景の畑の位置が動く)。
@@ -1850,6 +2147,19 @@ function buildCastelDelMonte(){
     courtyard: [ { minX:-3.5, maxX:3.5, minZ:-3.5, maxZ:3.5 } ],
     population: { farmers: 8, guards: 0 }
   };
+
+  /* ---------------------------------------------------------------- *
+   * UV をメートル単位に書き直す(ビルド末尾で1回だけ)
+   * ---------------------------------------------------------------- *
+   * BoxGeometry の UV は面ごとに 0..1 なので、放っておくと 16.5m の城壁
+   * と 0.95m の煙突で石の大きさが 17 倍違う。texMat が material.userData
+   * に覚えさせた密度(1m あたり何タイル)で全メッシュの UV を書き直し、
+   * どこでも同じ寸法の石にする。
+   * ★ ジオメトリの position には一切触らないので、外形(32方位の
+   *   レイキャストで測る八角形のシルエット)はビット単位で不変。
+   * ★ 丘のメッシュだけは自前で UV を作って __uvW を立ててあるので、
+   *   ここは素通りする。 */
+  applyWorldUVs(group);
 
   return { group: group, fadeGroups: fadeGroups, interiorGroup: interiorGroup, info: info,
     pickables: pickables, windowMat: windowMat, waterMats: [], labelGroup: labelGroup, life: life };
